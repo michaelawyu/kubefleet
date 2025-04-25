@@ -208,6 +208,23 @@ func TestExtractResFromConfigMap(t *testing.T) {
 			want:    nil,
 			wantErr: true,
 		},
+		"config map with cluster scoped resource should fail": {
+			uConfigMap: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]interface{}{
+						"name":      "test-config",
+						"namespace": "default",
+					},
+					"data": map[string]interface{}{
+						"resource": `{"apiVersion": "admissionregistration.k8s.io/v1", "kind": "ValidatingWebhookConfiguration", "metadata": {"name": "test-webhook"}}`,
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
 		"config map with valid and invalid entries should fail": {
 			uConfigMap: &unstructured.Unstructured{
 				Object: map[string]interface{}{
