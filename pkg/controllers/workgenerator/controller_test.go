@@ -243,7 +243,7 @@ func TestExtractResFromConfigMap(t *testing.T) {
 			want:    nil,
 			wantErr: true,
 		},
-		"config map with cluster and namespace scoped data in the correct namespace should pass": {
+		"config map with cluster and namespace scoped data in the correct namespace should fail": {
 			uConfigMap: &unstructured.Unstructured{
 				Object: map[string]interface{}{
 					"apiVersion": "v1",
@@ -258,11 +258,8 @@ func TestExtractResFromConfigMap(t *testing.T) {
 					},
 				},
 			},
-			want: []fleetv1beta1.Manifest{
-				{RawExtension: runtime.RawExtension{Raw: []byte(`{"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "test-pod", "namespace": "default"}}`)}},
-				{RawExtension: runtime.RawExtension{Raw: []byte(`{"apiVersion": "v1", "kind": "ClusterRole", "metadata": {"name": "test-role"}}`)}},
-			},
-			wantErr: false,
+			want:    nil,
+			wantErr: true,
 		},
 		"config map with cluster scoped and cross namespaced resources data in a different namespace should fail": {
 			uConfigMap: &unstructured.Unstructured{
