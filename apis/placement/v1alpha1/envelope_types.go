@@ -35,10 +35,6 @@ type ClusterResourceEnvelope struct {
 	// The desired state of ClusterResourceEnvelope.
 	// +kubebuilder:validation:Required
 	Spec EnvelopeSpec `json:"spec"`
-
-	// The observed status of ClusterResourceEnvelope.
-	// +kubebuilder:validation:Optional
-	Status ClusterResourceEnvelopeStatus `json:"status,omitempty"`
 }
 
 // EnvelopeSpec helps wrap resources for placement.
@@ -62,38 +58,6 @@ type Manifest struct {
 	Data runtime.RawExtension `json:"data"`
 }
 
-// ClusterResourceEnvelopeStatus is the observed status of a ClusterResourceEnvelope.
-type ClusterResourceEnvelopeStatus struct {
-	// +patchMergeKey=type
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=type
-	//
-	// Conditions is an array of current observed conditions for ClusterResourceEnvelope.
-	// +kubebuilder:validation:Optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-
-	// ManifestConditions is an array of current observed conditions for each manifest in the envelope.
-	// +kubebuilder:validation:Optional
-	ManifestConditions []ManifestCondition `json:"manifestConditions,omitempty"`
-}
-
-// ManifestCondition is the observed conditions of a wrapped manifest.
-type ManifestCondition struct {
-	// The name of the manifest.
-	// +kubebuilder:validation:Required
-	Name string `json:"name"`
-
-	// +patchMergeKey=type
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=type
-	//
-	// Conditions is an array of current observed conditions for a wrapped manifest.
-	// +kubebuilder:validation:Optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-}
-
 // +genclient
 // +genclient:Namespaced
 // +kubebuilder:object:root=true
@@ -106,24 +70,4 @@ type ResourceEnvelope struct {
 	// The desired state of ResourceEnvelope.
 	// +kubebuilder:validation:Required
 	Spec EnvelopeSpec `json:"spec"`
-
-	// The observed status of ResourceEnvelope.
-	// +kubebuilder:validation:Optional
-	Status ResourceEnvelopeStatus `json:"status,omitempty"`
-}
-
-// ResourceEnvelopeStatus is the observed status of a ResourceEnvelope.
-type ResourceEnvelopeStatus struct {
-	// +patchMergeKey=type
-	// +patchStrategy=merge
-	// +listType=map
-	// +listMapKey=type
-	//
-	// Conditions is an array of current observed conditions for ResourceEnvelope.
-	// +kubebuilder:validation:Optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-
-	// ManifestConditions is an array of current observed conditions for each manifest in the envelope.
-	// +kubebuilder:validation:Optional
-	ManifestConditions []ManifestCondition `json:"manifestConditions,omitempty"`
 }
