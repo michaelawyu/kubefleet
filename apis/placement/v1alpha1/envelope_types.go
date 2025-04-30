@@ -19,6 +19,9 @@ package v1alpha1
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog/v2"
+
+	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 )
 
 // +genclient
@@ -70,4 +73,56 @@ type ResourceEnvelope struct {
 	// The desired state of ResourceEnvelope.
 	// +kubebuilder:validation:Required
 	Spec EnvelopeSpec `json:"spec"`
+}
+
+type EnvelopeReader interface {
+	// GetManifests returns the manifests in the envelope.
+	GetManifests() map[string]Manifest
+
+	// GetEnvelopeObjRef returns a klog object reference to the envelope.
+	GetEnvelopeObjRef() klog.ObjectRef
+
+	// GetNamespace returns the namespace of the envelope.
+	GetNamespace() string
+
+	// GetName returns the name of the envelope.
+	GetName() string
+
+	// GetEnvelopeType returns the type of the envelope.
+	GetEnvelopeType() string
+}
+
+// Ensure that both ClusterResourceEnvelope and ResourceEnvelope implement the
+// EnvelopeReader interface at compile time.
+var (
+	_ EnvelopeReader = &ClusterResourceEnvelope{}
+	_ EnvelopeReader = &ResourceEnvelope{}
+)
+
+// Implements the EnvelopeReader interface for ClusterResourceEnvelope.
+
+func (e *ClusterResourceEnvelope) GetManifests() map[string]Manifest {
+	return e.Spec.Manifests
+}
+
+func (e *ClusterResourceEnvelope) GetEnvelopeObjRef() klog.ObjectRef {
+	return klog.KObj(e)
+}
+
+func (e *ClusterResourceEnvelope) GetEnvelopeType() string {
+	return string(placementv1beta1.ClusterResourceEnvelopeType)
+}
+
+// Implements the EnvelopeReader interface for ResourceEnvelope.
+
+func (e *ResourceEnvelope) GetManifests() map[string]Manifest {
+	return e.Spec.Manifests
+}
+
+func (e *ResourceEnvelope) GetEnvelopeObjRef() klog.ObjectRef {
+	return klog.KObj(e)
+}
+
+func (e *ResourceEnvelope) GetEnvelopeType() string {
+	return string(placementv1beta1.ResourceEnvelopeType)
 }

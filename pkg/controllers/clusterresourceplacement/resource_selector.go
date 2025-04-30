@@ -463,8 +463,14 @@ func (r *Reconciler) selectResourcesForPlacement(placement *fleetv1beta1.Cluster
 		if err != nil {
 			return 0, nil, nil, err
 		}
-		if unstructuredObj.GetObjectKind().GroupVersionKind() == utils.ConfigMapGVK &&
-			len(unstructuredObj.GetAnnotations()[fleetv1beta1.EnvelopeConfigMapAnnotation]) != 0 {
+		uGVK := unstructuredObj.GetObjectKind().GroupVersionKind()
+		switch {
+		case uGVK == utils.ClusterResourceEnvelopeV1Alpha1GVK:
+			envelopeObjCount++
+		case uGVK == utils.ResourceEnvelopeV1Alpha1GVK:
+			envelopeObjCount++
+		case uGVK == utils.ConfigMapGVK && len(unstructuredObj.GetAnnotations()[fleetv1beta1.EnvelopeConfigMapAnnotation]) > 0:
+			// TO-DO (chenyu1): remove this branch after the configMap-based envelopes become obsolete.
 			envelopeObjCount++
 		}
 		resources[i] = *rc

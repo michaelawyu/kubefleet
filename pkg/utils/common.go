@@ -146,7 +146,7 @@ var (
 	}
 )
 
-// Those are the GVR/GVK of the fleet related resources.
+// Those are the GVR/GVKs in use by Fleet source code.
 var (
 	ClusterResourcePlacementV1Alpha1GVK = schema.GroupVersionKind{
 		Group:   fleetv1alpha1.GroupVersion.Group,
@@ -500,6 +500,18 @@ var (
 		Group:   corev1.GroupName,
 		Version: corev1.SchemeGroupVersion.Version,
 		Kind:    "PersistentVolumeClaim",
+	}
+
+	ClusterResourceEnvelopeV1Alpha1GVK = schema.GroupVersionKind{
+		Group:   placementv1alpha1.GroupVersion.Group,
+		Version: placementv1alpha1.GroupVersion.Version,
+		Kind:    "ClusterResourceEnvelope",
+	}
+
+	ResourceEnvelopeV1Alpha1GVK = schema.GroupVersionKind{
+		Group:   placementv1alpha1.GroupVersion.Group,
+		Version: placementv1alpha1.GroupVersion.Version,
+		Kind:    "ResourceEnvelope",
 	}
 )
 
