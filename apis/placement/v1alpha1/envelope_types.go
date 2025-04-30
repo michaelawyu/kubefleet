@@ -75,6 +75,10 @@ type ResourceEnvelope struct {
 	Spec EnvelopeSpec `json:"spec"`
 }
 
+// +kubebuilder:object:generate=false
+// EnvelopeReader is an interface that allows retrieval of common information across all envelope CRs.
+//
+// Note (chenyu1): controller-gen should skip this type.
 type EnvelopeReader interface {
 	// GetManifests returns the manifests in the envelope.
 	GetManifests() map[string]Manifest

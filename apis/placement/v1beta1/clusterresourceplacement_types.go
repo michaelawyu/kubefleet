@@ -887,7 +887,7 @@ type EnvelopeIdentifier struct {
 	// TO-DO (chenyu1): drop the enum value ConfigMap after the new envelope forms become fully available.
 
 	// Type of the envelope object.
-	// +kubebuilder:validation:Enum=ConfigMap,ClusterResourceEnvelope,ResourceEnvelope
+	// +kubebuilder:validation:Enum=ConfigMap;ClusterResourceEnvelope;ResourceEnvelope
 	// +kubebuilder:default=ConfigMap
 	// +kubebuilder:validation:Optional
 	Type EnvelopeType `json:"type"`
