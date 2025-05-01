@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,6 +26,7 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope="Cluster",categories={fleet,fleet-placement}
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:storageversion
 
 // ClusterResourceEnvelope wraps cluster-scoped resources for placement.
 type ClusterResourceEnvelope struct {
@@ -46,11 +47,11 @@ type EnvelopeSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinProperties=1
 	// +kubebuilder:validation:MaxProperties=50
-	Manifests map[string]Manifest `json:"manifests"`
+	Manifests map[string]WrappedManifest `json:"manifests"`
 }
 
-// Manifest is a wrapped resource.
-type Manifest struct {
+// WrappedManifest is a wrapped resource.
+type WrappedManifest struct {
 	// The resource data.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:EmbeddedResource
@@ -63,6 +64,9 @@ type Manifest struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope="Namespaced",categories={fleet,fleet-placement}
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:storageversion
+
+// ResourceEnvelope wraps namespaced resources for placement.
 type ResourceEnvelope struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

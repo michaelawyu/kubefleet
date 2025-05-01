@@ -17,7 +17,7 @@ spec:
     singular: clusterresourceenvelope
   scope: Cluster
   versions:
-  - name: v1alpha1
+  - name: v1beta1
     schema:
       openAPIV3Schema:
         description: ClusterResourceEnvelope wraps cluster-scoped resources for placement.
@@ -44,7 +44,7 @@ spec:
             properties:
               manifests:
                 additionalProperties:
-                  description: Manifest is a wrapped resource.
+                  description: WrappedManifest is a wrapped resource.
                   properties:
                     data:
                       description: The resource data.

@@ -17,9 +17,10 @@ spec:
     singular: resourceenvelope
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - name: v1beta1
     schema:
       openAPIV3Schema:
+        description: ResourceEnvelope wraps namespaced resources for placement.
         properties:
           apiVersion:
             description: |-
@@ -43,7 +44,7 @@ spec:
             properties:
               manifests:
                 additionalProperties:
-                  description: Manifest is a wrapped resource.
+                  description: WrappedManifest is a wrapped resource.
                   properties:
                     data:
                       description: The resource data.
