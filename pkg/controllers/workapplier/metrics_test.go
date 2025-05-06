@@ -437,7 +437,7 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 			`,
 		},
 		{
-			name: "with out-of-date conditons",
+			name: "with out-of-date conditions",
 			work: &placementv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       workName,
