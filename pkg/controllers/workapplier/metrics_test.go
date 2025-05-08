@@ -56,10 +56,12 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 					Conditions: []metav1.Condition{
 						{
 							Type:   placementv1beta1.WorkConditionTypeApplied,
+							Reason: WorkAllManifestsAppliedReason,
 							Status: metav1.ConditionTrue,
 						},
 						{
 							Type:   placementv1beta1.WorkConditionTypeAvailable,
+							Reason: WorkAllManifestsAvailableReason,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -83,7 +85,7 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 			},
 			wantWorkMetricCount: 1,
 			wantWorkCounter: `
-				fleet_work_processing_requests_total{apply_status="applied",availability_status="available",diff_reporting_status="skipped"} 1
+				fleet_work_processing_requests_total{apply_status="allmanifestsapplied",availability_status="allmanifestsavailable",diff_reporting_status="skipped"} 1
 			`,
 			wantManifestMetricCount: 1,
 			wantManifestCounter: `
@@ -100,6 +102,7 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 					Conditions: []metav1.Condition{
 						{
 							Type:   placementv1beta1.WorkConditionTypeApplied,
+							Reason: WorkNotAllManifestsAppliedReason,
 							Status: metav1.ConditionFalse,
 						},
 					},
@@ -118,8 +121,8 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 			},
 			wantWorkMetricCount: 2,
 			wantWorkCounter: `
-				fleet_work_processing_requests_total{apply_status="applied",availability_status="available",diff_reporting_status="skipped"} 1
-				fleet_work_processing_requests_total{apply_status="failed",availability_status="skipped",diff_reporting_status="skipped"} 1
+				fleet_work_processing_requests_total{apply_status="allmanifestsapplied",availability_status="allmanifestsavailable",diff_reporting_status="skipped"} 1
+             	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="skipped",diff_reporting_status="skipped"} 1
 			`,
 			wantManifestMetricCount: 2,
 			wantManifestCounter: `
@@ -137,10 +140,12 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 					Conditions: []metav1.Condition{
 						{
 							Type:   placementv1beta1.WorkConditionTypeApplied,
+							Reason: WorkNotAllManifestsAppliedReason,
 							Status: metav1.ConditionTrue,
 						},
 						{
 							Type:   placementv1beta1.WorkConditionTypeAvailable,
+							Reason: WorkNotAllManifestsAvailableReason,
 							Status: metav1.ConditionFalse,
 						},
 					},
@@ -164,9 +169,9 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 			},
 			wantWorkMetricCount: 3,
 			wantWorkCounter: `
-				fleet_work_processing_requests_total{apply_status="applied",availability_status="available",diff_reporting_status="skipped"} 1
-				fleet_work_processing_requests_total{apply_status="applied",availability_status="unavailable",diff_reporting_status="skipped"} 1
-				fleet_work_processing_requests_total{apply_status="failed",availability_status="skipped",diff_reporting_status="skipped"} 1
+				fleet_work_processing_requests_total{apply_status="allmanifestsapplied",availability_status="allmanifestsavailable",diff_reporting_status="skipped"} 1
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="skipped",diff_reporting_status="skipped"} 1
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="somemanifestsarenotavailable",diff_reporting_status="skipped"} 1
 			`,
 			wantManifestMetricCount: 3,
 			wantManifestCounter: `
@@ -185,6 +190,7 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 					Conditions: []metav1.Condition{
 						{
 							Type:   placementv1beta1.WorkConditionTypeDiffReported,
+							Reason: WorkAllManifestsDiffReportedReason,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -203,17 +209,17 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 			},
 			wantWorkMetricCount: 4,
 			wantWorkCounter: `
-				fleet_work_processing_requests_total{apply_status="applied",availability_status="available",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="applied",availability_status="unavailable",diff_reporting_status="skipped"} 1
-           		fleet_work_processing_requests_total{apply_status="failed",availability_status="skipped",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="reported"} 1
+				fleet_work_processing_requests_total{apply_status="allmanifestsapplied",availability_status="allmanifestsavailable",diff_reporting_status="skipped"} 1
+            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="allmanifestsdiffreported"} 1
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="skipped",diff_reporting_status="skipped"} 1
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="somemanifestsarenotavailable",diff_reporting_status="skipped"} 1
 			`,
 			wantManifestMetricCount: 4,
 			wantManifestCounter: `
 				fleet_manifest_processing_requests_total{apply_status="applied",availability_status="available",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="applied",availability_status="manifestnotavailableyet",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="manifestapplyfailed",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="nodifffound",drift_detection_status="not_found"} 1
+				fleet_manifest_processing_requests_total{apply_status="applied",availability_status="manifestnotavailableyet",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
+				fleet_manifest_processing_requests_total{apply_status="manifestapplyfailed",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
+				fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="nodifffound",drift_detection_status="not_found"} 1
 			`,
 		},
 		{
@@ -226,6 +232,7 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 					Conditions: []metav1.Condition{
 						{
 							Type:   placementv1beta1.WorkConditionTypeDiffReported,
+							Reason: WorkNotAllManifestsDiffReportedReason,
 							Status: metav1.ConditionFalse,
 						},
 					},
@@ -244,19 +251,19 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 			},
 			wantWorkMetricCount: 5,
 			wantWorkCounter: `
-				fleet_work_processing_requests_total{apply_status="applied",availability_status="available",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="applied",availability_status="unavailable",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="failed",availability_status="skipped",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="failed"} 1
-            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="reported"} 1
+				fleet_work_processing_requests_total{apply_status="allmanifestsapplied",availability_status="allmanifestsavailable",diff_reporting_status="skipped"} 1
+            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="allmanifestsdiffreported"} 1
+            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="somemanifestshavenotreporteddiff"} 1
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="skipped",diff_reporting_status="skipped"} 1
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="somemanifestsarenotavailable",diff_reporting_status="skipped"} 1
 			`,
 			wantManifestMetricCount: 5,
 			wantManifestCounter: `
 				fleet_manifest_processing_requests_total{apply_status="applied",availability_status="available",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="applied",availability_status="manifestnotavailableyet",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="manifestapplyfailed",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
+		        fleet_manifest_processing_requests_total{apply_status="applied",availability_status="manifestnotavailableyet",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
+		    	fleet_manifest_processing_requests_total{apply_status="manifestapplyfailed",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
             	fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="failed",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="nodifffound",drift_detection_status="not_found"} 1
+	        	fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="nodifffound",drift_detection_status="not_found"} 1
 			`,
 		},
 		{
@@ -269,6 +276,7 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 					Conditions: []metav1.Condition{
 						{
 							Type:   placementv1beta1.WorkConditionTypeApplied,
+							Reason: WorkNotAllManifestsAppliedReason,
 							Status: metav1.ConditionFalse,
 						},
 					},
@@ -302,20 +310,20 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 			},
 			wantWorkMetricCount: 5,
 			wantWorkCounter: `
-				fleet_work_processing_requests_total{apply_status="applied",availability_status="available",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="applied",availability_status="unavailable",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="failed",availability_status="skipped",diff_reporting_status="skipped"} 2
-            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="failed"} 1
-            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="reported"} 1
+				fleet_work_processing_requests_total{apply_status="allmanifestsapplied",availability_status="allmanifestsavailable",diff_reporting_status="skipped"} 1
+            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="allmanifestsdiffreported"} 1
+            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="somemanifestshavenotreporteddiff"} 1
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="skipped",diff_reporting_status="skipped"} 2
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="somemanifestsarenotavailable",diff_reporting_status="skipped"} 1
 			`,
 			wantManifestMetricCount: 6,
 			wantManifestCounter: `
 				fleet_manifest_processing_requests_total{apply_status="applied",availability_status="available",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 2
-            	fleet_manifest_processing_requests_total{apply_status="applied",availability_status="manifestnotavailableyet",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="founddrifts",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="manifestapplyfailed",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="failed",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="nodifffound",drift_detection_status="not_found"} 1
+		    	fleet_manifest_processing_requests_total{apply_status="applied",availability_status="manifestnotavailableyet",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
+			   	fleet_manifest_processing_requests_total{apply_status="founddrifts",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="found"} 1
+	        	fleet_manifest_processing_requests_total{apply_status="manifestapplyfailed",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
+		        fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="failed",drift_detection_status="not_found"} 1
+		        fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="nodifffound",drift_detection_status="not_found"} 1
 			`,
 		},
 		{
@@ -328,6 +336,7 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 					Conditions: []metav1.Condition{
 						{
 							Type:   placementv1beta1.WorkConditionTypeDiffReported,
+							Reason: WorkNotAllManifestsDiffReportedReason,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -356,21 +365,21 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 			},
 			wantWorkMetricCount: 5,
 			wantWorkCounter: `
-				fleet_work_processing_requests_total{apply_status="applied",availability_status="available",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="applied",availability_status="unavailable",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="failed",availability_status="skipped",diff_reporting_status="skipped"} 2
-            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="failed"} 1
-            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="reported"} 2
+				fleet_work_processing_requests_total{apply_status="allmanifestsapplied",availability_status="allmanifestsavailable",diff_reporting_status="skipped"} 1
+            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="allmanifestsdiffreported"} 1
+            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="somemanifestshavenotreporteddiff"} 2
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="skipped",diff_reporting_status="skipped"} 2
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="somemanifestsarenotavailable",diff_reporting_status="skipped"} 1
 			`,
 			wantManifestMetricCount: 7,
 			wantManifestCounter: `
 				fleet_manifest_processing_requests_total{apply_status="applied",availability_status="available",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 2
-            	fleet_manifest_processing_requests_total{apply_status="applied",availability_status="manifestnotavailableyet",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="founddrifts",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="manifestapplyfailed",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="found",diff_reporting_status="founddiff",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="failed",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="nodifffound",drift_detection_status="not_found"} 2
+		    	fleet_manifest_processing_requests_total{apply_status="applied",availability_status="manifestnotavailableyet",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
+		        fleet_manifest_processing_requests_total{apply_status="founddrifts",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="found"} 1
+		    	fleet_manifest_processing_requests_total{apply_status="manifestapplyfailed",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
+		        fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="found",diff_reporting_status="founddiff",drift_detection_status="not_found"} 1
+		    	fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="failed",drift_detection_status="not_found"} 1
+		        fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="nodifffound",drift_detection_status="not_found"} 2
 			`,
 		},
 		// The cases below normally would never occur.
@@ -417,16 +426,16 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 			},
 			wantWorkMetricCount: 6,
 			wantWorkCounter: `
-				fleet_work_processing_requests_total{apply_status="applied",availability_status="available",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="applied",availability_status="unavailable",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="failed",availability_status="skipped",diff_reporting_status="skipped"} 2
-            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="failed"} 1
-            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="reported"} 2
-            	fleet_work_processing_requests_total{apply_status="unknown",availability_status="unknown",diff_reporting_status="unknown"} 1
+				fleet_work_processing_requests_total{apply_status="allmanifestsapplied",availability_status="allmanifestsavailable",diff_reporting_status="skipped"} 1
+            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="allmanifestsdiffreported"} 1
+            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="somemanifestshavenotreporteddiff"} 2
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="skipped",diff_reporting_status="skipped"} 2
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="somemanifestsarenotavailable",diff_reporting_status="skipped"} 1
+				fleet_work_processing_requests_total{apply_status="unknown",availability_status="unknown",diff_reporting_status="unknown"} 1
 			`,
 			wantManifestMetricCount: 8,
-			wantManifestCounter: `
-            	fleet_manifest_processing_requests_total{apply_status="applied",availability_status="available",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 2
+			wantManifestCounter: `	
+				fleet_manifest_processing_requests_total{apply_status="applied",availability_status="available",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 2
             	fleet_manifest_processing_requests_total{apply_status="applied",availability_status="manifestnotavailableyet",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
             	fleet_manifest_processing_requests_total{apply_status="founddrifts",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="found"} 1
             	fleet_manifest_processing_requests_total{apply_status="manifestapplyfailed",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
@@ -486,18 +495,17 @@ func TestTrackWorkAndManifestProcessingRequestMetrics(t *testing.T) {
 			},
 			wantWorkMetricCount: 6,
 			wantWorkCounter: `
-				fleet_work_processing_requests_total{apply_status="applied",availability_status="available",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="applied",availability_status="unavailable",diff_reporting_status="skipped"} 1
-            	fleet_work_processing_requests_total{apply_status="failed",availability_status="skipped",diff_reporting_status="skipped"} 2
-            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="failed"} 1
-            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="reported"} 2
-            	fleet_work_processing_requests_total{apply_status="unknown",availability_status="unknown",diff_reporting_status="unknown"} 2
+				fleet_work_processing_requests_total{apply_status="allmanifestsapplied",availability_status="allmanifestsavailable",diff_reporting_status="skipped"} 1
+            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="allmanifestsdiffreported"} 1
+            	fleet_work_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_reporting_status="somemanifestshavenotreporteddiff"} 2
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="skipped",diff_reporting_status="skipped"} 2
+            	fleet_work_processing_requests_total{apply_status="somemanifestsarenotapplied",availability_status="somemanifestsarenotavailable",diff_reporting_status="skipped"} 1
+            	fleet_work_processing_requests_total{apply_status="unknown",availability_status="unknown",diff_reporting_status="unknown"} 1
 			`,
-			wantManifestMetricCount: 9,
+			wantManifestMetricCount: 8,
 			wantManifestCounter: `
 				fleet_manifest_processing_requests_total{apply_status="applied",availability_status="available",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 2
             	fleet_manifest_processing_requests_total{apply_status="applied",availability_status="manifestnotavailableyet",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
-            	fleet_manifest_processing_requests_total{apply_status="appliedwithfaileddriftdetection",availability_status="failed",diff_detection_status="not_found",diff_reporting_status="founddiff",drift_detection_status="not_found"} 1
             	fleet_manifest_processing_requests_total{apply_status="founddrifts",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="found"} 1
             	fleet_manifest_processing_requests_total{apply_status="manifestapplyfailed",availability_status="skipped",diff_detection_status="not_found",diff_reporting_status="skipped",drift_detection_status="not_found"} 1
             	fleet_manifest_processing_requests_total{apply_status="skipped",availability_status="skipped",diff_detection_status="found",diff_reporting_status="founddiff",drift_detection_status="not_found"} 1

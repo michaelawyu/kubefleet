@@ -17,13 +17,16 @@ limitations under the License.
 package workapplier
 
 import (
+	"fmt"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 
 	fleetv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/metrics"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils/controller"
 )
 
 // Note (chenyu1):
@@ -36,105 +39,87 @@ import (
 // TO-DO (chenyu1): evaluate if there is any need for high-cardinality options and/or stateful
 // metric collection for better observability.
 
-// The label values for the work processing request counter metric.
+// Some of the label values for the work/manifest processing request counter metric.
 const (
-	// The values for the apply status label.
-	workApplyStatusApplied = "applied"
-	workApplyStatusFailed  = "failed"
-	workApplyStatusUnknown = "unknown"
-	workApplyStatusSkipped = "skipped"
+	workOrManifestStatusSkipped = "skipped"
+	workOrManifestStatusUnknown = "unknown"
 
-	// The values for the availability status label.
-	workAvailabilityStatusAvailable   = "available"
-	workAvailabilityStatusUnavailable = "unavailable"
-	workAvailabilityStatusUnknown     = "unknown"
-	workAvailabilityStatusSkipped     = "skipped"
-
-	// The values for the diff reported status label.
-	workDiffReportedStatusReported    = "reported"
-	workDiffReportedStatusNotReported = "failed"
-	workDiffReportedStatusUnknown     = "unknown"
-	workDiffReportedStatusSkipped     = "skipped"
-)
-
-// Some of the label values for the manifest processing request counter metric.
-const (
-	// The values for the manifest apply status label.
-	manifestApplyStatusUnknown = "unknown"
-	manifestApplyStatusSkipped = "skipped"
-
-	// The values for the manifest availability status label.
-	manifestAvailabilityStatusSkipped = "skipped"
-	manifestAvailabilityStatusUnknown = "unknown"
-
-	// The values for the manifest diff reported status label.
-	manifestDiffReportedStatusSkipped = "skipped"
-	manifestDiffReportedStatusUnknown = "unknown"
-
-	// The values for the manifest drift detection status label.
-	manifestDriftDetectionStatusFound    = "found"
-	manifestDriftDetectionStatusNotFound = "not_found"
-
-	// The values for the manifest diff detection status label.
-	manifestDiffDetectionStatusFound    = "found"
-	manifestDiffDetectionStatusNotFound = "not_found"
+	manifestDriftOrDiffDetectionStatusFound    = "found"
+	manifestDriftOrDiffDetectionStatusNotFound = "not_found"
 )
 
 func trackWorkAndManifestProcessingRequestMetrics(work *fleetv1beta1.Work) {
 	// Increment the work processing request counter.
 
 	var workApplyStatus string
+	var shouldSkip bool
 	workAppliedCond := meta.FindStatusCondition(work.Status.Conditions, fleetv1beta1.WorkConditionTypeApplied)
 	switch {
 	case workAppliedCond == nil:
-		workApplyStatus = workApplyStatusSkipped
+		workApplyStatus = workOrManifestStatusSkipped
 	case workAppliedCond.ObservedGeneration != work.Generation:
 		// Normally this should never occur; as the method is called right after the status
 		// is refreshed.
-		workApplyStatus = workApplyStatusUnknown
-	case workAppliedCond.Status == metav1.ConditionTrue:
-		workApplyStatus = workApplyStatusApplied
-	case workAppliedCond.Status == metav1.ConditionFalse:
-		workApplyStatus = workApplyStatusFailed
-	default:
+		_ = controller.NewUnexpectedBehaviorError(fmt.Errorf("failed to track work metrics: applied condition is stale"))
+		shouldSkip = true
+	case workAppliedCond.Status == metav1.ConditionUnknown:
+		// At this point Fleet does not set the Applied condition to the Unknown status; this
+		// branch is added just for completeness reasons.
+		workApplyStatus = workOrManifestStatusUnknown
+	case len(workAppliedCond.Reason) == 0:
 		// Normally this should never occur; this branch is added just for completeness reasons.
-		workApplyStatus = workApplyStatusUnknown
+		_ = controller.NewUnexpectedBehaviorError(fmt.Errorf("failed to track work metrics: applied condition has no reason (work=%v)", klog.KObj(work)))
+		shouldSkip = true
+	default:
+		workApplyStatus = strings.ToLower(workAppliedCond.Reason)
 	}
 
 	var workAvailabilityStatus string
 	workAvailableCond := meta.FindStatusCondition(work.Status.Conditions, fleetv1beta1.WorkConditionTypeAvailable)
 	switch {
 	case workAvailableCond == nil:
-		workAvailabilityStatus = workAvailabilityStatusSkipped
+		workAvailabilityStatus = workOrManifestStatusSkipped
 	case workAvailableCond.ObservedGeneration != work.Generation:
 		// Normally this should never occur; as the method is called right after the status
 		// is refreshed.
-		workAvailabilityStatus = workAvailabilityStatusUnknown
-	case workAvailableCond.Status == metav1.ConditionTrue:
-		workAvailabilityStatus = workAvailabilityStatusAvailable
-	case workAvailableCond.Status == metav1.ConditionFalse:
-		workAvailabilityStatus = workAvailabilityStatusUnavailable
-	default:
+		_ = controller.NewUnexpectedBehaviorError(fmt.Errorf("failed to track work metrics: available condition is stale"))
+		shouldSkip = true
+	case workAvailableCond.Status == metav1.ConditionUnknown:
+		// At this point Fleet does not set the Available condition to the Unknown status; this
+		// branch is added just for completeness reasons.
+		workAvailabilityStatus = workOrManifestStatusUnknown
+	case len(workAvailableCond.Reason) == 0:
 		// Normally this should never occur; this branch is added just for completeness reasons.
-		workAvailabilityStatus = workAvailabilityStatusUnknown
+		_ = controller.NewUnexpectedBehaviorError(fmt.Errorf("failed to track work metrics: available condition has no reason (work=%v)", klog.KObj(work)))
+	default:
+		workAvailabilityStatus = strings.ToLower(workAvailableCond.Reason)
 	}
 
 	var workDiffReportedStatus string
 	workDiffReportedCond := meta.FindStatusCondition(work.Status.Conditions, fleetv1beta1.WorkConditionTypeDiffReported)
 	switch {
 	case workDiffReportedCond == nil:
-		workDiffReportedStatus = workDiffReportedStatusSkipped
+		workDiffReportedStatus = workOrManifestStatusSkipped
 	case workDiffReportedCond.ObservedGeneration != work.Generation:
 		// Normally this should never occur; as the method is called right after the status
 		// is refreshed.
-		workDiffReportedStatus = workDiffReportedStatusUnknown
-	case workDiffReportedCond.Status == metav1.ConditionTrue:
-		workDiffReportedStatus = workDiffReportedStatusReported
-	case workDiffReportedCond.Status == metav1.ConditionFalse:
-		workDiffReportedStatus = workDiffReportedStatusNotReported
-	default:
+		_ = controller.NewUnexpectedBehaviorError(fmt.Errorf("failed to track work metrics: diff reported condition is stale"))
+		shouldSkip = true
+	case workDiffReportedCond.Status == metav1.ConditionUnknown:
+		// At this point Fleet does not set the DiffReported condition to the Unknown status; this
+		// branch is added just for completeness reasons.
+		workDiffReportedStatus = workOrManifestStatusUnknown
+	case len(workDiffReportedCond.Reason) == 0:
 		// Normally this should never occur; this branch is added just for completeness reasons.
-		workDiffReportedStatus = workDiffReportedStatusUnknown
+		_ = controller.NewUnexpectedBehaviorError(fmt.Errorf("failed to track work metrics: diff reported condition has no reason (work=%v)", klog.KObj(work)))
+	default:
+		workDiffReportedStatus = strings.ToLower(workDiffReportedCond.Reason)
+	}
+
+	// Do a sanity check; if any of the work conditions is stale; do not emit any metric data point.
+	if shouldSkip {
+		// An error has been logged earlier.
+		return
 	}
 
 	metrics.FleetWorkProcessingRequestsTotal.WithLabelValues(
@@ -157,10 +142,15 @@ func trackWorkAndManifestProcessingRequestMetrics(work *fleetv1beta1.Work) {
 		manifestAppliedCond := meta.FindStatusCondition(manifestCond.Conditions, fleetv1beta1.WorkConditionTypeApplied)
 		switch {
 		case manifestAppliedCond == nil:
-			manifestApplyStatus = manifestApplyStatusSkipped
+			manifestApplyStatus = workOrManifestStatusSkipped
+		case manifestAppliedCond.Status == metav1.ConditionUnknown:
+			// At this point Fleet does not set the Applied condition to the Unknown status; this
+			// branch is added just for completeness reasons.
+			manifestApplyStatus = workOrManifestStatusUnknown
 		case len(manifestAppliedCond.Reason) == 0:
 			// Normally this should never occur; this branch is added just for completeness reasons.
-			manifestApplyStatus = manifestApplyStatusUnknown
+			_ = controller.NewUnexpectedBehaviorError(fmt.Errorf("failed to track manifest metrics: applied condition has no reason (manifest=%v, work=%v)", manifestCond.Identifier, klog.KObj(work)))
+			continue
 		default:
 			manifestApplyStatus = strings.ToLower(manifestAppliedCond.Reason)
 		}
@@ -169,10 +159,15 @@ func trackWorkAndManifestProcessingRequestMetrics(work *fleetv1beta1.Work) {
 		manifestAvailableCond := meta.FindStatusCondition(manifestCond.Conditions, fleetv1beta1.WorkConditionTypeAvailable)
 		switch {
 		case manifestAvailableCond == nil:
-			manifestAvailabilityStatus = manifestAvailabilityStatusSkipped
+			manifestAvailabilityStatus = workOrManifestStatusSkipped
+		case manifestAvailableCond.Status == metav1.ConditionUnknown:
+			// At this point Fleet does not set the Available condition to the Unknown status; this
+			// branch is added just for completeness reasons.
+			manifestAvailabilityStatus = workOrManifestStatusUnknown
 		case len(manifestAvailableCond.Reason) == 0:
 			// Normally this should never occur; this branch is added just for completeness reasons.
-			manifestAvailabilityStatus = manifestAvailabilityStatusUnknown
+			_ = controller.NewUnexpectedBehaviorError(fmt.Errorf("failed to track manifest metrics: available condition has no reason (manifest=%v, work=%v)", manifestCond.Identifier, klog.KObj(work)))
+			continue
 		default:
 			manifestAvailabilityStatus = strings.ToLower(manifestAvailableCond.Reason)
 		}
@@ -181,22 +176,27 @@ func trackWorkAndManifestProcessingRequestMetrics(work *fleetv1beta1.Work) {
 		manifestDiffReportedCond := meta.FindStatusCondition(manifestCond.Conditions, fleetv1beta1.WorkConditionTypeDiffReported)
 		switch {
 		case manifestDiffReportedCond == nil:
-			manifestDiffReportedStatus = manifestDiffReportedStatusSkipped
+			manifestDiffReportedStatus = workOrManifestStatusSkipped
+		case manifestDiffReportedCond.Status == metav1.ConditionUnknown:
+			// At this point Fleet does not set the DiffReported condition to the Unknown status; this
+			// branch is added just for completeness reasons.
+			manifestDiffReportedStatus = workOrManifestStatusUnknown
 		case len(manifestDiffReportedCond.Reason) == 0:
 			// Normally this should never occur; this branch is added just for completeness reasons.
-			manifestDiffReportedStatus = manifestDiffReportedStatusUnknown
+			_ = controller.NewUnexpectedBehaviorError(fmt.Errorf("failed to track manifest metrics: diff reported condition has no reason (manifest=%v, work=%v)", manifestCond.Identifier, klog.KObj(work)))
+			continue
 		default:
 			manifestDiffReportedStatus = strings.ToLower(manifestDiffReportedCond.Reason)
 		}
 
-		manifestDriftDetectionStatus := manifestDriftDetectionStatusNotFound
+		manifestDriftDetectionStatus := manifestDriftOrDiffDetectionStatusNotFound
 		if manifestCond.DriftDetails != nil {
-			manifestDriftDetectionStatus = manifestDriftDetectionStatusFound
+			manifestDriftDetectionStatus = manifestDriftOrDiffDetectionStatusFound
 		}
 
-		manifestDiffDetectionStatus := manifestDiffDetectionStatusNotFound
+		manifestDiffDetectionStatus := manifestDriftOrDiffDetectionStatusNotFound
 		if manifestCond.DiffDetails != nil {
-			manifestDiffDetectionStatus = manifestDiffDetectionStatusFound
+			manifestDiffDetectionStatus = manifestDriftOrDiffDetectionStatusFound
 		}
 
 		metrics.FleetManifestProcessingRequestsTotal.WithLabelValues(
