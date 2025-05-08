@@ -689,8 +689,12 @@ var _ = Describe("SSA", Ordered, func() {
 			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update the manifests")
 		})
 
-		// Note (chenyu1): this must happen before the CRP status check as the
-		// status check might encounter a stale output from the previous step.
+		It("should update CRP status as expected", func() {
+			crpStatusUpdatedActual := crpStatusUpdatedActual(workResourceIdentifiers(), allMemberClusterNames, nil, "1")
+			// Longer timeout is used to allow full rollouts.
+			Eventually(crpStatusUpdatedActual, workloadEventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update CRP status as expected")
+		})
+
 		It("should refresh the resources on all member clusters", func() {
 			for idx := range allMemberClusters {
 				memberClient := allMemberClusters[idx].KubeClient
@@ -725,12 +729,6 @@ var _ = Describe("SSA", Ordered, func() {
 					return nil
 				}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to refresh the resources on %s", allMemberClusters[idx].ClusterName)
 			}
-		})
-
-		It("should update CRP status as expected", func() {
-			crpStatusUpdatedActual := crpStatusUpdatedActual(workResourceIdentifiers(), allMemberClusterNames, nil, "1")
-			// Longer timeout is used to allow full rollouts.
-			Eventually(crpStatusUpdatedActual, workloadEventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update CRP status as expected")
 		})
 
 		AfterAll(func() {
