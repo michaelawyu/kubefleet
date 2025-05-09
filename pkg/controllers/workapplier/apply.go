@@ -624,7 +624,7 @@ func shouldUseForcedServerSideApply(inMemberClusterObj *unstructured.Unstructure
 			// this case and let user decide if forced apply is needed.
 			klog.V(2).InfoS("Found a field manager that is neither Fleet nor the `before-first-apply` field manager; Fleet will not enable forced server-side apply unless explicitly requested",
 				"fieldManager", mf.Manager,
-				"GVR", inMemberClusterObj.GroupVersionKind(), "inMemberClusterObj", klog.KObj(inMemberClusterObj))
+				"GVK", inMemberClusterObj.GroupVersionKind(), "inMemberClusterObj", klog.KObj(inMemberClusterObj))
 			return false
 		}
 	}
@@ -633,6 +633,6 @@ func shouldUseForcedServerSideApply(inMemberClusterObj *unstructured.Unstructure
 	// use forced server-side apply to avoid confusing self-conflicts. This would
 	// allow Fleet to (correctly) assume ownership of managed fields.
 	klog.V(2).InfoS("All field managers are either Fleet or the `before-first-apply` field manager; Fleet will enable forced server-side apply",
-		"GVR", inMemberClusterObj.GroupVersionKind(), "inMemberClusterObj", klog.KObj(inMemberClusterObj))
+		"GVK", inMemberClusterObj.GroupVersionKind(), "inMemberClusterObj", klog.KObj(inMemberClusterObj))
 	return true
 }
