@@ -70,6 +70,12 @@ var _ = Describe("Test member cluster join and leave flow", Ordered, Serial, fun
 				Name:      testResourceEnvelope.Name,
 				Namespace: workNamespaceName,
 			},
+			{
+				Group:   placementv1beta1.GroupVersion.Group,
+				Kind:    "ClusterResourceEnvelope",
+				Version: placementv1beta1.GroupVersion.Version,
+				Name:    testClusterResourceEnvelope.Name,
+			},
 		}
 	})
 
@@ -77,13 +83,42 @@ var _ = Describe("Test member cluster join and leave flow", Ordered, Serial, fun
 		It("Create the test resources in the namespace", createWrappedResourcesForEnvelopTest)
 
 		It("Create the CRP that select the name space and place it to all clusters", func() {
-			createCRP(crpName)
+			crp := &placementv1beta1.ClusterResourcePlacement{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: crpName,
+					// Add a custom finalizer; this would allow us to better observe
+					// the behavior of the controllers.
+					Finalizers: []string{customDeletionBlockerFinalizer},
+				},
+				Spec: placementv1beta1.ClusterResourcePlacementSpec{
+					ResourceSelectors: []placementv1beta1.ClusterResourceSelector{
+						{
+							Group:   "",
+							Kind:    "Namespace",
+							Version: "v1",
+							Name:    workNamespaceName,
+						},
+						{
+							Group:   placementv1beta1.GroupVersion.Group,
+							Kind:    "ClusterResourceEnvelope",
+							Version: placementv1beta1.GroupVersion.Version,
+							Name:    testClusterResourceEnvelope.Name,
+						},
+					},
+					Strategy: placementv1beta1.RolloutStrategy{
+						Type: placementv1beta1.RollingUpdateRolloutStrategyType,
+						RollingUpdate: &placementv1beta1.RollingUpdateConfig{
+							UnavailablePeriodSeconds: ptr.To(2),
+						},
+					},
+				},
+			}
+			Expect(hubClient.Create(ctx, crp)).To(Succeed(), "Failed to create CRP")
 		})
 
 		It("should update CRP status as expected", func() {
-			// resourceQuota is not trackable yet
 			crpStatusUpdatedActual := customizedCRPStatusUpdatedActual(crpName, wantSelectedResources, allMemberClusterNames, nil, "0", true)
-			Eventually(crpStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update CRP status as expected")
+			Eventually(crpStatusUpdatedActual, workloadEventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update CRP status as expected")
 		})
 
 		It("should place the resources on all member clusters", func() {
