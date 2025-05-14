@@ -64,9 +64,10 @@ var _ = Describe("Test member cluster join and leave flow", Ordered, Serial, fun
 				Namespace: workNamespaceName,
 			},
 			{
-				Kind:      "ConfigMap",
-				Name:      testEnvelopConfigMap.Name,
-				Version:   "v1",
+				Group:     placementv1beta1.GroupVersion.Group,
+				Kind:      placementv1beta1.ResourceEnvelopeKind,
+				Version:   placementv1beta1.GroupVersion.Version,
+				Name:      testResourceEnvelope.Name,
 				Namespace: workNamespaceName,
 			},
 		}
@@ -76,25 +77,7 @@ var _ = Describe("Test member cluster join and leave flow", Ordered, Serial, fun
 		It("Create the test resources in the namespace", createWrappedResourcesForEnvelopTest)
 
 		It("Create the CRP that select the name space and place it to all clusters", func() {
-			crp := &placementv1beta1.ClusterResourcePlacement{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: crpName,
-					// Add a custom finalizer; this would allow us to better observe
-					// the behavior of the controllers.
-					Finalizers: []string{customDeletionBlockerFinalizer},
-				},
-				Spec: placementv1beta1.ClusterResourcePlacementSpec{
-					ResourceSelectors: workResourceSelector(),
-					Strategy: placementv1beta1.RolloutStrategy{
-						Type: placementv1beta1.RollingUpdateRolloutStrategyType,
-						RollingUpdate: &placementv1beta1.RollingUpdateConfig{
-							UnavailablePeriodSeconds: ptr.To(2),
-						},
-						ApplyStrategy: &placementv1beta1.ApplyStrategy{AllowCoOwnership: true},
-					},
-				},
-			}
-			Expect(hubClient.Create(ctx, crp)).To(Succeed(), "Failed to create CRP")
+			createCRP(crpName)
 		})
 
 		It("should update CRP status as expected", func() {
@@ -106,7 +89,7 @@ var _ = Describe("Test member cluster join and leave flow", Ordered, Serial, fun
 		It("should place the resources on all member clusters", func() {
 			for idx := range allMemberClusters {
 				memberCluster := allMemberClusters[idx]
-				workResourcesPlacedActual := checkEnvelopQuotaPlacement(memberCluster)
+				workResourcesPlacedActual := checkAllResourcesPlacement(memberCluster)
 				Eventually(workResourcesPlacedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to place work resources on member cluster %s", memberCluster.ClusterName)
 			}
 		})
