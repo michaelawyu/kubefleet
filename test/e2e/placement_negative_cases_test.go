@@ -46,7 +46,7 @@ var _ = Describe("handling errors and failures gracefully", func() {
 			Expect(hubClient.Create(ctx, &ns)).To(Succeed(), "Failed to create namespace %s", ns.Name)
 
 			// Create an envelope resource to wrap the configMaps.
-			resourceEnvelop := &placementv1beta1.ResourceEnvelope{
+			resourceEnvelope := &placementv1beta1.ResourceEnvelope{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      envelopeName,
 					Namespace: ns.Name,
@@ -77,16 +77,16 @@ var _ = Describe("handling errors and failures gracefully", func() {
 			}
 			badCMBytes, err := json.Marshal(badConfigMap)
 			Expect(err).To(BeNil(), "Failed to marshal configMap %s", badConfigMap.Name)
-			resourceEnvelop.Data["cm1.yaml"] = runtime.RawExtension{Raw: badCMBytes}
+			resourceEnvelope.Data["cm1.yaml"] = runtime.RawExtension{Raw: badCMBytes}
 
 			wrappedCM2 := configMap.DeepCopy()
 			wrappedCM2.Name = wrappedCMName2
 			wrappedCM2.Data[cmDataKey] = cmDataVal2
 			wrappedCM2Bytes, err := json.Marshal(wrappedCM2)
 			Expect(err).To(BeNil(), "Failed to marshal configMap %s", wrappedCM2.Name)
-			resourceEnvelop.Data["cm2.yaml"] = runtime.RawExtension{Raw: wrappedCM2Bytes}
+			resourceEnvelope.Data["cm2.yaml"] = runtime.RawExtension{Raw: wrappedCM2Bytes}
 
-			Expect(hubClient.Create(ctx, resourceEnvelop)).To(Succeed(), "Failed to create configMap %s", resourceEnvelop.Name)
+			Expect(hubClient.Create(ctx, resourceEnvelope)).To(Succeed(), "Failed to create configMap %s", resourceEnvelope.Name)
 
 			// Create a CRP.
 			crp := &placementv1beta1.ClusterResourcePlacement{
