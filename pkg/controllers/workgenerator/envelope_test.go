@@ -17,11 +17,12 @@ limitations under the License.
 package workgenerator
 
 import (
-	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,35 +30,28 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	fleetv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1alpha1"
 	fleetv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 	"github.com/kubefleet-dev/kubefleet/test/utils/informer"
 )
 
-var ctx = context.Background()
-
 func TestExtractManifestsFromEnvelopeCR(t *testing.T) {
 	tests := []struct {
 		name           string
-		envelopeReader fleetv1alpha1.EnvelopeReader
+		envelopeReader fleetv1beta1.EnvelopeReader
 		want           []fleetv1beta1.Manifest
 		wantErr        bool
 	}{
 		{
 			name: "valid ResourceEnvelope with one resource",
-			envelopeReader: &fleetv1alpha1.ResourceEnvelope{
+			envelopeReader: &fleetv1beta1.ResourceEnvelope{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-envelope",
 					Namespace: "default",
 				},
-				Spec: fleetv1alpha1.EnvelopeSpec{
-					Manifests: map[string]fleetv1alpha1.Manifest{
-						"resource1": {
-							Data: runtime.RawExtension{
-								Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm","namespace":"default"},"data":{"key":"value"}}`),
-							},
-						},
+				Data: map[string]runtime.RawExtension{
+					"resource1": {
+						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm","namespace":"default"},"data":{"key":"value"}}`),
 					},
 				},
 			},
@@ -71,18 +65,33 @@ func TestExtractManifestsFromEnvelopeCR(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "config map with valid and invalid entries should fail",
+			envelopeReader: &fleetv1beta1.ResourceEnvelope{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-config",
+					Namespace: "default",
+				},
+				Data: map[string]runtime.RawExtension{
+					"valid": {
+						Raw: []byte(`"apiVersion": "v1", "kind": "Pod", "metadata": {"name": "test-pod", "namespace": "default"}}`),
+					},
+					"invalid": {
+						Raw: []byte("{invalid-json}"),
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
 			name: "valid ClusterResourceEnvelope with one resource",
-			envelopeReader: &fleetv1alpha1.ClusterResourceEnvelope{
+			envelopeReader: &fleetv1beta1.ClusterResourceEnvelope{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-cluster-envelope",
 				},
-				Spec: fleetv1alpha1.EnvelopeSpec{
-					Manifests: map[string]fleetv1alpha1.Manifest{
-						"clusterrole1": {
-							Data: runtime.RawExtension{
-								Raw: []byte(`{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"test-role"},"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get","list"]}]}`),
-							},
-						},
+				Data: map[string]runtime.RawExtension{
+					"clusterrole1": {
+						Raw: []byte(`{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"test-role"},"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get","list"]}]}`),
 					},
 				},
 			},
@@ -96,36 +105,30 @@ func TestExtractManifestsFromEnvelopeCR(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "envelope with multiple resources",
-			envelopeReader: &fleetv1alpha1.ResourceEnvelope{
+			name: "envelope with multiple resources should have the right order",
+			envelopeReader: &fleetv1beta1.ResourceEnvelope{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "multi-resource-envelope",
 					Namespace: "default",
 				},
-				Spec: fleetv1alpha1.EnvelopeSpec{
-					Manifests: map[string]fleetv1alpha1.Manifest{
-						"resource1": {
-							Data: runtime.RawExtension{
-								Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm1","namespace":"default"},"data":{"key1":"value1"}}`),
-							},
-						},
-						"resource2": {
-							Data: runtime.RawExtension{
-								Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm2","namespace":"default"},"data":{"key2":"value2"}}`),
-							},
-						},
+				Data: map[string]runtime.RawExtension{
+					"resource1": {
+						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm1","namespace":"default"},"data":{"key1":"value1"}}`),
+					},
+					"resource2": {
+						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm2","namespace":"default"},"data":{"key2":"value2"}}`),
 					},
 				},
 			},
 			want: []fleetv1beta1.Manifest{
 				{
 					RawExtension: runtime.RawExtension{
-						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm1","namespace":"default"},"data":{"key1":"value1"}}`),
+						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm2","namespace":"default"},"data":{"key2":"value2"}}`),
 					},
 				},
 				{
 					RawExtension: runtime.RawExtension{
-						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm2","namespace":"default"},"data":{"key2":"value2"}}`),
+						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm1","namespace":"default"},"data":{"key1":"value1"}}`),
 					},
 				},
 			},
@@ -133,18 +136,14 @@ func TestExtractManifestsFromEnvelopeCR(t *testing.T) {
 		},
 		{
 			name: "envelope with invalid resource JSON",
-			envelopeReader: &fleetv1alpha1.ResourceEnvelope{
+			envelopeReader: &fleetv1beta1.ResourceEnvelope{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "invalid-resource-envelope",
 					Namespace: "default",
 				},
-				Spec: fleetv1alpha1.EnvelopeSpec{
-					Manifests: map[string]fleetv1alpha1.Manifest{
-						"invalid": {
-							Data: runtime.RawExtension{
-								Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{invalid_json}`),
-							},
-						},
+				Data: map[string]runtime.RawExtension{
+					"invalid": {
+						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{invalid_json}`),
 					},
 				},
 			},
@@ -153,17 +152,82 @@ func TestExtractManifestsFromEnvelopeCR(t *testing.T) {
 		},
 		{
 			name: "empty envelope",
-			envelopeReader: &fleetv1alpha1.ResourceEnvelope{
+			envelopeReader: &fleetv1beta1.ResourceEnvelope{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "empty-envelope",
 					Namespace: "default",
 				},
-				Spec: fleetv1alpha1.EnvelopeSpec{
-					Manifests: map[string]fleetv1alpha1.Manifest{},
-				},
+				Data: map[string]runtime.RawExtension{},
 			},
 			want:    []fleetv1beta1.Manifest{},
 			wantErr: false,
+		},
+		// New test cases for namespace mismatches
+		{
+			name: "ResourceEnvelope with manifest in a different namespace",
+			envelopeReader: &fleetv1beta1.ResourceEnvelope{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "namespace-mismatch-envelope",
+					Namespace: "default",
+				},
+				Data: map[string]runtime.RawExtension{
+					"resource1": {
+						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm","namespace":"other-namespace"},"data":{"key":"value"}}`),
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "ResourceEnvelope containing a cluster-scoped resource",
+			envelopeReader: &fleetv1beta1.ResourceEnvelope{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "cluster-resource-in-resource-envelope",
+					Namespace: "default",
+				},
+				Data: map[string]runtime.RawExtension{
+					"resource1": {
+						Raw: []byte(`{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"test-role"},"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get","list"]}]}`),
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "ClusterResourceEnvelope with namespaced resource",
+			envelopeReader: &fleetv1beta1.ClusterResourceEnvelope{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "namespaced-in-cluster-envelope",
+				},
+				Data: map[string]runtime.RawExtension{
+					"resource1": {
+						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm","namespace":"default"},"data":{"key":"value"}}`),
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "ResourceEnvelope with mixed namespaced resources",
+			envelopeReader: &fleetv1beta1.ResourceEnvelope{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "mixed-namespace-resources",
+					Namespace: "default",
+				},
+				Data: map[string]runtime.RawExtension{
+					"resource1": {
+						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm1","namespace":"default"},"data":{"key1":"value1"}}`),
+					},
+					"resource2": {
+						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm2","namespace":"other-namespace"},"data":{"key2":"value2"}}`),
+					},
+				},
+			},
+			want:    nil,
+			wantErr: true,
 		},
 	}
 
@@ -175,31 +239,33 @@ func TestExtractManifestsFromEnvelopeCR(t *testing.T) {
 				return
 			}
 
-			// Compare manifests by their raw content
-			if len(got) != len(tt.want) {
-				t.Fatalf("extractManifestsFromEnvelopeCR() returned %d manifests, want %d", len(got), len(tt.want))
+			if tt.wantErr {
+				return
 			}
 
-			for i := range got {
-				var gotObj, wantObj map[string]interface{}
-				if err := json.Unmarshal(got[i].Raw, &gotObj); err != nil {
-					t.Fatalf("Failed to unmarshal result: %v", err)
-				}
-				if err := json.Unmarshal(tt.want[i].Raw, &wantObj); err != nil {
-					t.Fatalf("Failed to unmarshal expected: %v", err)
-				}
-				if diff := cmp.Diff(wantObj, gotObj); diff != "" {
-					t.Errorf("extractManifestsFromEnvelopeCR() mismatch (-want +got):\n%s", diff)
-				}
+			// Use cmp.Diff for comparison
+			if diff := cmp.Diff(got, tt.want); diff != "" {
+				t.Errorf("extractManifestsFromEnvelopeCR() mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
 }
 
 func TestCreateOrUpdateEnvelopeCRWorkObj(t *testing.T) {
+	ignoreWorkMeta := cmpopts.IgnoreFields(metav1.ObjectMeta{}, "Name", "OwnerReferences")
 	scheme := serviceScheme(t)
 
 	workNamePrefix := "test-work"
+
+	resourceSnapshot := &fleetv1beta1.ClusterResourceSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-snapshot",
+			Labels: map[string]string{
+				fleetv1beta1.CRPTrackingLabel: "test-crp",
+			},
+		},
+		Spec: fleetv1beta1.ClusterResourceSnapshot{}.Spec,
+	}
 	resourceBinding := &fleetv1beta1.ClusterResourceBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-binding",
@@ -207,42 +273,32 @@ func TestCreateOrUpdateEnvelopeCRWorkObj(t *testing.T) {
 				fleetv1beta1.CRPTrackingLabel: "test-crp",
 			},
 		},
-		Spec: fleetv1beta1.ClusterResourceBinding{}.Spec,
-	}
-	resourceSnapshot := &fleetv1beta1.ClusterResourceSnapshot{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-snapshot",
+		Spec: fleetv1beta1.ResourceBindingSpec{
+			TargetCluster:        "test-cluster-1",
+			ResourceSnapshotName: resourceSnapshot.Name,
 		},
-		Spec: fleetv1beta1.ClusterResourceSnapshot{}.Spec,
 	}
-
-	resourceEnvelope := &fleetv1alpha1.ResourceEnvelope{
+	configMapData := []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm","namespace":"default"},"data":{"key":"value"}}`)
+	resourceEnvelope := &fleetv1beta1.ResourceEnvelope{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-envelope",
 			Namespace: "default",
 		},
-		Spec: fleetv1alpha1.EnvelopeSpec{
-			Manifests: map[string]fleetv1alpha1.Manifest{
-				"configmap": {
-					Data: runtime.RawExtension{
-						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm","namespace":"default"},"data":{"key":"value"}}`),
-					},
-				},
+		Data: map[string]runtime.RawExtension{
+			"configmap": {
+				Raw: configMapData,
 			},
 		},
 	}
 
-	clusterResourceEnvelope := &fleetv1alpha1.ClusterResourceEnvelope{
+	clusterroleData := []byte(`{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"test-role"},"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get","list"]}]}`)
+	clusterResourceEnvelope := &fleetv1beta1.ClusterResourceEnvelope{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-cluster-envelope",
 		},
-		Spec: fleetv1alpha1.EnvelopeSpec{
-			Manifests: map[string]fleetv1alpha1.Manifest{
-				"clusterrole": {
-					Data: runtime.RawExtension{
-						Raw: []byte(`{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"test-role"},"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get","list"]}]}`),
-					},
-				},
+		Data: map[string]runtime.RawExtension{
+			"clusterrole": {
+				Raw: clusterroleData,
 			},
 		},
 	}
@@ -251,11 +307,11 @@ func TestCreateOrUpdateEnvelopeCRWorkObj(t *testing.T) {
 	existingWork := &fleetv1beta1.Work{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      workNamePrefix,
-			Namespace: utils.GetClusterNamespace("test-cluster"),
+			Namespace: "test-app",
 			Labels: map[string]string{
 				fleetv1beta1.ParentBindingLabel:     resourceBinding.Name,
 				fleetv1beta1.CRPTrackingLabel:       resourceBinding.Labels[fleetv1beta1.CRPTrackingLabel],
-				fleetv1beta1.EnvelopeTypeLabel:      string(fleetv1alpha1.EnvelopeTypeResource),
+				fleetv1beta1.EnvelopeTypeLabel:      string(fleetv1beta1.ResourceEnvelopeType),
 				fleetv1beta1.EnvelopeNameLabel:      resourceEnvelope.Name,
 				fleetv1beta1.EnvelopeNamespaceLabel: resourceEnvelope.Namespace,
 			},
@@ -275,7 +331,7 @@ func TestCreateOrUpdateEnvelopeCRWorkObj(t *testing.T) {
 
 	tests := []struct {
 		name                                string
-		envelopeReader                      fleetv1alpha1.EnvelopeReader
+		envelopeReader                      fleetv1beta1.EnvelopeReader
 		resourceOverrideSnapshotHash        string
 		clusterResourceOverrideSnapshotHash string
 		existingObjects                     []client.Object
@@ -290,17 +346,28 @@ func TestCreateOrUpdateEnvelopeCRWorkObj(t *testing.T) {
 			existingObjects:                     []client.Object{},
 			want: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
+					Namespace: fmt.Sprintf(utils.NamespaceNameFormat, resourceBinding.Spec.TargetCluster),
 					Labels: map[string]string{
-						fleetv1beta1.ParentBindingLabel:     resourceBinding.Name,
-						fleetv1beta1.CRPTrackingLabel:       resourceBinding.Labels[fleetv1beta1.CRPTrackingLabel],
-						fleetv1beta1.EnvelopeTypeLabel:      string(fleetv1alpha1.EnvelopeTypeResource),
-						fleetv1beta1.EnvelopeNameLabel:      resourceEnvelope.Name,
-						fleetv1beta1.EnvelopeNamespaceLabel: resourceEnvelope.Namespace,
+						fleetv1beta1.ParentBindingLabel:               resourceBinding.Name,
+						fleetv1beta1.CRPTrackingLabel:                 resourceBinding.Labels[fleetv1beta1.CRPTrackingLabel],
+						fleetv1beta1.ParentResourceSnapshotIndexLabel: resourceSnapshot.Labels[fleetv1beta1.ResourceIndexLabel],
+						fleetv1beta1.EnvelopeTypeLabel:                string(fleetv1beta1.ResourceEnvelopeType),
+						fleetv1beta1.EnvelopeNameLabel:                resourceEnvelope.Name,
+						fleetv1beta1.EnvelopeNamespaceLabel:           resourceEnvelope.Namespace,
 					},
 					Annotations: map[string]string{
 						fleetv1beta1.ParentResourceSnapshotNameAnnotation:                resourceBinding.Spec.ResourceSnapshotName,
 						fleetv1beta1.ParentResourceOverrideSnapshotHashAnnotation:        "resource-hash",
 						fleetv1beta1.ParentClusterResourceOverrideSnapshotHashAnnotation: "cluster-resource-hash",
+					},
+				},
+				Spec: fleetv1beta1.WorkSpec{
+					Workload: fleetv1beta1.WorkloadTemplate{
+						Manifests: []fleetv1beta1.Manifest{
+							{
+								RawExtension: runtime.RawExtension{Raw: configMapData},
+							},
+						},
 					},
 				},
 			},
@@ -314,17 +381,28 @@ func TestCreateOrUpdateEnvelopeCRWorkObj(t *testing.T) {
 			existingObjects:                     []client.Object{},
 			want: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
+					Namespace: fmt.Sprintf(utils.NamespaceNameFormat, resourceBinding.Spec.TargetCluster),
 					Labels: map[string]string{
-						fleetv1beta1.ParentBindingLabel:     resourceBinding.Name,
-						fleetv1beta1.CRPTrackingLabel:       resourceBinding.Labels[fleetv1beta1.CRPTrackingLabel],
-						fleetv1beta1.EnvelopeTypeLabel:      string(fleetv1alpha1.EnvelopeTypeClusterResource),
-						fleetv1beta1.EnvelopeNameLabel:      clusterResourceEnvelope.Name,
-						fleetv1beta1.EnvelopeNamespaceLabel: "",
+						fleetv1beta1.ParentBindingLabel:               resourceBinding.Name,
+						fleetv1beta1.CRPTrackingLabel:                 resourceBinding.Labels[fleetv1beta1.CRPTrackingLabel],
+						fleetv1beta1.ParentResourceSnapshotIndexLabel: resourceSnapshot.Labels[fleetv1beta1.ResourceIndexLabel],
+						fleetv1beta1.EnvelopeTypeLabel:                string(fleetv1beta1.ClusterResourceEnvelopeType),
+						fleetv1beta1.EnvelopeNameLabel:                clusterResourceEnvelope.Name,
+						fleetv1beta1.EnvelopeNamespaceLabel:           "",
 					},
 					Annotations: map[string]string{
 						fleetv1beta1.ParentResourceSnapshotNameAnnotation:                resourceBinding.Spec.ResourceSnapshotName,
 						fleetv1beta1.ParentResourceOverrideSnapshotHashAnnotation:        "resource-hash",
 						fleetv1beta1.ParentClusterResourceOverrideSnapshotHashAnnotation: "cluster-resource-hash",
+					},
+				},
+				Spec: fleetv1beta1.WorkSpec{
+					Workload: fleetv1beta1.WorkloadTemplate{
+						Manifests: []fleetv1beta1.Manifest{
+							{
+								RawExtension: runtime.RawExtension{Raw: clusterroleData},
+							},
+						},
 					},
 				},
 			},
@@ -338,14 +416,14 @@ func TestCreateOrUpdateEnvelopeCRWorkObj(t *testing.T) {
 			existingObjects:                     []client.Object{existingWork},
 			want: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      workNamePrefix,
-					Namespace: utils.GetClusterNamespace("test-cluster"),
+					Namespace: "test-app", //copy from the existing work
 					Labels: map[string]string{
-						fleetv1beta1.ParentBindingLabel:     resourceBinding.Name,
-						fleetv1beta1.CRPTrackingLabel:       resourceBinding.Labels[fleetv1beta1.CRPTrackingLabel],
-						fleetv1beta1.EnvelopeTypeLabel:      string(fleetv1alpha1.EnvelopeTypeResource),
-						fleetv1beta1.EnvelopeNameLabel:      resourceEnvelope.Name,
-						fleetv1beta1.EnvelopeNamespaceLabel: resourceEnvelope.Namespace,
+						fleetv1beta1.ParentBindingLabel:               resourceBinding.Name,
+						fleetv1beta1.CRPTrackingLabel:                 resourceBinding.Labels[fleetv1beta1.CRPTrackingLabel],
+						fleetv1beta1.ParentResourceSnapshotIndexLabel: resourceSnapshot.Labels[fleetv1beta1.ResourceIndexLabel],
+						fleetv1beta1.EnvelopeTypeLabel:                string(fleetv1beta1.ResourceEnvelopeType),
+						fleetv1beta1.EnvelopeNameLabel:                resourceEnvelope.Name,
+						fleetv1beta1.EnvelopeNamespaceLabel:           resourceEnvelope.Namespace,
 					},
 					Annotations: map[string]string{
 						fleetv1beta1.ParentResourceSnapshotNameAnnotation:                resourceBinding.Spec.ResourceSnapshotName,
@@ -358,7 +436,7 @@ func TestCreateOrUpdateEnvelopeCRWorkObj(t *testing.T) {
 						Manifests: []fleetv1beta1.Manifest{
 							{
 								RawExtension: runtime.RawExtension{
-									Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm","namespace":"default"},"data":{"key":"value"}}`),
+									Raw: configMapData,
 								},
 							},
 						},
@@ -367,15 +445,48 @@ func TestCreateOrUpdateEnvelopeCRWorkObj(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "error with malformed data in ResourceEnvelope",
+			envelopeReader: &fleetv1beta1.ResourceEnvelope{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "malformed-envelope",
+					Namespace: "default",
+				},
+				Data: map[string]runtime.RawExtension{
+					"malformed": {
+						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"bad-cm",invalid json}}`),
+					},
+				},
+			},
+			resourceOverrideSnapshotHash:        "resource-hash",
+			clusterResourceOverrideSnapshotHash: "cluster-resource-hash",
+			existingObjects:                     []client.Object{},
+			want:                                nil,
+			wantErr:                             true,
+		},
+		{
+			name: "error with ResourceEnvelope containing cluster-scoped object",
+			envelopeReader: &fleetv1beta1.ResourceEnvelope{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "invalid-scope-envelope",
+					Namespace: "default",
+				},
+				Data: map[string]runtime.RawExtension{
+					"clusterrole": {
+						Raw: []byte(`{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"test-role"},"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get","list"]}]}`),
+					},
+				},
+			},
+			resourceOverrideSnapshotHash:        "resource-hash",
+			clusterResourceOverrideSnapshotHash: "cluster-resource-hash",
+			existingObjects:                     []client.Object{},
+			want:                                nil,
+			wantErr:                             true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set up binding with expected target cluster
-			resourceBinding.Spec.TargetCluster = "test-cluster"
-			// Set up binding with expected resource snapshot name
-			resourceBinding.Spec.ResourceSnapshotName = "test-snapshot"
-
 			// Create fake client with scheme
 			fakeClient := fake.NewClientBuilder().
 				WithScheme(scheme).
@@ -390,52 +501,17 @@ func TestCreateOrUpdateEnvelopeCRWorkObj(t *testing.T) {
 			}
 
 			// Call the function under test
-			got, err := r.createOrUpdateEnvelopeCRWorkObj(
-				ctx,
-				workNamePrefix,
-				resourceBinding,
-				resourceSnapshot,
-				tt.envelopeReader,
-				tt.resourceOverrideSnapshotHash,
-				tt.clusterResourceOverrideSnapshotHash,
-			)
+			got, err := r.createOrUpdateEnvelopeCRWorkObj(ctx, tt.envelopeReader, workNamePrefix,
+				resourceBinding, resourceSnapshot, tt.resourceOverrideSnapshotHash, tt.clusterResourceOverrideSnapshotHash)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("createOrUpdateEnvelopeCRWorkObj() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
-			if err == nil {
-				// Verify the basic structure of the created/updated work
-				if got.Name == "" {
-					t.Error("createOrUpdateEnvelopeCRWorkObj() returned work with empty name")
-				}
-
-				if got.Namespace != utils.GetClusterNamespace("test-cluster") {
-					t.Errorf("createOrUpdateEnvelopeCRWorkObj() returned work with namespace %s, want %s",
-						got.Namespace, utils.GetClusterNamespace("test-cluster"))
-				}
-
-				// Check labels
-				for key, expectedValue := range tt.want.Labels {
-					if got.Labels[key] != expectedValue {
-						t.Errorf("createOrUpdateEnvelopeCRWorkObj() returned work with label %s=%s, want %s",
-							key, got.Labels[key], expectedValue)
-					}
-				}
-
-				// Check annotations
-				for key, expectedValue := range tt.want.Annotations {
-					if got.Annotations[key] != expectedValue {
-						t.Errorf("createOrUpdateEnvelopeCRWorkObj() returned work with annotation %s=%s, want %s",
-							key, got.Annotations[key], expectedValue)
-					}
-				}
-
-				// Check that manifests exist
-				if len(got.Spec.Workload.Manifests) == 0 {
-					t.Error("createOrUpdateEnvelopeCRWorkObj() returned work with empty manifests")
-				}
+			// Use cmp.Diff for comparison
+			if diff := cmp.Diff(got, tt.want, ignoreWorkOption, ignoreWorkMeta, ignoreTypeMeta); diff != "" {
+				t.Errorf("createOrUpdateEnvelopeCRWorkObj() mismatch (-got +want):\n%s", diff)
 			}
 		})
 	}
@@ -464,41 +540,33 @@ func TestProcessOneSelectedResource(t *testing.T) {
 	}
 
 	// Convert the envelope objects to ResourceContent
-	resourceEnvelopeContent := createResourceContent(t, &fleetv1alpha1.ResourceEnvelope{
+	resourceEnvelopeContent := createResourceContent(t, &fleetv1beta1.ResourceEnvelope{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: fleetv1alpha1.GroupVersion.String(),
-			Kind:       "ResourceEnvelope",
+			APIVersion: fleetv1beta1.GroupVersion.String(),
+			Kind:       fleetv1beta1.ResourceEnvelopeKind,
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-resource-envelope",
 			Namespace: "default",
 		},
-		Spec: fleetv1alpha1.EnvelopeSpec{
-			Manifests: map[string]fleetv1alpha1.Manifest{
-				"configmap": {
-					Data: runtime.RawExtension{
-						Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm","namespace":"default"},"data":{"key":"value"}}`),
-					},
-				},
+		Data: map[string]runtime.RawExtension{
+			"configmap": {
+				Raw: []byte(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-cm","namespace":"default"},"data":{"key":"value"}}`),
 			},
 		},
 	})
 
-	clusterResourceEnvelopeContent := createResourceContent(t, &fleetv1alpha1.ClusterResourceEnvelope{
+	clusterResourceEnvelopeContent := createResourceContent(t, &fleetv1beta1.ClusterResourceEnvelope{
 		TypeMeta: metav1.TypeMeta{
-			APIVersion: fleetv1alpha1.GroupVersion.String(),
+			APIVersion: fleetv1beta1.GroupVersion.String(),
 			Kind:       "ClusterResourceEnvelope",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-cluster-envelope",
 		},
-		Spec: fleetv1alpha1.EnvelopeSpec{
-			Manifests: map[string]fleetv1alpha1.Manifest{
-				"clusterrole": {
-					Data: runtime.RawExtension{
-						Raw: []byte(`{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"test-role"},"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get","list"]}]}`),
-					},
-				},
+		Data: map[string]runtime.RawExtension{
+			"clusterrole": {
+				Raw: []byte(`{"apiVersion":"rbac.authorization.k8s.io/v1","kind":"ClusterRole","metadata":{"name":"test-role"},"rules":[{"apiGroups":[""],"resources":["pods"],"verbs":["get","list"]}]}`),
 			},
 		},
 	})
@@ -563,12 +631,12 @@ func TestProcessOneSelectedResource(t *testing.T) {
 			wantErr:                             false,
 		},
 		{
-			name:                                "process ConfigMap envelope",
+			name:                                "process ConfigMap envelope that we no longer support",
 			selectedResource:                    configMapEnvelopeContent,
 			resourceOverrideSnapshotHash:        "resource-hash",
 			clusterResourceOverrideSnapshotHash: "cluster-resource-hash",
-			wantNewWorkLen:                      1, // Should create a new work
-			wantSimpleManifestsLen:              0, // Should not add to simple manifests
+			wantNewWorkLen:                      0, // Should create a new work
+			wantSimpleManifestsLen:              1, // Should not add to simple manifests
 			wantErr:                             false,
 		},
 		{
@@ -641,23 +709,8 @@ func createResourceContent(t *testing.T, obj runtime.Object) *fleetv1beta1.Resou
 		t.Fatalf("Failed to marshal object: %v", err)
 	}
 	return &fleetv1beta1.ResourceContent{
-		Raw: jsonData,
+		RawExtension: runtime.RawExtension{
+			Raw: jsonData,
+		},
 	}
-}
-
-func serviceScheme(t *testing.T) *runtime.Scheme {
-	scheme := runtime.NewScheme()
-
-	// Add types needed for testing
-	if err := fleetv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("Failed to add fleetv1alpha1 types to scheme: %v", err)
-	}
-	if err := fleetv1beta1.AddToScheme(scheme); err != nil {
-		t.Fatalf("Failed to add fleetv1beta1 types to scheme: %v", err)
-	}
-	if err := corev1.AddToScheme(scheme); err != nil {
-		t.Fatalf("Failed to add corev1 types to scheme: %v", err)
-	}
-
-	return scheme
 }

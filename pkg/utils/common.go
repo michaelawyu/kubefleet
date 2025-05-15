@@ -24,7 +24,6 @@ import (
 	"strings"
 	"time"
 
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -292,12 +291,6 @@ var (
 		Kind:    "MemberCluster",
 	}
 
-	MutatingWebhookConfigurationGVR = schema.GroupVersionResource{
-		Group:    admissionregistrationv1.SchemeGroupVersion.Group,
-		Version:  admissionregistrationv1.SchemeGroupVersion.Version,
-		Resource: "mutatingwebhookconfigurations",
-	}
-
 	NamespaceMetaGVK = metav1.GroupVersionKind{
 		Group:   corev1.GroupName,
 		Version: corev1.SchemeGroupVersion.Version,
@@ -400,12 +393,6 @@ var (
 		Kind:    "Work",
 	}
 
-	ValidatingWebhookConfigurationGVR = schema.GroupVersionResource{
-		Group:    admissionregistrationv1.SchemeGroupVersion.Group,
-		Version:  admissionregistrationv1.SchemeGroupVersion.Version,
-		Resource: "validatingwebhookconfigurations",
-	}
-
 	ClusterResourceOverrideSnapshotKind = schema.GroupVersionKind{
 		Group:   placementv1alpha1.GroupVersion.Group,
 		Version: placementv1alpha1.GroupVersion.Version,
@@ -502,16 +489,14 @@ var (
 		Kind:    "PersistentVolumeClaim",
 	}
 
-	ClusterResourceEnvelopeV1Alpha1GVK = schema.GroupVersionKind{
-		Group:   placementv1alpha1.GroupVersion.Group,
-		Version: placementv1alpha1.GroupVersion.Version,
-		Kind:    "ClusterResourceEnvelope",
+	ClusterResourceEnvelopeGK = schema.GroupKind{
+		Group: placementv1beta1.GroupVersion.Group,
+		Kind:  placementv1beta1.ClusterResourceEnvelopeKind,
 	}
 
-	ResourceEnvelopeV1Alpha1GVK = schema.GroupVersionKind{
-		Group:   placementv1alpha1.GroupVersion.Group,
-		Version: placementv1alpha1.GroupVersion.Version,
-		Kind:    "ResourceEnvelope",
+	ResourceEnvelopeGK = schema.GroupKind{
+		Group: placementv1beta1.GroupVersion.Group,
+		Kind:  placementv1beta1.ResourceEnvelopeKind,
 	}
 )
 

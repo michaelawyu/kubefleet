@@ -905,7 +905,6 @@ type EnvelopeType string
 
 const (
 	// ConfigMapEnvelopeType means the envelope object is of type `ConfigMap`.
-	//
 	// TO-DO (chenyu1): drop this type after the configMap-based envelopes become obsolete.
 	ConfigMapEnvelopeType EnvelopeType = "ConfigMap"
 

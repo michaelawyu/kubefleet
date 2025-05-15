@@ -477,16 +477,16 @@ func (r *Reconciler) syncAllWork(ctx context.Context, resourceBinding *fleetv1be
 	// generate work objects for each resource snapshot
 	for i := range resourceSnapshots {
 		snapshot := resourceSnapshots[i]
-		var newWork []*fleetv1beta1.Work
 		workNamePrefix, err := getWorkNamePrefixFromSnapshotName(snapshot)
 		if err != nil {
 			klog.ErrorS(err, "Encountered a mal-formatted resource snapshot", "resourceSnapshot", klog.KObj(snapshot))
 			return false, false, err
 		}
 		var simpleManifests []fleetv1beta1.Manifest
+		var newWork []*fleetv1beta1.Work
 		for j := range snapshot.Spec.SelectedResources {
 			selectedResource := snapshot.Spec.SelectedResources[j].DeepCopy()
-			// TODO: override the content of the wrapped resource instead of the envelope itself
+			// TODO: apply the override rules on the envelope resources by applying them on the work instead of the selected resource
 			resourceDeleted, overrideErr := r.applyOverrides(selectedResource, cluster, croMap, roMap)
 			if overrideErr != nil {
 				return false, false, overrideErr
@@ -581,70 +581,56 @@ func (r *Reconciler) processOneSelectedResource(
 	newWork []*fleetv1beta1.Work,
 	simpleManifests []fleetv1beta1.Manifest,
 ) ([]*fleetv1beta1.Work, []fleetv1beta1.Manifest, error) {
-	// Extract resources from envelopes if one or more ClusterResourceEnvelopes and/or ResourceEnvelopes
-	// are present.
-
 	// Unmarshal the YAML content into an unstructured object.
 	var uResource unstructured.Unstructured
 	if unMarshallErr := uResource.UnmarshalJSON(selectedResource.Raw); unMarshallErr != nil {
 		klog.ErrorS(unMarshallErr, "work has invalid content", "snapshot", klog.KObj(snapshot), "selectedResource", selectedResource.Raw)
-		return newWork, simpleManifests, controller.NewUnexpectedBehaviorError(unMarshallErr)
+		return nil, nil, controller.NewUnexpectedBehaviorError(unMarshallErr)
 	}
 
-	uGVK := uResource.GetObjectKind().GroupVersionKind()
+	uGVK := uResource.GetObjectKind().GroupVersionKind().GroupKind()
 	switch {
-	case uGVK == utils.ClusterResourceEnvelopeV1Alpha1GVK:
+	case uGVK == utils.ClusterResourceEnvelopeGK:
 		// The resource is a ClusterResourceEnvelope; extract its contents.
-		var clusterResourceEnvelope fleetv1alpha1.ClusterResourceEnvelope
+		var clusterResourceEnvelope fleetv1beta1.ClusterResourceEnvelope
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(uResource.Object, &clusterResourceEnvelope); err != nil {
 			klog.ErrorS(err, "Failed to convert the unstructured object to a ClusterResourceEnvelope",
 				"clusterResourceBinding", klog.KObj(resourceBinding),
 				"clusterResourceSnapshot", klog.KObj(snapshot),
 				"selectedResource", klog.KObj(&uResource))
-			return newWork, simpleManifests, controller.NewUnexpectedBehaviorError(err)
+			return nil, nil, controller.NewUnexpectedBehaviorError(err)
 		}
-
-		work, err := r.createOrUpdateEnvelopeCRWorkObj(ctx, workNamePrefix, resourceBinding, snapshot, &clusterResourceEnvelope, resourceOverrideSnapshotHash, clusterResourceOverrideSnapshotHash)
+		work, err := r.createOrUpdateEnvelopeCRWorkObj(ctx, &clusterResourceEnvelope, workNamePrefix, resourceBinding, snapshot, resourceOverrideSnapshotHash, clusterResourceOverrideSnapshotHash)
 		if err != nil {
 			klog.ErrorS(err, "Failed to create or get the work object for the ClusterResourceEnvelope",
 				"clusterResourceEnvelope", klog.KObj(&clusterResourceEnvelope),
 				"clusterResourceBinding", klog.KObj(resourceBinding),
 				"clusterResourceSnapshot", klog.KObj(snapshot))
-			return newWork, simpleManifests, err
+			return nil, nil, err
 		}
 		activeWork[work.Name] = work
 		newWork = append(newWork, work)
-	case uGVK == utils.ResourceEnvelopeV1Alpha1GVK:
+	case uGVK == utils.ResourceEnvelopeGK:
 		// The resource is a ResourceEnvelope; extract its contents.
-		var resourceEnvelope fleetv1alpha1.ResourceEnvelope
+		var resourceEnvelope fleetv1beta1.ResourceEnvelope
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(uResource.Object, &resourceEnvelope); err != nil {
 			klog.ErrorS(err, "Failed to convert the unstructured object to a ResourceEnvelope",
 				"clusterResourceBinding", klog.KObj(resourceBinding),
 				"clusterResourceSnapshot", klog.KObj(snapshot),
 				"selectedResource", klog.KObj(&uResource))
-			return newWork, simpleManifests, controller.NewUnexpectedBehaviorError(err)
+			return nil, nil, controller.NewUnexpectedBehaviorError(err)
 		}
-
-		work, err := r.createOrUpdateEnvelopeCRWorkObj(ctx, workNamePrefix, resourceBinding, snapshot, &resourceEnvelope, resourceOverrideSnapshotHash, clusterResourceOverrideSnapshotHash)
+		work, err := r.createOrUpdateEnvelopeCRWorkObj(ctx, &resourceEnvelope, workNamePrefix, resourceBinding, snapshot, resourceOverrideSnapshotHash, clusterResourceOverrideSnapshotHash)
 		if err != nil {
 			klog.ErrorS(err, "Failed to create or get the work object for the ResourceEnvelope",
 				"resourceEnvelope", klog.KObj(&resourceEnvelope),
 				"clusterResourceBinding", klog.KObj(resourceBinding),
 				"clusterResourceSnapshot", klog.KObj(snapshot))
-			return newWork, simpleManifests, err
+			return nil, nil, err
 		}
 		activeWork[work.Name] = work
 		newWork = append(newWork, work)
-	case uGVK == utils.ConfigMapGVK && len(uResource.GetAnnotations()[fleetv1beta1.EnvelopeConfigMapAnnotation]) > 0:
-		// The resource is a configMap-based envelope; extract its contents.
-		//
-		// TO-DO (chenyu1): drop this branch after the configMap-based envelope becomes obsolete.
-		work, err := r.getConfigMapEnvelopWorkObj(ctx, workNamePrefix, resourceBinding, snapshot, &uResource, resourceOverrideSnapshotHash, clusterResourceOverrideSnapshotHash)
-		if err != nil {
-			return newWork, simpleManifests, err
-		}
-		activeWork[work.Name] = work
-		newWork = append(newWork, work)
+
 	default:
 		// The resource is not an envelope; add it to the list of simple manifests.
 		simpleManifests = append(simpleManifests, fleetv1beta1.Manifest(*selectedResource))

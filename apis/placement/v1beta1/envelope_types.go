@@ -20,8 +20,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
-
-	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 )
 
 // +genclient
@@ -46,6 +44,17 @@ type ClusterResourceEnvelope struct {
 	Data map[string]runtime.RawExtension `json:"data"`
 }
 
+// ClusterResourceEnvelopeList contains a list of ClusterResourceEnvelope objects.
+// +kubebuilder:resource:scope=Cluster
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type ClusterResourceEnvelopeList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+
+	// Items is the list of ClusterResourceEnvelope objects.
+	Items []ClusterResourceEnvelope `json:"items"`
+}
+
 // +genclient
 // +genclient:Namespaced
 // +kubebuilder:object:root=true
@@ -68,13 +77,30 @@ type ResourceEnvelope struct {
 	Data map[string]runtime.RawExtension `json:"data"`
 }
 
+// ResourceEnvelopeList contains a list of ResourceEnvelope objects.
+// +kubebuilder:resource:scope=Namespaced
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type ResourceEnvelopeList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+
+	// Items is the list of ResourceEnvelope objects.
+	Items []ResourceEnvelope `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(
+		&ClusterResourceEnvelope{},
+		&ClusterResourceEnvelopeList{},
+		&ResourceEnvelope{},
+		&ResourceEnvelopeList{})
+}
+
 // +kubebuilder:object:generate=false
 // EnvelopeReader is an interface that allows retrieval of common information across all envelope CRs.
-//
-// Note (chenyu1): controller-gen should skip this type.
 type EnvelopeReader interface {
-	// GetManifests returns the manifests in the envelope.
-	GetManifests() map[string]Manifest
+	// GetData returns the raw data in the envelope.
+	GetData() map[string]runtime.RawExtension
 
 	// GetEnvelopeObjRef returns a klog object reference to the envelope.
 	GetEnvelopeObjRef() klog.ObjectRef
@@ -98,8 +124,8 @@ var (
 
 // Implements the EnvelopeReader interface for ClusterResourceEnvelope.
 
-func (e *ClusterResourceEnvelope) GetManifests() map[string]Manifest {
-	return e.Spec.Manifests
+func (e *ClusterResourceEnvelope) GetData() map[string]runtime.RawExtension {
+	return e.Data
 }
 
 func (e *ClusterResourceEnvelope) GetEnvelopeObjRef() klog.ObjectRef {
@@ -107,13 +133,13 @@ func (e *ClusterResourceEnvelope) GetEnvelopeObjRef() klog.ObjectRef {
 }
 
 func (e *ClusterResourceEnvelope) GetEnvelopeType() string {
-	return string(placementv1beta1.ClusterResourceEnvelopeType)
+	return string(ClusterResourceEnvelopeType)
 }
 
 // Implements the EnvelopeReader interface for ResourceEnvelope.
 
-func (e *ResourceEnvelope) GetManifests() map[string]Manifest {
-	return e.Spec.Manifests
+func (e *ResourceEnvelope) GetData() map[string]runtime.RawExtension {
+	return e.Data
 }
 
 func (e *ResourceEnvelope) GetEnvelopeObjRef() klog.ObjectRef {
@@ -121,5 +147,5 @@ func (e *ResourceEnvelope) GetEnvelopeObjRef() klog.ObjectRef {
 }
 
 func (e *ResourceEnvelope) GetEnvelopeType() string {
-	return string(placementv1beta1.ResourceEnvelopeType)
+	return string(ResourceEnvelopeType)
 }

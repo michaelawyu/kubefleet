@@ -41,6 +41,10 @@ const (
 	ClusterResourcePlacementEvictionKind = "ClusterResourcePlacementEviction"
 	// ClusterResourcePlacementDisruptionBudgetKind is the kind of the ClusterResourcePlacementDisruptionBudget.
 	ClusterResourcePlacementDisruptionBudgetKind = "ClusterResourcePlacementDisruptionBudget"
+	// ResourceEnvelopeKind is the kind of the ResourceEnvelope.
+	ResourceEnvelopeKind = "ResourceEnvelope"
+	// ClusterResourceEnvelopeKind is the kind of the ClusterResourceEnvelope.
+	ClusterResourceEnvelopeKind = "ClusterResourceEnvelope"
 )
 
 const (
