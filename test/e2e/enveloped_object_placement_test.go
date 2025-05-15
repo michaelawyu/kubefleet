@@ -41,9 +41,9 @@ import (
 )
 
 const (
-	envelopResourceName = "envelop-wrapper"
-	cmDataKey           = "foo"
-	cmDataVal           = "bar"
+	envelopeResourceName = "envelope-wrapper"
+	cmDataKey            = "foo"
+	cmDataVal            = "bar"
 )
 
 var (
@@ -386,7 +386,7 @@ var _ = Describe("placing wrapped resources using a CRP", func() {
 			// Create an envelope config map.
 			envelopWrapper = &placementv1beta1.ResourceEnvelope{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      envelopResourceName,
+					Name:      envelopeResourceName,
 					Namespace: ns.Name,
 				},
 				Data: make(map[string]runtime.RawExtension),
@@ -484,7 +484,7 @@ var _ = Describe("placing wrapped resources using a CRP", func() {
 							Group:     placementv1beta1.GroupVersion.Group,
 							Kind:      placementv1beta1.ResourceEnvelopeKind,
 							Version:   placementv1beta1.GroupVersion.Version,
-							Name:      envelopResourceName,
+							Name:      envelopeResourceName,
 							Namespace: workNamespaceName,
 						},
 					},
@@ -527,7 +527,7 @@ var _ = Describe("Process objects with generate name", Ordered, func() {
 		// Create an envelope.
 		envelope = &placementv1beta1.ResourceEnvelope{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      envelopResourceName,
+				Name:      envelopeResourceName,
 				Namespace: ns.Name,
 			},
 			Data: map[string]runtime.RawExtension{},
@@ -597,7 +597,7 @@ var _ = Describe("Process objects with generate name", Ordered, func() {
 									Namespace: workNamespaceName,
 									Version:   "v1",
 									Envelope: &placementv1beta1.EnvelopeIdentifier{
-										Name:      envelopResourceName,
+										Name:      envelopeResourceName,
 										Namespace: workNamespaceName,
 										Type:      placementv1beta1.ResourceEnvelopeType,
 									},
@@ -623,7 +623,7 @@ var _ = Describe("Process objects with generate name", Ordered, func() {
 						Group:     placementv1beta1.GroupVersion.Group,
 						Kind:      placementv1beta1.ResourceEnvelopeKind,
 						Version:   placementv1beta1.GroupVersion.Version,
-						Name:      envelopResourceName,
+						Name:      envelopeResourceName,
 						Namespace: workNamespaceName,
 					},
 				},
