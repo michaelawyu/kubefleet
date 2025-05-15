@@ -59,7 +59,7 @@ var (
 	cancel    context.CancelFunc
 
 	// pre loaded test manifests
-	testResourceCRD, testNameSpace, testResource, testConfigMap, testResourceEnvelop, testResourceEnvelop2, testClusterScopedEnvelop, testPdb []byte
+	testResourceCRD, testNameSpace, testResource, testConfigMap, testResourceEnvelope, testResourceEnvelope2, testClusterScopedEnvelope, testPdb []byte
 
 	// want overridden manifest which is overridden by cro-1 and ro-1
 	wantOverriddenTestResource []byte
@@ -347,22 +347,22 @@ func readTestManifests() {
 	testConfigMap, err = yaml.ToJSON(rawByte)
 	Expect(err).Should(Succeed())
 
-	By("Read testResourceEnvelop resource")
-	rawByte, err = os.ReadFile("manifests/test-resource-envelop.yaml")
+	By("Read testResourceEnvelope resource")
+	rawByte, err = os.ReadFile("manifests/test-resource-envelope.yaml")
 	Expect(err).Should(Succeed())
-	testResourceEnvelop, err = yaml.ToJSON(rawByte)
-	Expect(err).Should(Succeed())
-
-	By("Read testResourceEnvelop2 resource")
-	rawByte, err = os.ReadFile("manifests/test-resource-envelop2.yaml")
-	Expect(err).Should(Succeed())
-	testResourceEnvelop2, err = yaml.ToJSON(rawByte)
+	testResourceEnvelope, err = yaml.ToJSON(rawByte)
 	Expect(err).Should(Succeed())
 
-	By("Read testClusterScopedEnvelop resource")
-	rawByte, err = os.ReadFile("manifests/test-clusterscoped-envelop.yaml")
+	By("Read testResourceEnvelope2 resource")
+	rawByte, err = os.ReadFile("manifests/test-resource-envelope2.yaml")
 	Expect(err).Should(Succeed())
-	testClusterScopedEnvelop, err = yaml.ToJSON(rawByte)
+	testResourceEnvelope2, err = yaml.ToJSON(rawByte)
+	Expect(err).Should(Succeed())
+
+	By("Read testClusterScopedEnvelope resource")
+	rawByte, err = os.ReadFile("manifests/test-clusterscoped-envelope.yaml")
+	Expect(err).Should(Succeed())
+	testClusterScopedEnvelope, err = yaml.ToJSON(rawByte)
 	Expect(err).Should(Succeed())
 
 	By("Read PodDisruptionBudget")

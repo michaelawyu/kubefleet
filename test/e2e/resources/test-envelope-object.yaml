@@ -1,5 +1,5 @@
 apiVersion: placement.kubernetes-fleet.io/v1beta1
 kind: ResourceEnvelope
 metadata:
-  name: envelop-object
+  name: envelope-object
   namespace: app

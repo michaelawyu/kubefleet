@@ -1,7 +1,7 @@
 apiVersion: placement.kubernetes-fleet.io/v1beta1
 kind: ClusterResourceEnvelope
 metadata:
-  name: clusterscoped-resource-envelop
+  name: clusterscoped-resource-envelope
 data:
   "webhook.yaml":
     apiVersion: admissionregistration.k8s.io/v1

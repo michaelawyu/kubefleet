@@ -596,13 +596,13 @@ var _ = Describe("Test Work Generator Controller", func() {
 			})
 		})
 
-		Context("Test Bound ClusterResourceBinding with a single resource snapshot with namespaced envelop objects", func() {
+		Context("Test Bound ClusterResourceBinding with a single resource snapshot with namespaced envelope objects", func() {
 			var masterSnapshot *placementv1beta1.ClusterResourceSnapshot
-			envelopedResourceName := "namespaced-resource-envelop"
+			envelopedResourceName := "namespaced-resource-envelope"
 			envelopedResourceNameSpace := "app"
 			BeforeEach(func() {
 				masterSnapshot = generateResourceSnapshot(1, 1, 0, [][]byte{
-					testConfigMap, testResourceEnvelop, testResourceCRD, testNameSpace,
+					testConfigMap, testResourceEnvelope, testResourceCRD, testNameSpace,
 				})
 				Expect(k8sClient.Create(ctx, masterSnapshot)).Should(Succeed())
 				By(fmt.Sprintf("master resource snapshot  %s created", masterSnapshot.Name))
@@ -723,7 +723,7 @@ var _ = Describe("Test Work Generator Controller", func() {
 				fetchEnvelopedWork(&workList, binding, string(placementv1beta1.ResourceEnvelopeType), envelopedResourceName, envelopedResourceNameSpace)
 				// create a second snapshot with a modified enveloped object
 				masterSnapshot = generateResourceSnapshot(2, 1, 0, [][]byte{
-					testResourceEnvelop2, testResourceCRD, testNameSpace,
+					testResourceEnvelope2, testResourceCRD, testNameSpace,
 				})
 				Expect(k8sClient.Create(ctx, masterSnapshot)).Should(Succeed())
 				By(fmt.Sprintf("another master resource snapshot  %s created", masterSnapshot.Name))
@@ -829,7 +829,7 @@ var _ = Describe("Test Work Generator Controller", func() {
 					},
 				}
 				diff = cmp.Diff(wantWork, work, ignoreWorkOption, ignoreTypeMeta)
-				Expect(diff).Should(BeEmpty(), fmt.Sprintf("envelop work(%s) mismatch (-want +got):\n%s", work.Name, diff))
+				Expect(diff).Should(BeEmpty(), fmt.Sprintf("envelope work(%s) mismatch (-want +got):\n%s", work.Name, diff))
 			})
 
 			It("Should delete the enveloped work object in the target namespace after it's removed from snapshot", func() {
@@ -882,13 +882,13 @@ var _ = Describe("Test Work Generator Controller", func() {
 			})
 		})
 
-		Context("Test Bound ClusterResourceBinding with a single resource snapshot with cluster scoped envelop objects", func() {
+		Context("Test Bound ClusterResourceBinding with a single resource snapshot with cluster scoped envelope objects", func() {
 			var masterSnapshot *placementv1beta1.ClusterResourceSnapshot
-			envelopedResourceName := "clusterscoped-resource-envelop"
+			envelopedResourceName := "clusterscoped-resource-envelope"
 			envelopedResourceNameSpace := ""
 			BeforeEach(func() {
 				masterSnapshot = generateResourceSnapshot(1, 1, 0, [][]byte{
-					testClusterScopedEnvelop, testResourceCRD, testNameSpace,
+					testClusterScopedEnvelope, testResourceCRD, testNameSpace,
 				})
 				Expect(k8sClient.Create(ctx, masterSnapshot)).Should(Succeed())
 				By(fmt.Sprintf("master resource snapshot  %s created", masterSnapshot.Name))

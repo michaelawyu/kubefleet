@@ -164,7 +164,7 @@ var _ = Describe("placing wrapped resources using a CRP", Ordered, func() {
 		})
 
 		AfterAll(func() {
-			By(fmt.Sprintf("deleting envelop %s", testDeploymentEnvelope.Name))
+			By(fmt.Sprintf("deleting envelope %s", testDeploymentEnvelope.Name))
 			Expect(hubClient.Delete(ctx, &testDeploymentEnvelope)).To(Succeed(), "Failed to delete ResourceEnvelope")
 			// Remove the custom deletion blocker finalizer from the CRP.
 			ensureCRPAndRelatedResourcesDeleted(crpName, allMemberClusters)
@@ -1008,7 +1008,7 @@ func createWrappedResourcesForRollout(testEnvelopeObj *placementv1beta1.Resource
 	Expect(hubClient.Create(ctx, &namespace)).To(Succeed(), "Failed to create namespace %s", namespace.Name)
 	testEnvelopeObj.Data = make(map[string]runtime.RawExtension)
 	constructWrappedResources(testEnvelopeObj, obj, kind, namespace)
-	Expect(hubClient.Create(ctx, testEnvelopeObj)).To(Succeed(), "Failed to create testEnvelop object %s containing %s", testEnvelopeObj.Name, kind)
+	Expect(hubClient.Create(ctx, testEnvelopeObj)).To(Succeed(), "Failed to create testEnvelope object %s containing %s", testEnvelopeObj.Name, kind)
 }
 
 func checkCluster(cluster *framework.Cluster, name, namespace string) bool {

@@ -50,7 +50,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
-	fleetv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1alpha1"
 	fleetv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/workapplier"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils"

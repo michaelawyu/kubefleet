@@ -1,7 +1,7 @@
 apiVersion: placement.kubernetes-fleet.io/v1beta1
 kind: ResourceEnvelope
 metadata:
-  name: namespaced-resource-envelop
+  name: namespaced-resource-envelope
   namespace: app
 data:
   "resourceQuota.yaml":
@@ -12,7 +12,7 @@ data:
       namespace: app
     spec:
       hard:
-        requests.cpu: "2"
-        requests.memory: 2Gi
-        limits.cpu: "4"
-        limits.memory: 4Gi
+        requests.cpu: "1"
+        requests.memory: 1Gi
+        limits.cpu: "2"
+        limits.memory: 2Gi
