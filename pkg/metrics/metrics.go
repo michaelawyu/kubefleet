@@ -94,15 +94,16 @@ var (
 	//
 	// The following labels are available:
 	// * apply_status: the apply status of the processing request; see the list of
-	//   work apply condition reasons in the work applier source code for possible values.
+	//   work apply condition reasons in the work applier source code
+	//   (pkg/controller/workapplier/controller.go) for possible values.
 	//   if the work object does not need to be applied, the value is "Skipped".
 	// * availability_status: the availability check status of the processing request;
 	//   see the list of availability check condition reasons in the work applier source
-	//   code for possible values.
+	//   code (pkg/controller/workapplier/controller.go) for possible values.
 	//   if the work object does not need an availability check, the value is "Skipped".
 	// * diff_reporting_status: the diff reporting status of the processing request;
 	//   see the list of diff reporting condition reasons in the work applier source
-	//   code for possible values.
+	//   code (pkg/controller/workapplier/controller.go) for possible values.
 	//   if the work object does not need a diff reporting, the value is "Skipped".
 	FleetWorkProcessingRequestsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "fleet_work_processing_requests_total",
