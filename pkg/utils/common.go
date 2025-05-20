@@ -24,7 +24,6 @@ import (
 	"strings"
 	"time"
 
-	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	appv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -146,7 +145,7 @@ var (
 	}
 )
 
-// Those are the GVR/GVK of the fleet related resources.
+// Those are the GVR/GVKs in use by Fleet source code.
 var (
 	ClusterResourcePlacementV1Alpha1GVK = schema.GroupVersionKind{
 		Group:   fleetv1alpha1.GroupVersion.Group,
@@ -170,6 +169,12 @@ var (
 		Group:   placementv1beta1.GroupVersion.Group,
 		Version: placementv1beta1.GroupVersion.Version,
 		Kind:    placementv1beta1.ClusterResourcePlacementKind,
+	}
+
+	ClusterResourcePlacementEvictionMetaGVK = metav1.GroupVersionKind{
+		Group:   placementv1beta1.GroupVersion.Group,
+		Version: placementv1beta1.GroupVersion.Version,
+		Kind:    placementv1beta1.ClusterResourcePlacementEvictionKind,
 	}
 
 	ConfigMapGVK = schema.GroupVersionKind{
@@ -292,12 +297,6 @@ var (
 		Kind:    "MemberCluster",
 	}
 
-	MutatingWebhookConfigurationGVR = schema.GroupVersionResource{
-		Group:    admissionregistrationv1.SchemeGroupVersion.Group,
-		Version:  admissionregistrationv1.SchemeGroupVersion.Version,
-		Resource: "mutatingwebhookconfigurations",
-	}
-
 	NamespaceMetaGVK = metav1.GroupVersionKind{
 		Group:   corev1.GroupName,
 		Version: corev1.SchemeGroupVersion.Version,
@@ -400,12 +399,6 @@ var (
 		Kind:    "Work",
 	}
 
-	ValidatingWebhookConfigurationGVR = schema.GroupVersionResource{
-		Group:    admissionregistrationv1.SchemeGroupVersion.Group,
-		Version:  admissionregistrationv1.SchemeGroupVersion.Version,
-		Resource: "validatingwebhookconfigurations",
-	}
-
 	ClusterResourceOverrideSnapshotKind = schema.GroupVersionKind{
 		Group:   placementv1alpha1.GroupVersion.Group,
 		Version: placementv1alpha1.GroupVersion.Version,
@@ -500,6 +493,16 @@ var (
 		Group:   corev1.GroupName,
 		Version: corev1.SchemeGroupVersion.Version,
 		Kind:    "PersistentVolumeClaim",
+	}
+
+	ClusterResourceEnvelopeGK = schema.GroupKind{
+		Group: placementv1beta1.GroupVersion.Group,
+		Kind:  placementv1beta1.ClusterResourceEnvelopeKind,
+	}
+
+	ResourceEnvelopeGK = schema.GroupKind{
+		Group: placementv1beta1.GroupVersion.Group,
+		Kind:  placementv1beta1.ResourceEnvelopeKind,
 	}
 )
 
