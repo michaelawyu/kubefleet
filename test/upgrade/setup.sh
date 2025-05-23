@@ -36,7 +36,7 @@ TAG=$IMAGE_TAG make docker-build-member-agent
 TAG=$IMAGE_TAG make docker-build-refresh-token
 
 # Create the kind clusters.
-echo "Creatinå the kind clusters..."
+echo "Creating the kind clusters..."
 
 # Create the hub cluster.
 kind create cluster --name $HUB_CLUSTER --image=$KIND_IMAGE --kubeconfig=$KUBECONFIG
@@ -128,4 +128,4 @@ do
         --set enableV1Beta1APIs=true
 done
 
-echo "Setup fo the before upgrade environment has been completed."
+echo "Setup for the before upgrade environment has been completed."
