@@ -404,7 +404,7 @@ func summarizeAKSClusterProperties(memberCluster *framework.Cluster, mcObj *clus
 				ObservedGeneration: mcObj.Generation,
 			},
 			{
-				Type:               azure.PropertyCollectionSucceededConditionType,
+				Type:               azure.CostPropertiesCollectionSucceededCondType,
 				Status:             metav1.ConditionTrue,
 				ObservedGeneration: mcObj.Generation,
 			},
