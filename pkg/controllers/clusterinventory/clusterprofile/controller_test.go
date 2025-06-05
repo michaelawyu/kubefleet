@@ -22,9 +22,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	clusterinventory "sigs.k8s.io/cluster-inventory-api/apis/v1alpha1"
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
+	clusterinventory "github.com/kubefleet-dev/kubefleet/apis/clusterinventory/v1alpha1"
 )
 
 func TestSyncClusterProfileCondition(t *testing.T) {

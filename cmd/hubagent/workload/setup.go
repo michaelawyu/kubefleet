@@ -22,12 +22,12 @@ import (
 	"strings"
 	"sync"
 
+	clusterinventory "github.com/kubefleet-dev/kubefleet/apis/clusterinventory/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
-	clusterinventory "sigs.k8s.io/cluster-inventory-api/apis/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	workv1alpha1 "sigs.k8s.io/work-api/pkg/apis/v1alpha1"
 

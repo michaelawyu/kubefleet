@@ -19,16 +19,17 @@ package clusterprofile
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
-	clusterinventory "sigs.k8s.io/cluster-inventory-api/apis/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -37,8 +38,48 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
+	clusterinventory "github.com/kubefleet-dev/kubefleet/apis/clusterinventory/v1alpha1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/controller"
 )
+
+const (
+	useAKSOIDCIssuerFederatedAuthenticationLabelKey = "kubernetes-fleet.io/use-aks-oidc-issuer-federated-authentication"
+
+	cloudEnvironmentLabelKey = "kubernetes-fleet.io/cloud-environment"
+
+	cloudEnvironmentLabelAKSPublicCloudValue = "aks-public-cloud"
+	cloudEnvironmentLabelGKEValue            = "gke"
+
+	msEntraTenantIDLabelKey = "kubernetes-fleet.io/ms-entra-tenant-id"
+)
+
+const (
+	federatedAuthnCredentialProviderName = "federated-identity"
+
+	aksOIDCIssuer              = "aks-oidc-issuer"
+	azureTokenExchangeAudience = "api://AzureADTokenExchange"
+	azureAuthorityHost         = "https://login.microsoftonline.com/"
+	azureAKSScope              = "6dae42f8-4368-4678-94ff-3960e28e3630/.default"
+)
+
+type PartialFederatedCredentialProviderForAKSClusterConfig struct {
+	// Fleet always uses the AKS OIDC issuer for ID token issuance.
+	IDTokenIssuer string `json:"idTokenIssuerType,omitempty"`
+
+	CloudEnvironment string `json:"cloudEnvironment,omitempty"`
+
+	AzureTokenExchangeAudience string `json:"azureTokenExchangeAudience,omitempty"`
+	MSEntraTenantID            string `json:"tenantID,omitempty"`
+	AzureAuthorityHost         string `json:"authorityHost,omitempty"`
+	AzureAKSScope              string `json:"aksScope,omitempty"`
+}
+
+type PartialFederatedCredentialProviderForGKEClusterConfig struct {
+	// Fleet always uses the GKE OIDC issuer for ID token issuance.
+	IDTokenIssuer string `json:"idTokenIssuerType,omitempty"`
+
+	CloudEnvironment string `json:"cloudEnvironment,omitempty"`
+}
 
 const (
 	// clusterProfileCleanupFinalizer is the finalizer added to a MemberCluster object if
@@ -158,13 +199,110 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 	klog.V(2).InfoS("Cluster profile object is created or updated", "memberCluster", mcRef, "clusterProfile", klog.KObj(cp), "operation", createOrUpdateRes)
+
 	// sync the cluster profile condition from the member cluster condition
 	r.syncClusterProfileCondition(mc, cp)
+
+	// Add the credential provider information as necessary.
+	prepareCredentialProviders(mc, cp)
+
 	if err = r.Status().Update(ctx, cp); err != nil {
 		klog.ErrorS(err, "Failed to update cluster profile status", "memberCluster", mcRef, "clusterProfile", klog.KObj(cp))
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+func prepareCredentialProviders(mc *clusterv1beta1.MemberCluster, cp *clusterinventory.ClusterProfile) {
+	// Check if the member cluster has a cloud environment label set.
+	_, ok := mc.Labels[useAKSOIDCIssuerFederatedAuthenticationLabelKey]
+	if !ok {
+		// AKS OIDC issuer based federated authentication is not enabled for this member cluster.
+		// No need to prepare the credential provider.
+		klog.V(2).InfoS("AKS OIDC issuer based federated authentication is not enabled for this member cluster; skipping credential provider preparation", "memberCluster", klog.KObj(mc))
+		return
+	}
+
+	env := mc.Labels[cloudEnvironmentLabelKey]
+
+	switch env {
+	case cloudEnvironmentLabelAKSPublicCloudValue:
+		// Set Azure (public cloud) specific credential provider information.
+		klog.V(2).InfoS("Preparing AKS public cloud credential provider", "memberCluster", klog.KObj(mc))
+		prepareAKSPublicCloudCredentialProvider(mc, cp)
+	case cloudEnvironmentLabelGKEValue:
+		// Set GKE specific credential provider information.
+		klog.V(2).InfoS("Preparing GKE credential provider", "memberCluster", klog.KObj(mc))
+		prepareGKECredentialProvider(mc, cp)
+	default:
+		// Unsupported cloud environment for federated authentication.
+		klog.ErrorS(fmt.Errorf("unsupported cloud environment for federated authentication"), "environment", env, "memberCluster", klog.KObj(mc))
+	}
+}
+
+func prepareAKSPublicCloudCredentialProvider(mc *clusterv1beta1.MemberCluster, cp *clusterinventory.ClusterProfile) {
+	var fedCP *clusterinventory.CredentialProvider
+
+	// Check if an entry for federated authentication is already present.
+	for idx := range cp.Status.CredentialProviders {
+		cp := cp.Status.CredentialProviders[idx]
+		if cp.Name == federatedAuthnCredentialProviderName {
+			fedCP = &cp
+			break
+		}
+	}
+
+	if fedCP == nil {
+		// Create a new credential provider entry for federated authentication.
+		cp.Status.CredentialProviders = append(cp.Status.CredentialProviders, clusterinventory.CredentialProvider{
+			Name: federatedAuthnCredentialProviderName,
+		})
+		fedCP = &cp.Status.CredentialProviders[len(cp.Status.CredentialProviders)-1]
+	}
+
+	// Set the credential provider.
+	msEntraTenantID := mc.Labels[msEntraTenantIDLabelKey]
+	configRawData, _ := json.Marshal(PartialFederatedCredentialProviderForAKSClusterConfig{
+		IDTokenIssuer:              aksOIDCIssuer,
+		CloudEnvironment:           cloudEnvironmentLabelAKSPublicCloudValue,
+		AzureTokenExchangeAudience: azureTokenExchangeAudience,
+		MSEntraTenantID:            msEntraTenantID,
+		AzureAuthorityHost:         azureAuthorityHost,
+		AzureAKSScope:              azureAKSScope,
+	})
+	fedCP.Config = runtime.RawExtension{
+		Raw: configRawData,
+	}
+}
+
+func prepareGKECredentialProvider(_ *clusterv1beta1.MemberCluster, cp *clusterinventory.ClusterProfile) {
+	var fedCP *clusterinventory.CredentialProvider
+
+	// Check if an entry for federated authentication is already present.
+	for idx := range cp.Status.CredentialProviders {
+		cp := cp.Status.CredentialProviders[idx]
+		if cp.Name == federatedAuthnCredentialProviderName {
+			fedCP = &cp
+			break
+		}
+	}
+
+	if fedCP == nil {
+		// Create a new credential provider entry for federated authentication.
+		cp.Status.CredentialProviders = append(cp.Status.CredentialProviders, clusterinventory.CredentialProvider{
+			Name: federatedAuthnCredentialProviderName,
+		})
+		fedCP = &cp.Status.CredentialProviders[len(cp.Status.CredentialProviders)-1]
+	}
+
+	// Set the credential provider.
+	configRawData, _ := json.Marshal(PartialFederatedCredentialProviderForGKEClusterConfig{
+		IDTokenIssuer:    aksOIDCIssuer,
+		CloudEnvironment: cloudEnvironmentLabelGKEValue,
+	})
+	fedCP.Config = runtime.RawExtension{
+		Raw: configRawData,
+	}
 }
 
 // syncClusterProfileCondition syncs the ClusterProfile object's condition based on the MemberCluster object's condition.
@@ -267,8 +405,26 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).Named("clusterprofile-controller").
 		For(&clusterv1beta1.MemberCluster{}).
 		Watches(&clusterinventory.ClusterProfile{}, handler.Funcs{
+			CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+				klog.V(2).InfoS("Handling a clusterProfile create event", "clusterProfile", klog.KObj(e.Object))
+				q.Add(reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: e.Object.GetName()},
+				})
+			},
+			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+				klog.V(2).InfoS("Handling a clusterProfile update event", "clusterProfile", klog.KObj(e.ObjectNew))
+				q.Add(reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: e.ObjectNew.GetName()},
+				})
+			},
 			DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 				klog.V(2).InfoS("Handling a clusterProfile delete event", "clusterProfile", klog.KObj(e.Object))
+				q.Add(reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: e.Object.GetName()},
+				})
+			},
+			GenericFunc: func(ctx context.Context, e event.GenericEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+				klog.V(2).InfoS("Handling a clusterProfile generic event", "clusterProfile", klog.KObj(e.Object))
 				q.Add(reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: e.Object.GetName()},
 				})
