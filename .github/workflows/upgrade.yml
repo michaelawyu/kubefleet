@@ -57,11 +57,11 @@ jobs:
       - name: Travel back in time to the before upgrade version
         run: |
           GIT_TAG="${{ github.event.inputs.beforeTagOrCommit }}"
-          PREVIOUS_BRANCH=$(git branch --show-current)
-          PREVIOUS_COMMIT=$(git rev-parse HEAD)
-          echo "Current at branch $PREVIOUS_BRANCH, commit $PREVIOUS_COMMIT."
+          CURRENT_BRANCH=$(git branch --show-current)
+          CURRENT_BRANCH=$(git rev-parse HEAD)
+          echo "Current at branch $CURRENT_BRANCH, commit $CURRENT_BRANCH."
 
-          echo "PREVIOUS_COMMIT=$PREVIOUS_COMMIT" >> "$GITHUB_ENV"
+          echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> "$GITHUB_ENV"
 
           if [ -z "${GIT_TAG}" ]
           then
@@ -82,8 +82,11 @@ jobs:
 
       - name: Prepare the fleet using the before upgrade version
         # Set up the Fleet using images built the older source code but with the current setup script.
+        #
+        # Note that the `git checkout` command below only checks out the `test/upgrade` directory (at
+        # the current commit); the rest of the source code is still at the before-upgrade version.
         run: |
-          git checkout $PREVIOUS_COMMIT -- test/upgrade
+          git checkout $CURRENT_BRANCH -- test/upgrade
           cd test/upgrade && chmod +x setup.sh && cd -
           ./test/upgrade/setup.sh 3
         env:
@@ -93,8 +96,8 @@ jobs:
       - name: Travel to the current state
         # Run the test suite from the current version, i.e., the commit that triggered the workflow.
         run: |
-          git checkout $PREVIOUS_COMMIT
-          echo "Checked out source code at $PREVIOUS_COMMIT."
+          git checkout $CURRENT_BRANCH
+          echo "Checked out source code at $CURRENT_BRANCH."
 
       - name: Run the Before suite
         run: cd test/upgrade/before && ginkgo -v -p . && cd -
@@ -137,11 +140,11 @@ jobs:
       - name: Travel back in time to the before upgrade version
         run: |
           GIT_TAG="${{ github.event.inputs.beforeTagOrCommit }}"
-          PREVIOUS_BRANCH=$(git branch --show-current)
-          PREVIOUS_COMMIT=$(git rev-parse HEAD)
-          echo "Current at branch $PREVIOUS_BRANCH, commit $PREVIOUS_COMMIT."
+          CURRENT_BRANCH=$(git branch --show-current)
+          CURRENT_BRANCH=$(git rev-parse HEAD)
+          echo "Current at branch $CURRENT_BRANCH, commit $CURRENT_BRANCH."
 
-          echo "PREVIOUS_COMMIT=$PREVIOUS_COMMIT" >> "$GITHUB_ENV"
+          echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> "$GITHUB_ENV"
 
           if [ -z "${GIT_TAG}" ]
           then
@@ -162,8 +165,11 @@ jobs:
 
       - name: Prepare the fleet using the before upgrade version
         # Set up the Fleet using images built the older source code but with the current setup script.
+        #
+        # Note that the `git checkout` command below only checks out the `test/upgrade` directory (at
+        # the current commit); the rest of the source code is still at the before-upgrade version.
         run: |
-          git checkout $PREVIOUS_COMMIT -- test/upgrade
+          git checkout $CURRENT_BRANCH -- test/upgrade
           cd test/upgrade && chmod +x setup.sh && cd -
           ./test/upgrade/setup.sh 3
         env:
@@ -173,8 +179,8 @@ jobs:
       - name: Travel to the current state
         # Run the test suite from the current version, i.e., the commit that triggered the workflow.
         run: |
-          git checkout $PREVIOUS_COMMIT
-          echo "Checked out source code at $PREVIOUS_COMMIT."
+          git checkout $CURRENT_BRANCH
+          echo "Checked out source code at $CURRENT_BRANCH."
 
       - name: Run the Before suite
         run: cd test/upgrade/before && ginkgo -v -p . && cd -
@@ -217,11 +223,11 @@ jobs:
       - name: Travel back in time to the before upgrade version
         run: |
           GIT_TAG="${{ github.event.inputs.beforeTagOrCommit }}"
-          PREVIOUS_BRANCH=$(git branch --show-current)
-          PREVIOUS_COMMIT=$(git rev-parse HEAD)
-          echo "Current at branch $PREVIOUS_BRANCH, commit $PREVIOUS_COMMIT."
+          CURRENT_BRANCH=$(git branch --show-current)
+          CURRENT_BRANCH=$(git rev-parse HEAD)
+          echo "Current at branch $CURRENT_BRANCH, commit $CURRENT_BRANCH."
 
-          echo "PREVIOUS_COMMIT=$PREVIOUS_COMMIT" >> "$GITHUB_ENV"
+          echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> "$GITHUB_ENV"
 
           if [ -z "${GIT_TAG}" ]
           then
@@ -242,8 +248,11 @@ jobs:
 
       - name: Prepare the fleet using the before upgrade version
         # Set up the Fleet using images built the older source code but with the current setup script.
+        #
+        # Note that the `git checkout` command below only checks out the `test/upgrade` directory (at
+        # the current commit); the rest of the source code is still at the before-upgrade version.
         run: |
-          git checkout $PREVIOUS_COMMIT -- test/upgrade
+          git checkout $CURRENT_BRANCH -- test/upgrade
           cd test/upgrade && chmod +x setup.sh && cd -
           ./test/upgrade/setup.sh 3
         env:
@@ -253,8 +262,8 @@ jobs:
       - name: Travel to the current state
         # Run the test suite from the current version, i.e., the commit that triggered the workflow.
         run: |
-          git checkout $PREVIOUS_COMMIT
-          echo "Checked out source code at $PREVIOUS_COMMIT."
+          git checkout $CURRENT_BRANCH
+          echo "Checked out source code at $CURRENT_BRANCH."
 
       - name: Run the Before suite
         run: cd test/upgrade/before && ginkgo -v -p . && cd -
