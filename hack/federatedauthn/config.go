@@ -25,50 +25,6 @@ const (
 	PluginPropertyKey            = "plugin.multicluster.k8s.io"
 )
 
-var pluginMap = map[string]PluginInterface{}
-
-/**
-func init() {
-	spiffePlugin, err := spiffe.NewPlugin()
-	if err == nil {
-		pluginMap[spiffePlugin.Name()] = spiffePlugin
-	} else {
-		utilruntime.HandleError(err)
-	}
-}
-*/
-
-/**
-// BuildConfigFromClusterProfile is to build the rest.Config to init the client.
-func BuildConfigFromClusterProfile(cluster *v1alpha1.ClusterProfile) (*rest.Config, error) {
-	// get the plugin by clusterprofile
-	plugin, err := getPluginFromClusterProfile(cluster)
-	if err != nil {
-		return nil, err
-	}
-
-	clusterEndpoint, err := getEndpointFromClusterProfile(cluster)
-	if err != nil {
-		return nil, err
-	}
-
-	config := &rest.Config{
-		Host: clusterEndpoint,
-		TLSClientConfig: rest.TLSClientConfig{
-			CAData: getCABundleFromClusterProfile(cluster),
-		},
-	}
-
-	a := newAuthenticator(plugin, cluster)
-	transportConfig, err := config.TransportConfig()
-	if err := a.UpdateTransportConfig(transportConfig); err != nil {
-		return nil, err
-	}
-
-	return config, nil
-}
-*/
-
 // code copied from https://github.com/kubernetes/kubernetes/blob/master/staging/src/k8s.io/client-go/plugin/pkg/client/auth/exec/exec.go
 // to handle token/cert expiration. It caches the token in the authenticator, and check
 // expiration upon each call, if it is expired, the plugin is called to refresh.
@@ -116,7 +72,7 @@ type Authenticator struct {
 	connTracker *connrotation.ConnectionTracker
 }
 
-func newAuthenticator(p PluginInterface, cluster *v1alpha1.ClusterProfile) *Authenticator {
+func NewAuthenticator(p PluginInterface, cluster *v1alpha1.ClusterProfile) *Authenticator {
 	connTracker := connrotation.NewConnectionTracker()
 	defaultDialer := connrotation.NewDialerWithTracker(
 		(&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -273,7 +229,7 @@ func (a *Authenticator) cert() (*tls.Certificate, error) {
 	return creds.cert, nil
 }
 
-func getCABundleFromClusterProfile(cluster *v1alpha1.ClusterProfile) []byte {
+func GetCABundleFromClusterProfile(cluster *v1alpha1.ClusterProfile) []byte {
 	caString, found := getPropertyByKey(cluster, CABunblePropertyKey)
 	if !found {
 		return []byte{}
@@ -282,7 +238,7 @@ func getCABundleFromClusterProfile(cluster *v1alpha1.ClusterProfile) []byte {
 }
 
 // endpoints is a json array string based on https://github.com/kubernetes/enhancements/pull/5185
-func getEndpointFromClusterProfile(cluster *v1alpha1.ClusterProfile) (string, error) {
+func GetEndpointFromClusterProfile(cluster *v1alpha1.ClusterProfile) (string, error) {
 	endpointsStr, found := getPropertyByKey(cluster, APIServerEndpointPropertyKey)
 	if !found {
 		return "", errors.New("no endpoint property found")

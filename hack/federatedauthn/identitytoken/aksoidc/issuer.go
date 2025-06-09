@@ -1,9 +1,10 @@
 package aksoidc
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -19,29 +20,38 @@ func (issuer *AKSOIDCIssuer) Name() string {
 	return "aks-oidc-issuer"
 }
 
-func (issuer *AKSOIDCIssuer) GetIDToken(fedCPConfig *runtime.RawExtension) (string, error) {
-	projectedSvcAccTokenPath, err := retrieveProjectedServiceAccountTokenPath(fedCPConfig)
+func (issuer *AKSOIDCIssuer) GetIDToken(fedCPConfig *runtime.RawExtension, appConfig map[string]string) (string, time.Time, error) {
+	projectedSvcAccTokenPath, projectedSvcAccTokenExpiryTime, err := retrieveProjectedServiceAccountTokenPathAndExpiryTimeFromAppConfig(appConfig)
 	if err != nil {
-		return "", fmt.Errorf("failed to retrieve projected service account token path: %w", err)
+		return "", time.Time{}, fmt.Errorf("failed to retrieve projected service account token path and expiry time: %w", err)
 	}
 
 	data, err := os.ReadFile(projectedSvcAccTokenPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to read projected service account token file at path %s: %w", projectedSvcAccTokenPath, err)
+		return "", time.Time{}, fmt.Errorf("failed to read projected service account token file at path %s: %w", projectedSvcAccTokenPath, err)
 	}
 
-	return string(data), nil
+	return string(data), projectedSvcAccTokenExpiryTime, nil
 }
 
-func retrieveProjectedServiceAccountTokenPath(fedCPConfig *runtime.RawExtension) (string, error) {
-	var marshalled map[string]string
-	if err := json.Unmarshal(fedCPConfig.Raw, &marshalled); err != nil {
-		return "", fmt.Errorf("failed to unmarshal federated authentication credential provider config: %w", err)
+func retrieveProjectedServiceAccountTokenPathAndExpiryTimeFromAppConfig(appConfig map[string]string) (string, time.Time, error) {
+	projectSvcAccTokenPath := appConfig["aksOIDCIssuerProjectedServiceAccountTokenPath"]
+	if len(projectSvcAccTokenPath) == 0 {
+		return "", time.Time{}, fmt.Errorf("aksOIDCIssuerProjectedServiceAccountTokenPath is not set in the federated authentication credential provider config")
 	}
 
-	projectSvcAccTokenPath := marshalled["projectedServiceAccountTokenPath"]
-	if len(projectSvcAccTokenPath) == 0 {
-		return "", fmt.Errorf("projectedServiceAccountTokenPath is not set in the federated authentication credential provider config")
+	ttl := appConfig["aksOIDCIssuerProjectedServiceAccountTokenTTLSeconds"]
+	if len(ttl) == 0 {
+		return "", time.Time{}, fmt.Errorf("aksOIDCIssuerProjectedServiceAccountTokenTTLSeconds is not set in the federated authentication credential provider config")
 	}
-	return projectSvcAccTokenPath, nil
+
+	// To simplify the workflow, set the expiry time to a fixed percentage of the token's expected lifetime.
+	//
+	// Note that Kubernetes will rotate the token automatically when it is close to expiry (80% of TTL).
+	ttlSeconds, err := strconv.Atoi(ttl)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("failed to parse aksOIDCIssuerProjectedServiceAccountTokenTTLSeconds: %w", err)
+	}
+	ttlSecondsDuration := int64(float64(time.Duration(ttlSeconds)*time.Second) * 0.2)
+	return projectSvcAccTokenPath, time.Now().Add(time.Duration(ttlSecondsDuration)), nil
 }

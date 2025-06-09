@@ -9,5 +9,5 @@ import (
 type Exchanger interface {
 	TargetCloudEnvironment() string
 
-	GetAccessToken(fedCPConfig *runtime.RawExtension, idToken string) (string, time.Time, error)
+	GetAccessToken(fedCPConfig *runtime.RawExtension, appConfig map[string]string, idToken string) (string, time.Time, error)
 }
