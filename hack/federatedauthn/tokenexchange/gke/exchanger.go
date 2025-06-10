@@ -120,12 +120,12 @@ func retrieveAudienceFromFedCPConfig(fedCPConfig *runtime.RawExtension) (string,
 }
 
 func retrieveDefaultCredPathAndTokenPathFromAppConfig(appConfig map[string]string) (string, string, error) {
-	defaultCredPath := appConfig["defaultCredPath"]
+	defaultCredPath := appConfig["gkeDefaultCredPath"]
 	if len(defaultCredPath) == 0 {
 		return "", "", fmt.Errorf("defaultCredPath is not set in the application config")
 	}
 
-	tokenPath := appConfig["tokenPath"]
+	tokenPath := appConfig["gkeTokenPath"]
 	if len(tokenPath) == 0 {
 		return "", "", fmt.Errorf("tokenPath is not set in the application config")
 	}
