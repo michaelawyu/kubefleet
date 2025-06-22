@@ -50,8 +50,8 @@ const (
 	// Note that requests with the same priority level will be processed in the FIFO order.
 	//
 	// TO-DO (chenyu1): evaluate if/how we need to/should prioritize requeues properly.
-	highPriorityLevel    = 0
-	mediumPriorityLevel  = 0
+	highPriorityLevel    = 2
+	mediumPriorityLevel  = 1
 	defaultPriorityLevel = 0
 )
 
