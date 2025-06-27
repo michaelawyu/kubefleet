@@ -191,7 +191,7 @@ func (r *Reconciler) refreshWorkStatus(
 
 	// Update the Work object status.
 	//
-	// As a shortcut, always update the status if there are drifts or diffs found, as KubeFleet needs
+	// As a shortcut, always update the status if there are drifts or diffs found, as KubeFleet needs to
 	// report the latest timestamp when the drifts/diffs were identified.
 	if !foundDriftsOrDiffs && equality.Semantic.DeepEqual(ogStatus, &work.Status) {
 		// No status change; skip the update.
