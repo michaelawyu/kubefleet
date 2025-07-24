@@ -26,9 +26,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -62,13 +64,22 @@ const (
 	CostPropertiesCollectionSucceededMsg        = "All cost properties have been collected successfully"
 	CostPropertiesCollectionDegradedMsgTemplate = "Cost properties are collected in a degraded mode with the following warning(s): %v"
 	CostPropertiesCollectionFailedMsgTemplate   = "An error has occurred when collecting cost properties: %v"
+
+	AvailableCapacityPropertyCollectionSucceededCondType = "AKSClusterAvailableCapacityPropertyCollectionSucceeded"
+	AvailableCapacityPropertyCollectionSucceededReason   = "AvailableCapacityCalculated"
+	AvailableCapacityPropertyCollectionFailedReason      = "FailedtoCalculateAvailableCapacity"
+	AvailableCapacityPropertyCollectionSucceededMsg      = "Available capacity has been calculated successfully"
+	AvailableCapacityPropertyCollectionFailedMsgTemplate = "An error has occurred when calculating available capacity: %s"
 )
 
 // PropertyProvider is the Azure property provider for Fleet.
 type PropertyProvider struct {
 	// The trackers.
-	podTracker  *trackers.PodTracker
-	nodeTracker *trackers.NodeTracker
+	nodeTracker        *trackers.NodeTracker
+	nodeMetricsTracker *trackers.NodeMetricsTracker
+
+	// The discovery client.
+	discoveryClient *discovery.DiscoveryClient
 
 	// The region where the Azure property provider resides.
 	//
@@ -118,6 +129,7 @@ func (p *PropertyProvider) Start(ctx context.Context, config *rest.Config) error
 		return err
 	}
 
+	// Set up the node tracker.
 	klog.V(2).Info("Setting up the node tracker")
 	if p.nodeTracker == nil {
 		klog.V(2).Info("Building a node tracker using the default AKS Karpenter pricing client")
@@ -142,10 +154,7 @@ func (p *PropertyProvider) Start(ctx context.Context, config *rest.Config) error
 		p.nodeTracker = trackers.NewNodeTracker(pp)
 	}
 
-	klog.V(2).Info("Setting up the pod tracker")
-	p.podTracker = trackers.NewPodTracker()
-
-	// Set up the node and pod reconcilers.
+	// Set up the node watcher.
 	klog.V(2).Info("Starting the node reconciler")
 	nodeReconciler := &controllers.NodeReconciler{
 		NT:     p.nodeTracker,
@@ -156,14 +165,24 @@ func (p *PropertyProvider) Start(ctx context.Context, config *rest.Config) error
 		return err
 	}
 
-	klog.V(2).Info("Starting the pod reconciler")
-	podReconciler := &controllers.PodReconciler{
-		PT:     p.podTracker,
-		Client: mgr.GetClient(),
-	}
-	if err := podReconciler.SetupWithManager(mgr); err != nil {
-		klog.ErrorS(err, "Failed to start the pod reconciler in the Azure property provider")
-		return err
+	// Set up the node metrics tracker.
+	p.nodeMetricsTracker = trackers.NewNodeMetricsTracker()
+
+	// Check if the metrics API is available is in the cluster.
+	klog.V(2).Info("Checking if the metrics API is available in the cluster")
+	_, err = p.discoveryClient.ServerResourcesForGroupVersion(metricsv1beta1.SchemeGroupVersion.String())
+	if err == nil {
+		klog.V(2).Info("Metrics API is available in the cluster; setting up the node metrics watcher")
+		nodeMetricsReconciler := &controllers.NodeMetricsReconciler{
+			NMT:    p.nodeMetricsTracker,
+			Client: mgr.GetClient(),
+		}
+		if err := nodeMetricsReconciler.SetupWithManager(mgr); err != nil {
+			klog.ErrorS(err, "Failed to start the node metrics reconciler in the Azure property provider")
+			return err
+		}
+	} else {
+		klog.ErrorS(err, "Metrics API is not available in the cluster; the node metrics watcher will not be set up")
 	}
 
 	// Start the controller manager.
@@ -196,9 +215,10 @@ func (p *PropertyProvider) Collect(_ context.Context) propertyprovider.PropertyC
 	conds := make([]metav1.Condition, 0, 1)
 
 	// Collect the non-resource properties.
+	nodeCount := p.nodeTracker.NodeCount()
 	properties := make(map[clusterv1beta1.PropertyName]clusterv1beta1.PropertyValue)
 	properties[propertyprovider.NodeCountProperty] = clusterv1beta1.PropertyValue{
-		Value:           fmt.Sprintf("%d", p.nodeTracker.NodeCount()),
+		Value:           fmt.Sprintf("%d", nodeCount),
 		ObservationTime: metav1.Now(),
 	}
 
@@ -254,26 +274,65 @@ func (p *PropertyProvider) Collect(_ context.Context) propertyprovider.PropertyC
 	resources.Capacity = p.nodeTracker.TotalCapacity()
 	resources.Allocatable = p.nodeTracker.TotalAllocatable()
 
-	requested := p.podTracker.TotalRequested()
-	available := make(corev1.ResourceList)
-	for rn := range resources.Allocatable {
-		left := resources.Allocatable[rn].DeepCopy()
-		// In some unlikely scenarios, it could happen that, due to unavoidable
-		// inconsistencies in the data collection process, the total value of a specific
-		// requested resource exceeds that of the allocatable resource, as observed by
-		// the property provider; for example, the node tracker might fail to track a node
-		// in time yet the some pods have been assigned to the pod and gets tracked by
-		// the pod tracker. In such cases, the property provider will report a zero
-		// value for the resource; and this occurrence should get fixed in the next (few)
-		// property collection iterations.
-		if left.Cmp(requested[rn]) > 0 {
-			left.Sub(requested[rn])
-		} else {
-			left = resource.Quantity{}
+	requested := p.nodeMetricsTracker.TotalRequested()
+	nodesWithRequestedRes := p.nodeMetricsTracker.TrackedNodeCount()
+	switch {
+	case nodesWithRequestedRes == 0 && nodeCount != 0:
+		// No node metrics have been tracked, even though the cluster does have nodes in presence;
+		// this could be caused by one of the following reasons:
+		// a) the metrics API is not available in the cluster; or
+		// b) the metrics API has been installed, but no metrics have been collected yet (e.g., the metrics server
+		//    might be missing or unavailable).
+		// Report this as an error to the user; no available capacity will be listed.
+		conds = append(conds, metav1.Condition{
+			Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+			Status:  metav1.ConditionFalse,
+			Reason:  AvailableCapacityPropertyCollectionFailedReason,
+			Message: fmt.Sprintf(AvailableCapacityPropertyCollectionFailedMsgTemplate, "no node metrics have been tracked; metrics API might not be installed, or metrics server is unavailable"),
+		})
+	case nodesWithRequestedRes != nodeCount:
+		// Node metrics have been tracked, but the number of nodes with metrics does not match with the
+		// number of nodes found in the cluster; this could be caused by one of the following reasons:
+		// a) metrics are missing for some nodes; or
+		// b) the property provider catches an intermediate state where some nodes are being created/deleted.
+		// Report this as an error to the user; no available capacity will be listed.
+		errDetails := fmt.Sprintf("not all nodes have metrics tracked (%d out of %d nodes)", nodesWithRequestedRes, nodeCount)
+		conds = append(conds, metav1.Condition{
+			Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+			Status:  metav1.ConditionFalse,
+			Reason:  AvailableCapacityPropertyCollectionFailedReason,
+			Message: fmt.Sprintf(AvailableCapacityPropertyCollectionFailedMsgTemplate, errDetails),
+		})
+	default:
+		// All nodes have metrics tracked; calculate the available capacity.
+		available := make(corev1.ResourceList)
+		for rn := range resources.Allocatable {
+			left := resources.Allocatable[rn].DeepCopy()
+			// In some unlikely scenarios, it could happen that, due to unavoidable
+			// inconsistencies in the data collection process, the total value of a specific
+			// requested resource exceeds that of the allocatable resource, as observed by
+			// the property provider; for example, the node tracker might fail to track a node
+			// in time yet the some pods have been assigned to the pod and gets tracked by
+			// the pod tracker. In such cases, the property provider will report a zero
+			// value for the resource; and this occurrence should get fixed in the next (few)
+			// property collection iterations.
+			if left.Cmp(requested[rn]) > 0 {
+				left.Sub(requested[rn])
+			} else {
+				left = resource.Quantity{}
+			}
+			available[rn] = left
 		}
-		available[rn] = left
+		resources.Available = available
+
+		// Add the condition.
+		conds = append(conds, metav1.Condition{
+			Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+			Status:  metav1.ConditionTrue,
+			Reason:  AvailableCapacityPropertyCollectionSucceededReason,
+			Message: AvailableCapacityPropertyCollectionSucceededMsg,
+		})
 	}
-	resources.Available = available
 
 	// Return the collection response.
 	return propertyprovider.PropertyCollectionResponse{
@@ -336,9 +395,10 @@ func (p *PropertyProvider) autoDiscoverRegionAndSetupTrackers(ctx context.Contex
 // If the region is unspecified at the time when this function is called, the provider
 // will attempt to auto-discover the region of its host cluster when the Start method is
 // called.
-func New(region *string) propertyprovider.PropertyProvider {
+func New(region *string, discoveryClient *discovery.DiscoveryClient) propertyprovider.PropertyProvider {
 	return &PropertyProvider{
-		region: region,
+		region:          region,
+		discoveryClient: discoveryClient,
 	}
 }
 
@@ -347,8 +407,9 @@ func New(region *string) propertyprovider.PropertyProvider {
 //
 // This is mostly used for allow plugging in of alternate pricing providers (one that
 // does not use the Karpenter client), and for testing purposes.
-func NewWithPricingProvider(pp trackers.PricingProvider) propertyprovider.PropertyProvider {
+func NewWithPricingProvider(pp trackers.PricingProvider, discoveryClient *discovery.DiscoveryClient) propertyprovider.PropertyProvider {
 	return &PropertyProvider{
-		nodeTracker: trackers.NewNodeTracker(pp),
+		nodeTracker:     trackers.NewNodeTracker(pp),
+		discoveryClient: discoveryClient,
 	}
 }

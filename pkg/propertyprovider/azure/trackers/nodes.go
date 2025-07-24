@@ -131,8 +131,7 @@ func NewNodeTracker(pp PricingProvider) *NodeTracker {
 // at this moment.
 //
 // b) if a node is of an unrecognizable SKU, i.e., the SKU is absent from the Azure Retail Prices
-// API reportings, the node is considered to be free of charge. This should be a very rare occurrence;
-// a warning will be issued in this case.
+// API reportings, no average cost is calculated and an error is returned.
 //
 // Note that this method assumes that the access lock has been acquired.
 func (nt *NodeTracker) calculateCosts() {
@@ -424,8 +423,8 @@ func (nt *NodeTracker) trackTotalCapacity(node *corev1.Node) bool {
 	return isCapacityChanged
 }
 
-// AddOrUpdate starts tracking a node or updates the stats about a node that has been
-// tracked.
+// AddOrUpdate starts tracking a node; or updates the tracked information of
+// a node if it has been tracked already.
 func (nt *NodeTracker) AddOrUpdate(node *corev1.Node) {
 	nt.mu.Lock()
 	defer nt.mu.Unlock()

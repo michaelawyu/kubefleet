@@ -19,18 +19,24 @@ package azure
 import (
 	"context"
 	"fmt"
+	"log"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/Azure/karpenter-provider-azure/pkg/providers/pricing"
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/scheme"
+	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/propertyprovider"
 	"github.com/kubefleet-dev/kubefleet/pkg/propertyprovider/azure/trackers"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 )
 
 const (
@@ -38,16 +44,6 @@ const (
 	nodeName2 = "node-2"
 	nodeName3 = "node-3"
 	nodeName4 = "node-4"
-
-	podName1 = "pod-1"
-	podName2 = "pod-2"
-	podName3 = "pod-3"
-	podName4 = "pod-4"
-
-	containerName1 = "container-1"
-	containerName2 = "container-2"
-	containerName3 = "container-3"
-	containerName4 = "container-4"
 
 	namespaceName1 = "work-1"
 	namespaceName2 = "work-2"
@@ -65,6 +61,16 @@ const (
 var (
 	currentTime = time.Now()
 )
+
+func TestMain(m *testing.M) {
+	// Add the K8s metrics API to the scheme so that the NodeMetrics objects can be
+	// created and used in the tests.
+	if err := metricsv1beta1.AddToScheme(scheme.Scheme); err != nil {
+		log.Fatalf("failed to add metrics v1beta1 API to scheme: %v", err)
+	}
+
+	os.Exit(m.Run())
+}
 
 // dummyPricingProvider is a mock implementation that implements the PricingProvider interface.
 type dummyPricingProvider struct{}
@@ -151,69 +157,43 @@ func TestCollect(t *testing.T) {
 			},
 		},
 	}
-	pods := []corev1.Pod{
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      podName1,
-				Namespace: namespaceName1,
-			},
-			Spec: corev1.PodSpec{
-				NodeName: nodeName1,
-				Containers: []corev1.Container{
-					{
-						Name: containerName1,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("1"),
-								corev1.ResourceMemory: resource.MustParse("2Gi"),
-							},
-						},
-					},
-					{
-						Name: containerName2,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("1.5"),
-								corev1.ResourceMemory: resource.MustParse("4Gi"),
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      podName2,
-				Namespace: namespaceName1,
-			},
-			Spec: corev1.PodSpec{
-				NodeName: nodeName2,
-				Containers: []corev1.Container{
-					{
-						Name: containerName3,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("6"),
-								corev1.ResourceMemory: resource.MustParse("16Gi"),
-							},
-						},
-					},
-				},
-			},
-		},
-	}
 
 	testCases := []struct {
 		name                         string
 		nodes                        []corev1.Node
-		pods                         []corev1.Pod
+		nodeMetrics                  []metricsv1beta1.NodeMetrics
 		pricingprovider              trackers.PricingProvider
 		wantMetricCollectionResponse propertyprovider.PropertyCollectionResponse
 	}{
 		{
-			name:            "can report properties",
-			nodes:           nodes,
-			pods:            pods,
+			name:  "can report properties",
+			nodes: nodes,
+			nodeMetrics: []metricsv1beta1.NodeMetrics{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName1,
+					},
+					Usage: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("2"),
+						corev1.ResourceMemory: resource.MustParse("8Gi"),
+					},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName2,
+					},
+					Usage: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("4"),
+						corev1.ResourceMemory: resource.MustParse("16Gi"),
+					},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+			},
 			pricingprovider: &dummyPricingProvider{},
 			wantMetricCollectionResponse: propertyprovider.PropertyCollectionResponse{
 				Properties: map[clusterv1beta1.PropertyName]clusterv1beta1.PropertyValue{
@@ -237,8 +217,8 @@ func TestCollect(t *testing.T) {
 						corev1.ResourceMemory: resource.MustParse("45.2Gi"),
 					},
 					Available: corev1.ResourceList{
-						corev1.ResourceCPU:    resource.MustParse("1.7"),
-						corev1.ResourceMemory: resource.MustParse("23.2Gi"),
+						corev1.ResourceCPU:    resource.MustParse("4.2"),
+						corev1.ResourceMemory: resource.MustParse("21.2Gi"),
 					},
 				},
 				Conditions: []metav1.Condition{
@@ -248,61 +228,42 @@ func TestCollect(t *testing.T) {
 						Reason:  CostPropertiesCollectionSucceededReason,
 						Message: CostPropertiesCollectionSucceededMsg,
 					},
+					{
+						Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+						Status:  metav1.ConditionTrue,
+						Reason:  AvailableCapacityPropertyCollectionSucceededReason,
+						Message: AvailableCapacityPropertyCollectionSucceededMsg,
+					},
 				},
 			},
 		},
 		{
 			name:  "will report zero values if the requested resources exceed the allocatable resources",
 			nodes: nodes,
-			pods: []corev1.Pod{
+			nodeMetrics: []metricsv1beta1.NodeMetrics{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      podName1,
-						Namespace: namespaceName1,
+						Name: nodeName1,
 					},
-					Spec: corev1.PodSpec{
-						NodeName: nodeName1,
-						Containers: []corev1.Container{
-							{
-								Name: containerName1,
-								Resources: corev1.ResourceRequirements{
-									Requests: corev1.ResourceList{
-										corev1.ResourceCPU:    resource.MustParse("10"),
-										corev1.ResourceMemory: resource.MustParse("20Gi"),
-									},
-								},
-							},
-							{
-								Name: containerName2,
-								Resources: corev1.ResourceRequirements{
-									Requests: corev1.ResourceList{
-										corev1.ResourceCPU:    resource.MustParse("20"),
-										corev1.ResourceMemory: resource.MustParse("20Gi"),
-									},
-								},
-							},
-						},
+					Usage: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("4"),
+						corev1.ResourceMemory: resource.MustParse("16Gi"),
 					},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      podName2,
-						Namespace: namespaceName1,
+						Name: nodeName2,
 					},
-					Spec: corev1.PodSpec{
-						NodeName: nodeName2,
-						Containers: []corev1.Container{
-							{
-								Name: containerName3,
-								Resources: corev1.ResourceRequirements{
-									Requests: corev1.ResourceList{
-										corev1.ResourceCPU:    resource.MustParse("20"),
-										corev1.ResourceMemory: resource.MustParse("20Gi"),
-									},
-								},
-							},
-						},
+					Usage: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("8"),
+						corev1.ResourceMemory: resource.MustParse("32Gi"),
 					},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
 				},
 			},
 			pricingprovider: &dummyPricingProvider{},
@@ -338,6 +299,12 @@ func TestCollect(t *testing.T) {
 						Status:  metav1.ConditionTrue,
 						Reason:  CostPropertiesCollectionSucceededReason,
 						Message: CostPropertiesCollectionSucceededMsg,
+					},
+					{
+						Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+						Status:  metav1.ConditionTrue,
+						Reason:  AvailableCapacityPropertyCollectionSucceededReason,
+						Message: AvailableCapacityPropertyCollectionSucceededMsg,
 					},
 				},
 			},
@@ -384,7 +351,26 @@ func TestCollect(t *testing.T) {
 					},
 				},
 			},
-			pods:            []corev1.Pod{},
+			nodeMetrics: []metricsv1beta1.NodeMetrics{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName1,
+					},
+					Usage: corev1.ResourceList{},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName2,
+					},
+					Usage: corev1.ResourceList{},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+			},
 			pricingprovider: &dummyPricingProvider{},
 			wantMetricCollectionResponse: propertyprovider.PropertyCollectionResponse{
 				Properties: map[clusterv1beta1.PropertyName]clusterv1beta1.PropertyValue{
@@ -414,6 +400,12 @@ func TestCollect(t *testing.T) {
 						Message: fmt.Sprintf(CostPropertiesCollectionFailedMsgTemplate,
 							fmt.Sprintf("nodes are present, but no pricing data is available for any node SKUs (%v)", []string{nodeSKU3}),
 						),
+					},
+					{
+						Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+						Status:  metav1.ConditionTrue,
+						Reason:  AvailableCapacityPropertyCollectionSucceededReason,
+						Message: AvailableCapacityPropertyCollectionSucceededMsg,
 					},
 				},
 			},
@@ -460,7 +452,26 @@ func TestCollect(t *testing.T) {
 					},
 				},
 			},
-			pods:            []corev1.Pod{},
+			nodeMetrics: []metricsv1beta1.NodeMetrics{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName1,
+					},
+					Usage: corev1.ResourceList{},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName2,
+					},
+					Usage: corev1.ResourceList{},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+			},
 			pricingprovider: &dummyPricingProvider{},
 			wantMetricCollectionResponse: propertyprovider.PropertyCollectionResponse{
 				Properties: map[clusterv1beta1.PropertyName]clusterv1beta1.PropertyValue{
@@ -490,6 +501,12 @@ func TestCollect(t *testing.T) {
 						Message: fmt.Sprintf(CostPropertiesCollectionFailedMsgTemplate,
 							fmt.Sprintf("no pricing data is available for one or more of the node SKUs (%v) in the cluster", []string{nodeSKU3}),
 						),
+					},
+					{
+						Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+						Status:  metav1.ConditionTrue,
+						Reason:  AvailableCapacityPropertyCollectionSucceededReason,
+						Message: AvailableCapacityPropertyCollectionSucceededMsg,
 					},
 				},
 			},
@@ -533,7 +550,26 @@ func TestCollect(t *testing.T) {
 					},
 				},
 			},
-			pods:            []corev1.Pod{},
+			nodeMetrics: []metricsv1beta1.NodeMetrics{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName1,
+					},
+					Usage: corev1.ResourceList{},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName2,
+					},
+					Usage: corev1.ResourceList{},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+			},
 			pricingprovider: &dummyPricingProvider{},
 			wantMetricCollectionResponse: propertyprovider.PropertyCollectionResponse{
 				Properties: map[clusterv1beta1.PropertyName]clusterv1beta1.PropertyValue{
@@ -563,6 +599,12 @@ func TestCollect(t *testing.T) {
 						Message: fmt.Sprintf(CostPropertiesCollectionFailedMsgTemplate,
 							fmt.Sprintf("no pricing data is available for one or more of the node SKUs (%v) in the cluster", []string{}),
 						),
+					},
+					{
+						Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+						Status:  metav1.ConditionTrue,
+						Reason:  AvailableCapacityPropertyCollectionSucceededReason,
+						Message: AvailableCapacityPropertyCollectionSucceededMsg,
 					},
 				},
 			},
@@ -609,7 +651,26 @@ func TestCollect(t *testing.T) {
 					},
 				},
 			},
-			pods:            []corev1.Pod{},
+			nodeMetrics: []metricsv1beta1.NodeMetrics{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName1,
+					},
+					Usage: corev1.ResourceList{},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName2,
+					},
+					Usage: corev1.ResourceList{},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+			},
 			pricingprovider: &dummyPricingProvider{},
 			wantMetricCollectionResponse: propertyprovider.PropertyCollectionResponse{
 				Properties: map[clusterv1beta1.PropertyName]clusterv1beta1.PropertyValue{
@@ -640,13 +701,44 @@ func TestCollect(t *testing.T) {
 							fmt.Sprintf("no pricing data is available for one or more of the node SKUs (%v) in the cluster", []string{nodeKnownMissingSKU}),
 						),
 					},
+					{
+						Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+						Status:  metav1.ConditionTrue,
+						Reason:  AvailableCapacityPropertyCollectionSucceededReason,
+						Message: AvailableCapacityPropertyCollectionSucceededMsg,
+					},
 				},
 			},
 		},
 		{
-			name:            "can report cost properties collection warnings (stale pricing data)",
-			nodes:           nodes,
-			pods:            pods,
+			name:  "can report cost properties collection warnings (stale pricing data)",
+			nodes: nodes,
+			nodeMetrics: []metricsv1beta1.NodeMetrics{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName1,
+					},
+					Usage: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("3"),
+						corev1.ResourceMemory: resource.MustParse("8Gi"),
+					},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: nodeName2,
+					},
+					Usage: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.MustParse("5.5"),
+						corev1.ResourceMemory: resource.MustParse("14Gi"),
+					},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
+				},
+			},
 			pricingprovider: &dummyPricingProviderWithStaleData{},
 			wantMetricCollectionResponse: propertyprovider.PropertyCollectionResponse{
 				Properties: map[clusterv1beta1.PropertyName]clusterv1beta1.PropertyValue{
@@ -685,6 +777,12 @@ func TestCollect(t *testing.T) {
 							},
 						),
 					},
+					{
+						Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+						Status:  metav1.ConditionTrue,
+						Reason:  AvailableCapacityPropertyCollectionSucceededReason,
+						Message: AvailableCapacityPropertyCollectionSucceededMsg,
+					},
 				},
 			},
 		},
@@ -696,20 +794,24 @@ func TestCollect(t *testing.T) {
 
 			// Build the trackers manually for testing purposes.
 			nodeTracker := trackers.NewNodeTracker(tc.pricingprovider)
-			podTracker := trackers.NewPodTracker()
 			for idx := range tc.nodes {
 				nodeTracker.AddOrUpdate(&tc.nodes[idx])
 			}
-			for idx := range tc.pods {
-				podTracker.AddOrUpdate(&tc.pods[idx])
+			nodeMetricsTracker := trackers.NewNodeMetricsTracker()
+			for idx := range tc.nodeMetrics {
+				nodeMetricsTracker.AddOrUpdate(&tc.nodeMetrics[idx])
 			}
 
 			p := &PropertyProvider{
-				nodeTracker: nodeTracker,
-				podTracker:  podTracker,
+				nodeTracker:        nodeTracker,
+				nodeMetricsTracker: nodeMetricsTracker,
 			}
 			res := p.Collect(ctx)
-			if diff := cmp.Diff(res, tc.wantMetricCollectionResponse, ignoreObservationTimeFieldInPropertyValue); diff != "" {
+			if diff := cmp.Diff(
+				res, tc.wantMetricCollectionResponse,
+				ignoreObservationTimeFieldInPropertyValue,
+				cmpopts.SortSlices(utils.LessFuncConditionByType),
+			); diff != "" {
 				t.Fatalf("Collect() property collection response diff (-got, +want):\n%s", diff)
 			}
 		})

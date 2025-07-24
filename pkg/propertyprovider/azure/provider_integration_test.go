@@ -31,10 +31,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/propertyprovider"
 	"github.com/kubefleet-dev/kubefleet/pkg/propertyprovider/azure/trackers"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 )
 
 var (
@@ -51,11 +53,11 @@ var (
 			return nil
 		}
 	}
-	podDeletedActual = func(namespace, name string) func() error {
+	nodeMetricsDeletedActual = func(name string) func() error {
 		return func() error {
-			pod := &corev1.Pod{}
-			if err := memberClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, pod); !errors.IsNotFound(err) {
-				return fmt.Errorf("pod has not been deleted yet")
+			nodeMetrics := &metricsv1beta1.NodeMetrics{}
+			if err := memberClient.Get(ctx, types.NamespacedName{Name: name}, nodeMetrics); !errors.IsNotFound(err) {
+				return fmt.Errorf("node metrics have not been deleted yet")
 			}
 			return nil
 		}
@@ -89,50 +91,72 @@ var (
 			}
 		}
 	}
-	shouldCreatePods = func(pods ...corev1.Pod) func() {
+	shouldCreateNodeMetrics = func(nodeMetrics ...metricsv1beta1.NodeMetrics) func() {
 		return func() {
-			for idx := range pods {
-				pod := pods[idx].DeepCopy()
-				Expect(memberClient.Create(ctx, pod)).To(Succeed(), "Failed to create pod")
+			for idx := range nodeMetrics {
+				nm := nodeMetrics[idx].DeepCopy()
+				// Set fresh timestamp and window for the metrics.
+				nm.Timestamp = metav1.Now()
+				nm.Window = metav1.Duration{Duration: time.Second * 10}
+				Expect(memberClient.Create(ctx, nm)).To(Succeed(), "Failed to create node metrics")
 			}
 		}
 	}
-	shouldBindPods = func(pods ...corev1.Pod) func() {
+	shouldCreateEmptyMetricsForNodes = func(nodes ...corev1.Node) func() {
 		return func() {
-			for idx := range pods {
-				pod := pods[idx].DeepCopy()
-				binding := &corev1.Binding{
-					Target: corev1.ObjectReference{
-						Name: pod.Spec.NodeName,
+			for idx := range nodes {
+				node := nodes[idx]
+				emptyNodeMetric := metricsv1beta1.NodeMetrics{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node.Name,
 					},
+					Usage: corev1.ResourceList{
+						corev1.ResourceCPU:    resource.Quantity{},
+						corev1.ResourceMemory: resource.Quantity{},
+					},
+					// Set fresh timestamp and window for the metrics.
+					Timestamp: metav1.Now(),
+					Window:    metav1.Duration{Duration: time.Second * 10},
 				}
-				Expect(memberClient.Get(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, pod)).To(Succeed(), "Failed to get pod")
-				Expect(memberClient.SubResource("binding").Create(ctx, pod, binding)).To(Succeed(), "Failed to bind pod to node")
+				Expect(memberClient.Create(ctx, &emptyNodeMetric)).To(Succeed(), "Failed to create empty node metrics for node %s", node.Name)
 			}
 		}
 	}
-	shouldDeletePods = func(pods ...corev1.Pod) func() {
+	emptyMetricsForNodes = func(nodes ...corev1.Node) []metricsv1beta1.NodeMetrics {
+		emptyNodeMetrics := []metricsv1beta1.NodeMetrics{}
+		for idx := range nodes {
+			node := nodes[idx]
+			emptyNodeMetrics = append(emptyNodeMetrics, metricsv1beta1.NodeMetrics{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: node.Name,
+				},
+				Usage: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.Quantity{},
+					corev1.ResourceMemory: resource.Quantity{},
+				},
+				// Set fresh timestamp and window for the metrics.
+				Timestamp: metav1.Now(),
+				Window:    metav1.Duration{Duration: time.Second * 10},
+			})
+		}
+		return emptyNodeMetrics
+	}
+	shouldDeleteMetricsForNodes = func(nodes ...corev1.Node) func() {
 		return func() {
-			for idx := range pods {
-				pod := pods[idx].DeepCopy()
-				Expect(memberClient.Get(ctx, types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, pod)).To(Succeed(), "Failed to get pod")
+			for idx := range nodes {
+				node := nodes[idx]
+				Expect(memberClient.Delete(ctx, &metricsv1beta1.NodeMetrics{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node.Name,
+					},
+				})).To(SatisfyAny(Succeed(), MatchError(errors.IsNotFound)), "Failed to delete node metrics")
 
-				// Transition the pod into a terminal state (if it has not been done).
-				if pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed {
-					pod.Status.Phase = corev1.PodSucceeded
-					Expect(memberClient.Status().Update(ctx, pod)).To(Succeed(), "Failed to update pod status")
-				}
-
-				// Delete the pod.
-				Expect(memberClient.Delete(ctx, pod)).To(SatisfyAny(Succeed(), MatchError(errors.IsNotFound)), "Failed to delete pod")
-
-				// Wait for the pod to be deleted.
-				Eventually(podDeletedActual(pod.Namespace, pod.Name), eventuallyDuration, eventuallyInterval).Should(BeNil())
+				// Wait for the node metrics to be deleted.
+				Eventually(nodeMetricsDeletedActual(node.Name), eventuallyDuration, eventuallyInterval).Should(BeNil())
 			}
 		}
-
 	}
-	shouldReportCorrectPropertiesForNodes = func(nodes []corev1.Node, pods []corev1.Pod) func() {
+	shouldReportCorrectPropertiesForNodes = func(nodes []corev1.Node, nodeMetrics []metricsv1beta1.NodeMetrics) func() {
 		return func() {
 			totalCPUCapacity := resource.Quantity{}
 			allocatableCPUCapacity := resource.Quantity{}
@@ -153,19 +177,22 @@ var (
 
 			requestedCPUCapacity := resource.Quantity{}
 			requestedMemoryCapacity := resource.Quantity{}
-			for idx := range pods {
-				pod := pods[idx]
-				for cidx := range pod.Spec.Containers {
-					c := pod.Spec.Containers[cidx]
-					requestedCPUCapacity.Add(c.Resources.Requests[corev1.ResourceCPU])
-					requestedMemoryCapacity.Add(c.Resources.Requests[corev1.ResourceMemory])
-				}
+			for idx := range nodeMetrics {
+				nm := nodeMetrics[idx]
+				requestedCPUCapacity.Add(nm.Usage[corev1.ResourceCPU])
+				requestedMemoryCapacity.Add(nm.Usage[corev1.ResourceMemory])
 			}
 
 			availableCPUCapacity := allocatableCPUCapacity.DeepCopy()
 			availableCPUCapacity.Sub(requestedCPUCapacity)
+			if availableCPUCapacity.Cmp(resource.Quantity{}) < 0 {
+				allocatableCPUCapacity = resource.Quantity{}
+			}
 			availableMemoryCapacity := allocatableMemoryCapacity.DeepCopy()
 			availableMemoryCapacity.Sub(requestedMemoryCapacity)
+			if availableMemoryCapacity.Cmp(resource.Quantity{}) < 0 {
+				allocatableMemoryCapacity = resource.Quantity{}
+			}
 
 			Eventually(func() error {
 				// Calculate the costs manually; hardcoded values cannot be used as Azure pricing
@@ -239,32 +266,51 @@ var (
 				var wantConditions []metav1.Condition
 				switch {
 				case costCollectionErr != nil:
-					wantConditions = []metav1.Condition{
-						{
-							Type:    CostPropertiesCollectionSucceededCondType,
-							Status:  metav1.ConditionFalse,
-							Reason:  CostPropertiesCollectionFailedReason,
-							Message: fmt.Sprintf(CostPropertiesCollectionFailedMsgTemplate, costCollectionErr),
-						},
-					}
+					wantConditions = append(wantConditions, metav1.Condition{
+						Type:    CostPropertiesCollectionSucceededCondType,
+						Status:  metav1.ConditionFalse,
+						Reason:  CostPropertiesCollectionFailedReason,
+						Message: fmt.Sprintf(CostPropertiesCollectionFailedMsgTemplate, costCollectionErr),
+					})
 				case len(costCollectionWarnings) > 0:
-					wantConditions = []metav1.Condition{
-						{
-							Type:    CostPropertiesCollectionSucceededCondType,
-							Status:  metav1.ConditionTrue,
-							Reason:  CostPropertiesCollectionDegradedReason,
-							Message: fmt.Sprintf(CostPropertiesCollectionDegradedMsgTemplate, costCollectionWarnings),
-						},
-					}
+					wantConditions = append(wantConditions, metav1.Condition{
+						Type:    CostPropertiesCollectionSucceededCondType,
+						Status:  metav1.ConditionTrue,
+						Reason:  CostPropertiesCollectionDegradedReason,
+						Message: fmt.Sprintf(CostPropertiesCollectionDegradedMsgTemplate, costCollectionWarnings),
+					})
 				default:
-					wantConditions = []metav1.Condition{
-						{
-							Type:    CostPropertiesCollectionSucceededCondType,
-							Status:  metav1.ConditionTrue,
-							Reason:  CostPropertiesCollectionSucceededReason,
-							Message: CostPropertiesCollectionSucceededMsg,
-						},
-					}
+					wantConditions = append(wantConditions, metav1.Condition{
+						Type:    CostPropertiesCollectionSucceededCondType,
+						Status:  metav1.ConditionTrue,
+						Reason:  CostPropertiesCollectionSucceededReason,
+						Message: CostPropertiesCollectionSucceededMsg,
+					})
+				}
+
+				switch {
+				case len(nodeMetrics) == 0 && len(nodes) != 0:
+					wantConditions = append(wantConditions, metav1.Condition{
+						Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+						Status:  metav1.ConditionFalse,
+						Reason:  AvailableCapacityPropertyCollectionFailedReason,
+						Message: fmt.Sprintf(AvailableCapacityPropertyCollectionFailedMsgTemplate, "no node metrics have been tracked; metrics API might not be installed, or metrics server is unavailable"),
+					})
+				case len(nodeMetrics) != len(nodes):
+					errDetails := fmt.Sprintf("not all nodes have metrics tracked (%d out of %d nodes)", len(nodeMetrics), len(nodes))
+					wantConditions = append(wantConditions, metav1.Condition{
+						Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+						Status:  metav1.ConditionFalse,
+						Reason:  AvailableCapacityPropertyCollectionFailedReason,
+						Message: fmt.Sprintf(AvailableCapacityPropertyCollectionFailedMsgTemplate, errDetails),
+					})
+				default:
+					wantConditions = append(wantConditions, metav1.Condition{
+						Type:    AvailableCapacityPropertyCollectionSucceededCondType,
+						Status:  metav1.ConditionTrue,
+						Reason:  AvailableCapacityPropertyCollectionSucceededReason,
+						Message: AvailableCapacityPropertyCollectionSucceededMsg,
+					})
 				}
 
 				expectedRes := propertyprovider.PropertyCollectionResponse{
@@ -287,11 +333,15 @@ var (
 				}
 
 				res := p.Collect(ctx)
-				if diff := cmp.Diff(res, expectedRes, ignoreObservationTimeFieldInPropertyValue); diff != "" {
+				if diff := cmp.Diff(
+					res, expectedRes,
+					ignoreObservationTimeFieldInPropertyValue,
+					cmpopts.SortSlices(utils.LessFuncConditionByType),
+				); diff != "" {
 					return fmt.Errorf("property collection response (-got, +want):\n%s", diff)
 				}
 				return nil
-			}, eventuallyDuration, eventuallyInterval).Should(BeNil())
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Property collection response does not match the expected one")
 		}
 	}
 )
@@ -377,6 +427,45 @@ var (
 					corev1.ResourceCPU:    resource.MustParse("1900m"),
 					corev1.ResourceMemory: resource.MustParse("4652372Ki"),
 				},
+			},
+		},
+	}
+
+	nodeMetrics = []metricsv1beta1.NodeMetrics{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName1,
+			},
+			Usage: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("2"),
+				corev1.ResourceMemory: resource.MustParse("2Gi"),
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName2,
+			},
+			Usage: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("10Gi"),
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName3,
+			},
+			Usage: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("600m"),
+				corev1.ResourceMemory: resource.MustParse("800Mi"),
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName4,
+			},
+			Usage: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1.3"),
+				corev1.ResourceMemory: resource.MustParse("1400Mi"),
 			},
 		},
 	}
@@ -610,321 +699,164 @@ var (
 			},
 		},
 	}
-
-	pods = []corev1.Pod{
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      podName1,
-				Namespace: namespaceName1,
-			},
-			Spec: corev1.PodSpec{
-				NodeName: nodeName1,
-				Containers: []corev1.Container{
-					{
-						Name:  containerName1,
-						Image: imageName,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("1"),
-								corev1.ResourceMemory: resource.MustParse("500Mi"),
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      podName2,
-				Namespace: namespaceName2,
-			},
-			Spec: corev1.PodSpec{
-				NodeName: nodeName2,
-				Containers: []corev1.Container{
-					{
-						Name:  containerName2,
-						Image: imageName,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("1.5"),
-								corev1.ResourceMemory: resource.MustParse("1Gi"),
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      podName3,
-				Namespace: namespaceName3,
-			},
-			Spec: corev1.PodSpec{
-				NodeName: nodeName3,
-				Containers: []corev1.Container{
-					{
-						Name:  containerName3,
-						Image: imageName,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("1"),
-								corev1.ResourceMemory: resource.MustParse("3Gi"),
-							},
-						},
-					},
-					{
-						Name:  containerName4,
-						Image: imageName,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("1"),
-								corev1.ResourceMemory: resource.MustParse("2Gi"),
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      podName4,
-				Namespace: namespaceName3,
-			},
-			Spec: corev1.PodSpec{
-				NodeName: nodeName4,
-				Containers: []corev1.Container{
-					{
-						Name:  containerName3,
-						Image: imageName,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("1"),
-								corev1.ResourceMemory: resource.MustParse("3Gi"),
-							},
-						},
-					},
-					{
-						Name:  containerName4,
-						Image: imageName,
-						Resources: corev1.ResourceRequirements{
-							Requests: corev1.ResourceList{
-								corev1.ResourceCPU:    resource.MustParse("1"),
-								corev1.ResourceMemory: resource.MustParse("2Gi"),
-							},
-						},
-					},
-				},
-			},
-		},
-	}
 )
 
 // All the test cases in this block are serial + ordered, as manipulation of nodes/pods
 // in one test case will disrupt another.
 var _ = Describe("azure property provider", func() {
 	Context("add a new node", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodes[0]))
+		BeforeAll(func() {
+			shouldCreateNodes(nodes[0])()
+			shouldCreateNodeMetrics(nodeMetrics[0])()
+		})
 
-		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodes[0:1], nil))
+		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodes[0:1], nodeMetrics[0:1]))
 
-		AfterAll(shouldDeleteNodes(nodes[0]))
+		AfterAll(func() {
+			shouldDeleteNodes(nodes[0])()
+			shouldDeleteMetricsForNodes(nodes[0])()
+		})
 	})
 
 	Context("add multiple nodes", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodes...))
+		BeforeAll(func() {
+			shouldCreateNodes(nodes...)()
+			shouldCreateNodeMetrics(nodeMetrics...)()
+		})
 
-		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodes, nil))
+		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodes, nodeMetrics))
 
-		AfterAll(shouldDeleteNodes(nodes...))
+		AfterAll(func() {
+			shouldDeleteNodes(nodes...)()
+			shouldDeleteMetricsForNodes(nodes...)()
+		})
 	})
 
 	Context("remove a node", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodes...))
+		BeforeAll(func() {
+			shouldCreateNodes(nodes...)()
+			shouldCreateNodeMetrics(nodeMetrics...)()
+		})
 
-		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodes, nil))
+		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodes, nodeMetrics))
 
 		It("can delete a node", shouldDeleteNodes(nodes[0]))
 
-		It("should report correct properties after deletion", shouldReportCorrectPropertiesForNodes(nodes[1:], nil))
+		It("can delete its metrics", shouldDeleteMetricsForNodes(nodes[0]))
 
-		AfterAll(shouldDeleteNodes(nodes[1:]...))
+		It("should report correct properties after deletion", shouldReportCorrectPropertiesForNodes(nodes[1:], nodeMetrics[1:]))
+
+		AfterAll(func() {
+			shouldDeleteNodes(nodes[1:]...)()
+			shouldDeleteMetricsForNodes(nodes[1:]...)()
+		})
 	})
 
 	Context("remove multiple nodes", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodes...))
+		BeforeAll(func() {
+			shouldCreateNodes(nodes...)()
+			shouldCreateNodeMetrics(nodeMetrics...)()
+		})
 
-		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodes, nil))
+		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodes, nodeMetrics))
 
 		It("can delete multiple nodes", shouldDeleteNodes(nodes[0], nodes[3]))
 
-		It("should report correct properties after deletion", shouldReportCorrectPropertiesForNodes(nodes[1:3], nil))
+		It("can delete their metrics", shouldDeleteMetricsForNodes(nodes[0], nodes[3]))
 
-		AfterAll(shouldDeleteNodes(nodes[1], nodes[2]))
-	})
+		It("should report correct properties after deletion", shouldReportCorrectPropertiesForNodes(nodes[1:3], nodeMetrics[1:3]))
 
-	Context("add a pod", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodes...))
-
-		BeforeAll(shouldCreatePods(pods[0]))
-
-		It("should report correct properties (pod bound)", shouldReportCorrectPropertiesForNodes(nodes, pods[0:1]))
-
-		AfterAll(shouldDeletePods(pods[0]))
-
-		AfterAll(shouldDeleteNodes(nodes...))
-	})
-
-	Context("add a pod (not bound)", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodes...))
-
-		BeforeAll(func() {
-			pod := pods[0].DeepCopy()
-			pod.Spec.NodeName = ""
-			Expect(memberClient.Create(ctx, pod)).To(Succeed(), "Failed to create pod")
+		AfterAll(func() {
+			shouldDeleteNodes(nodes[1], nodes[2])()
+			shouldDeleteMetricsForNodes(nodes[1], nodes[2])()
 		})
-
-		It("should report correct properties (pod not bound)", shouldReportCorrectPropertiesForNodes(nodes, nil))
-
-		It("can bind the pod", shouldBindPods(pods[0]))
-
-		It("should report correct properties (pod bound)", shouldReportCorrectPropertiesForNodes(nodes, pods[0:1]))
-
-		AfterAll(shouldDeletePods(pods[0]))
-
-		AfterAll(shouldDeleteNodes(nodes...))
-	})
-
-	Context("add multiple pods", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodes...))
-
-		BeforeAll(shouldCreatePods(pods...))
-
-		It("should report correct properties (pods bound)", shouldReportCorrectPropertiesForNodes(nodes, pods))
-
-		AfterAll(shouldDeletePods(pods...))
-
-		AfterAll(shouldDeleteNodes(nodes...))
-	})
-
-	Context("remove a pod (deleted)", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodes...))
-
-		BeforeAll(shouldCreatePods(pods[0]))
-
-		It("should report correct properties (pod bound)", shouldReportCorrectPropertiesForNodes(nodes, pods[0:1]))
-
-		It("can delete the pod", shouldDeletePods(pods[0]))
-
-		It("should report correct properties (pod deleted)", shouldReportCorrectPropertiesForNodes(nodes, nil))
-
-		AfterAll(shouldDeleteNodes(nodes...))
-	})
-
-	Context("remove a pod (succeeded)", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodes...))
-
-		BeforeAll(shouldCreatePods(pods[0]))
-
-		It("should report correct properties (pod bound)", shouldReportCorrectPropertiesForNodes(nodes, pods[0:1]))
-
-		It("can transition the pod to the succeeded state", func() {
-			pod := pods[0].DeepCopy()
-			pod.Status.Phase = corev1.PodSucceeded
-			Expect(memberClient.Status().Update(ctx, pod)).To(Succeed(), "Failed to update pod status")
-		})
-
-		It("should report correct properties (pod succeeded)", shouldReportCorrectPropertiesForNodes(nodes, nil))
-
-		AfterAll(shouldDeletePods(pods[0]))
-
-		AfterAll(shouldDeleteNodes(nodes...))
-	})
-
-	Context("remove a pod (failed)", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodes...))
-
-		BeforeAll(shouldCreatePods(pods[0]))
-
-		It("should report correct properties (pod bound)", shouldReportCorrectPropertiesForNodes(nodes, pods[0:1]))
-
-		It("can transition the pod to the failed state", func() {
-			pod := pods[0].DeepCopy()
-			pod.Status.Phase = corev1.PodFailed
-			Expect(memberClient.Status().Update(ctx, pod)).To(Succeed(), "Failed to update pod status")
-		})
-
-		It("should report correct properties (pod failed)", shouldReportCorrectPropertiesForNodes(nodes, nil))
-
-		AfterAll(shouldDeletePods(pods[0]))
-
-		AfterAll(shouldDeleteNodes(nodes...))
-	})
-
-	Context("remove multiple pods", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodes...))
-
-		BeforeAll(shouldCreatePods(pods...))
-
-		It("should report correct properties (pods bound)", shouldReportCorrectPropertiesForNodes(nodes, pods))
-
-		It("can delete multiple pods", shouldDeletePods(pods[1], pods[2]))
-
-		It("should report correct properties (pods deleted)", shouldReportCorrectPropertiesForNodes(nodes, []corev1.Pod{pods[0], pods[3]}))
-
-		AfterAll(shouldDeletePods(pods[0], pods[3]))
-
-		AfterAll(shouldDeleteNodes(nodes...))
 	})
 
 	Context("nodes with some unsupported SKUs", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodesWithSomeUnsupportedSKUs...))
+		BeforeAll(func() {
+			shouldCreateNodes(nodesWithSomeUnsupportedSKUs...)()
+			shouldCreateEmptyMetricsForNodes(nodesWithSomeUnsupportedSKUs...)()
+		})
 
-		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithSomeUnsupportedSKUs, nil))
+		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithSomeUnsupportedSKUs, emptyMetricsForNodes(nodesWithSomeUnsupportedSKUs...)))
 
-		AfterAll(shouldDeleteNodes(nodesWithSomeUnsupportedSKUs...))
+		AfterAll(func() {
+			shouldDeleteNodes(nodesWithSomeUnsupportedSKUs...)()
+			shouldDeleteMetricsForNodes(nodesWithSomeUnsupportedSKUs...)()
+		})
 	})
 
 	Context("nodes with some empty SKUs", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodesWithSomeEmptySKUs...))
+		BeforeAll(func() {
+			shouldCreateNodes(nodesWithSomeEmptySKUs...)()
+			shouldCreateEmptyMetricsForNodes(nodesWithSomeEmptySKUs...)()
+		})
 
-		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithSomeEmptySKUs, nil))
+		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithSomeEmptySKUs, emptyMetricsForNodes(nodesWithSomeEmptySKUs...)))
 
-		AfterAll(shouldDeleteNodes(nodesWithSomeEmptySKUs...))
+		AfterAll(func() {
+			shouldDeleteNodes(nodesWithSomeEmptySKUs...)()
+			shouldDeleteMetricsForNodes(nodesWithSomeEmptySKUs...)()
+		})
 	})
 
 	Context("nodes with all unsupported SKUs", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodesWithAllUnsupportedSKUs...))
+		BeforeAll(func() {
+			shouldCreateNodes(nodesWithAllUnsupportedSKUs...)()
+			shouldCreateEmptyMetricsForNodes(nodesWithAllUnsupportedSKUs...)()
+		})
 
-		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithAllUnsupportedSKUs, nil))
+		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithAllUnsupportedSKUs, emptyMetricsForNodes(nodesWithAllUnsupportedSKUs...)))
 
-		AfterAll(shouldDeleteNodes(nodesWithAllUnsupportedSKUs...))
+		AfterAll(func() {
+			shouldDeleteNodes(nodesWithAllUnsupportedSKUs...)()
+			shouldDeleteMetricsForNodes(nodesWithAllUnsupportedSKUs...)()
+		})
 	})
 
 	Context("nodes with all empty SKUs", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodesWithAllEmptySKUs...))
+		BeforeAll(func() {
+			shouldCreateNodes(nodesWithAllEmptySKUs...)()
+			shouldCreateEmptyMetricsForNodes(nodesWithAllEmptySKUs...)()
+		})
 
-		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithAllEmptySKUs, nil))
+		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithAllEmptySKUs, emptyMetricsForNodes(nodesWithAllEmptySKUs...)))
 
-		AfterAll(shouldDeleteNodes(nodesWithAllEmptySKUs...))
+		AfterAll(func() {
+			shouldDeleteNodes(nodesWithAllEmptySKUs...)()
+			shouldDeleteMetricsForNodes(nodesWithAllEmptySKUs...)()
+		})
 	})
 
 	// This covers a known issue with Azure Retail Prices API, where some deprecated SKUs are no longer
 	// reported by the API, but can still be used in an AKS cluster.
 	Context("nodes with some known missing SKUs", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodesWithSomeKnownMissingSKUs...))
+		BeforeAll(func() {
+			shouldCreateNodes(nodesWithSomeKnownMissingSKUs...)()
+			shouldCreateEmptyMetricsForNodes(nodesWithSomeKnownMissingSKUs...)()
+		})
 
-		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithSomeKnownMissingSKUs, nil))
+		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithSomeKnownMissingSKUs, emptyMetricsForNodes(nodesWithSomeKnownMissingSKUs...)))
 
-		AfterAll(shouldDeleteNodes(nodesWithSomeKnownMissingSKUs...))
+		AfterAll(func() {
+			shouldDeleteNodes(nodesWithSomeKnownMissingSKUs...)()
+			shouldDeleteMetricsForNodes(nodesWithSomeKnownMissingSKUs...)()
+		})
 	})
 
 	// This covers a known issue with Azure Retail Prices API, where some deprecated SKUs are no longer
 	// reported by the API, but can still be used in an AKS cluster.
 	Context("nodes with all known missing SKUs", Serial, Ordered, func() {
-		BeforeAll(shouldCreateNodes(nodesWithAllKnownMissingSKUs...))
+		BeforeAll(func() {
+			shouldCreateNodes(nodesWithAllKnownMissingSKUs...)()
+			shouldCreateEmptyMetricsForNodes(nodesWithAllKnownMissingSKUs...)()
+		})
 
-		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithAllKnownMissingSKUs, nil))
+		It("should report correct properties", shouldReportCorrectPropertiesForNodes(nodesWithAllKnownMissingSKUs, emptyMetricsForNodes(nodesWithAllKnownMissingSKUs...)))
 
-		AfterAll(shouldDeleteNodes(nodesWithAllKnownMissingSKUs...))
+		AfterAll(func() {
+			shouldDeleteNodes(nodesWithAllKnownMissingSKUs...)()
+			shouldDeleteMetricsForNodes(nodesWithAllKnownMissingSKUs...)()
+		})
 	})
 })

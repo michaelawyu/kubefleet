@@ -74,15 +74,14 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	// case of temporary inconsistency where the amount of requested resource exceed the
 	// allocatable capacity.
 
-	// Track the node. If it has been tracked, update its total and allocatable capacity
-	// information with the tracker.
+	// Track a node. If it has been tracked, update its information as necessary.
 	//
-	// Note that normally the capacity information remains immutable before object
-	// creation; the tracker update only serves as a sanity check.
+	// Note that in most cases, a node's SKU and total/allocatable capacities
+	// are immutable after the node is created; however, the node tracker will still
+	// attempt to update the information for completeness reasons.
 	//
 	// Also note that the tracker will attempt to track the node even if it has been
-	// marked for deletion, as cordoned, or as unschedulable. This behavior is consistent with
-	// the original Fleet setup.
+	// marked for deletion, as cordoned, or as unschedulable.
 	klog.V(2).InfoS("Attempt to track the node", "node", nodeRef)
 	r.NT.AddOrUpdate(node)
 

@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -94,7 +95,17 @@ var _ = BeforeSuite(func() {
 
 	// Start the test cluster.
 	memberTestEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "config", "crd", "bases")},
+		// Install the following CRDs:
+		// * All Fleet CRDs.
+		// * The NodeMetrics CRD, from the Kubernetes metrics API (v1beta1 version only).
+		//   Normally the metrics API is implemented in the K8s cluster as an API aggregation layer
+		//   (such as the case with K8s metrics server); however, the API aggregation layer is not
+		//   available in our integration test environment, and to verify the behaviors, a manually
+		//   prepared CRD is needed.
+		CRDDirectoryPaths: []string{
+			filepath.Join("..", "..", "..", "config", "crd", "bases"),
+			"crds",
+		},
 		ErrorIfCRDPathMissing: true,
 	}
 	memberCfg, err := memberTestEnv.Start()
@@ -111,7 +122,8 @@ var _ = BeforeSuite(func() {
 
 	// Start the Azure property provider.
 	pp = trackers.NewAKSKarpenterPricingClient(ctx, region)
-	p = NewWithPricingProvider(pp)
+	discoveryClient := discovery.NewDiscoveryClientForConfigOrDie(memberCfg)
+	p = NewWithPricingProvider(pp, discoveryClient)
 	Expect(p.Start(ctx, memberCfg)).To(Succeed())
 })
 

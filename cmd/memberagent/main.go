@@ -40,6 +40,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
+	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -112,6 +113,7 @@ func init() {
 	utilruntime.Must(workv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(clusterv1beta1.AddToScheme(scheme))
 	utilruntime.Must(placementv1beta1.AddToScheme(scheme))
+	utilruntime.Must(metricsv1beta1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 
 	metrics.Registry.MustRegister(
@@ -461,7 +463,7 @@ func Start(ctx context.Context, hubCfg, memberConfig *rest.Config, hubOpts, memb
 			// the specific instance wins the leader election.
 			klog.V(1).InfoS("Property Provider is azure, loading cloud config", "cloudConfigFile", *cloudConfigFile)
 			// TODO (britaniar): load cloud config for Azure property provider.
-			pp = azure.New(region)
+			pp = azure.New(region, discoverClient)
 		default:
 			// Fall back to not using any property provider if the provided type is none or
 			// not recognizable.
