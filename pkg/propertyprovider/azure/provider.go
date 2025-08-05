@@ -123,7 +123,7 @@ func (p *PropertyProvider) Start(ctx context.Context, config *rest.Config) error
 						pod.ObjectMeta.OwnerReferences = nil
 						pod.ObjectMeta.ManagedFields = nil
 
-						// Drop the pod status.
+						// Drop the rest of the pod status as they are irrelevant to the pod watcher.
 						pod.Status = corev1.PodStatus{
 							Phase: pod.Status.Phase,
 						}
