@@ -51,7 +51,7 @@ func TestRefreshWorkStatus(t *testing.T) {
 
 	workNS := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: memberReservedNSName,
+			Name: memberReservedNSName1,
 		},
 	}
 
@@ -78,7 +78,7 @@ func TestRefreshWorkStatus(t *testing.T) {
 			work: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       workName,
-					Namespace:  memberReservedNSName,
+					Namespace:  memberReservedNSName1,
 					Generation: 1,
 				},
 			},
@@ -148,7 +148,7 @@ func TestRefreshWorkStatus(t *testing.T) {
 			work: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       workName,
-					Namespace:  memberReservedNSName,
+					Namespace:  memberReservedNSName1,
 					Generation: 2,
 				},
 			},
@@ -238,7 +238,7 @@ func TestRefreshWorkStatus(t *testing.T) {
 			work: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      workName,
-					Namespace: memberReservedNSName,
+					Namespace: memberReservedNSName1,
 				},
 			},
 			bundles: []*manifestProcessingBundle{
@@ -379,7 +379,7 @@ func TestRefreshWorkStatus(t *testing.T) {
 			work: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       workName,
-					Namespace:  memberReservedNSName,
+					Namespace:  memberReservedNSName1,
 					Generation: 2,
 				},
 				Status: fleetv1beta1.WorkStatus{
@@ -557,7 +557,7 @@ func TestRefreshWorkStatus(t *testing.T) {
 			work: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       workName,
-					Namespace:  memberReservedNSName,
+					Namespace:  memberReservedNSName1,
 					Generation: 2,
 				},
 				Spec: fleetv1beta1.WorkSpec{
@@ -668,7 +668,7 @@ func TestRefreshWorkStatus(t *testing.T) {
 			work: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       workName,
-					Namespace:  memberReservedNSName,
+					Namespace:  memberReservedNSName1,
 					Generation: 2,
 				},
 				Spec: fleetv1beta1.WorkSpec{
@@ -767,7 +767,7 @@ func TestRefreshWorkStatus(t *testing.T) {
 			work: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       workName,
-					Namespace:  memberReservedNSName,
+					Namespace:  memberReservedNSName1,
 					Generation: 2,
 				},
 				Spec: fleetv1beta1.WorkSpec{
@@ -931,7 +931,7 @@ func TestRefreshWorkStatus(t *testing.T) {
 			work: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       workName,
-					Namespace:  memberReservedNSName,
+					Namespace:  memberReservedNSName1,
 					Generation: 2,
 				},
 				Spec: fleetv1beta1.WorkSpec{
@@ -1086,7 +1086,7 @@ func TestRefreshWorkStatus(t *testing.T) {
 				Build()
 			r := &Reconciler{
 				hubClient:     fakeClient,
-				workNameSpace: memberReservedNSName,
+				workNameSpace: memberReservedNSName1,
 			}
 
 			err := r.refreshWorkStatus(ctx, tc.work, tc.bundles)
@@ -1095,7 +1095,7 @@ func TestRefreshWorkStatus(t *testing.T) {
 			}
 
 			updatedWork := &fleetv1beta1.Work{}
-			if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: memberReservedNSName, Name: workName}, updatedWork); err != nil {
+			if err := fakeClient.Get(ctx, types.NamespacedName{Namespace: memberReservedNSName1, Name: workName}, updatedWork); err != nil {
 				t.Fatalf("Work Get() = %v, want no error", err)
 			}
 			opts := []cmp.Option{
