@@ -84,6 +84,10 @@ type PropertyProvider struct {
 	// The controller manager in use by the Azure property provider; this field is mostly reserved for
 	// testing purposes.
 	mgr ctrl.Manager
+	// The names in use by the controllers managed by the property provider; these fields are exposed
+	// to avoid name conflicts, though at this moment are mostly reserved for testing purposes.
+	nodeControllerName string
+	podControllerName  string
 }
 
 // Verify that the Azure property provider implements the MetricProvider interface at compile time.
@@ -162,7 +166,7 @@ func (p *PropertyProvider) Start(ctx context.Context, config *rest.Config) error
 		NT:     p.nodeTracker,
 		Client: mgr.GetClient(),
 	}
-	if err := nodeReconciler.SetupWithManager(mgr); err != nil {
+	if err := nodeReconciler.SetupWithManager(mgr, p.nodeControllerName); err != nil {
 		klog.ErrorS(err, "Failed to start the node reconciler in the Azure property provider")
 		return err
 	}
@@ -186,7 +190,7 @@ func (p *PropertyProvider) Start(ctx context.Context, config *rest.Config) error
 			PT:     p.podTracker,
 			Client: mgr.GetClient(),
 		}
-		if err := podReconciler.SetupWithManager(mgr); err != nil {
+		if err := podReconciler.SetupWithManager(mgr, p.podControllerName); err != nil {
 			klog.ErrorS(err, "Failed to start the pod reconciler in the Azure property provider")
 			return err
 		}
@@ -399,7 +403,10 @@ func New(
 	isCostCollectionEnabled, isAvailableResourcesCollectionEnabled bool,
 ) propertyprovider.PropertyProvider {
 	return &PropertyProvider{
-		region:                                region,
+		region: region,
+		// Use the default names.
+		nodeControllerName:                    "azure-property-provider-node-watcher",
+		podControllerName:                     "azure-property-provider-pod-watcher",
 		isCostCollectionEnabled:               isCostCollectionEnabled,
 		isAvailableResourcesCollectionEnabled: isAvailableResourcesCollectionEnabled,
 	}
@@ -412,10 +419,13 @@ func New(
 // does not use the Karpenter client), and for testing purposes.
 func NewWithPricingProvider(
 	pp trackers.PricingProvider,
+	nodeControllerName, podControllerName string,
 	isCostCollectionEnabled, isAvailableResourcesCollectionEnabled bool,
 ) propertyprovider.PropertyProvider {
 	return &PropertyProvider{
 		nodeTracker:                           trackers.NewNodeTracker(pp),
+		nodeControllerName:                    nodeControllerName,
+		podControllerName:                     podControllerName,
 		isCostCollectionEnabled:               isCostCollectionEnabled,
 		isAvailableResourcesCollectionEnabled: isAvailableResourcesCollectionEnabled,
 	}
