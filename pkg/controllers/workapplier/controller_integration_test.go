@@ -1489,7 +1489,7 @@ var _ = Describe("applying manifests", func() {
 			malformedConfigMapJSON := marshalK8sObjJSON(malformedConfigMap)
 
 			// Create a new Work object with all the manifest JSONs and proper apply strategy.
-			createWorkObject(workName, nil, regularNSJSON, malformedConfigMapJSON)
+			createWorkObject(workName, memberReservedNSName1, nil, regularNSJSON, malformedConfigMapJSON)
 		})
 
 		It("should add cleanup finalizer to the Work object", func() {
@@ -1508,7 +1508,7 @@ var _ = Describe("applying manifests", func() {
 			Consistently(func() error {
 				configMap := &corev1.ConfigMap{}
 				objKey := client.ObjectKey{Namespace: nsName, Name: malformedConfigMap.Name}
-				if err := memberClient.Get(ctx, objKey, configMap); !errors.IsNotFound(err) {
+				if err := memberClient1.Get(ctx, objKey, configMap); !errors.IsNotFound(err) {
 					return fmt.Errorf("the config map exists, or an unexpected error has occurred: %w", err)
 				}
 				return nil
@@ -1520,7 +1520,7 @@ var _ = Describe("applying manifests", func() {
 			regularNSObjectAppliedActual := regularNSObjectAppliedActual(nsName, appliedWorkOwnerRef)
 			Eventually(regularNSObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the namespace object")
 
-			Expect(memberClient.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
+			Expect(memberClient1.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
 		})
 
 		It("should update the Work object status", func() {
@@ -1605,7 +1605,7 @@ var _ = Describe("applying manifests", func() {
 
 		AfterAll(func() {
 			// Delete the Work object and related resources.
-			deleteWorkObject(workName)
+			deleteWorkObject(workName, memberReservedNSName1)
 
 			// Ensure that the AppliedWork object has been removed.
 			appliedWorkRemovedActual := appliedWorkRemovedActual(workName, nsName)
@@ -5670,7 +5670,7 @@ var _ = Describe("report diff", func() {
 			applyStrategy := &fleetv1beta1.ApplyStrategy{
 				Type: fleetv1beta1.ApplyStrategyTypeReportDiff,
 			}
-			createWorkObject(workName, applyStrategy, regularNSJSON, malformedConfigMapJSON)
+			createWorkObject(workName, memberReservedNSName1, applyStrategy, regularNSJSON, malformedConfigMapJSON)
 		})
 
 		It("should add cleanup finalizer to the Work object", func() {
@@ -5689,7 +5689,7 @@ var _ = Describe("report diff", func() {
 			Consistently(func() error {
 				configMap := &corev1.ConfigMap{}
 				objKey := client.ObjectKey{Namespace: nsName, Name: malformedConfigMap.Name}
-				if err := memberClient.Get(ctx, objKey, configMap); !errors.IsNotFound(err) {
+				if err := memberClient1.Get(ctx, objKey, configMap); !errors.IsNotFound(err) {
 					return fmt.Errorf("the config map exists, or an unexpected error has occurred: %w", err)
 				}
 				return nil
@@ -5768,7 +5768,7 @@ var _ = Describe("report diff", func() {
 
 		AfterAll(func() {
 			// Delete the Work object and related resources.
-			deleteWorkObject(workName)
+			deleteWorkObject(workName, memberReservedNSName1)
 
 			// Ensure that the AppliedWork object has been removed.
 			appliedWorkRemovedActual := appliedWorkRemovedActual(workName, nsName)

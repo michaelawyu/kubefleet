@@ -135,7 +135,7 @@ var _ = Describe("exponential backoff", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeApplied,
 							Status:             metav1.ConditionFalse,
-							Reason:             string(ManifestProcessingApplyResultTypeFailedToTakeOver),
+							Reason:             string(ApplyOrReportDiffResTypeFailedToTakeOver),
 							ObservedGeneration: 0,
 						},
 					},
@@ -343,13 +343,13 @@ var _ = Describe("exponential backoff", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeApplied,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingApplyResultTypeApplied),
+							Reason:             string(ApplyOrReportDiffResTypeApplied),
 							ObservedGeneration: 0,
 						},
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
