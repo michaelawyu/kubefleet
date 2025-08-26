@@ -79,7 +79,7 @@ var _ = Describe("placing wrapped resources using a CRP", func() {
 					Finalizers: []string{customDeletionBlockerFinalizer},
 				},
 				Spec: placementv1beta1.PlacementSpec{
-					ResourceSelectors: []placementv1beta1.ClusterResourceSelector{
+					ResourceSelectors: []placementv1beta1.ResourceSelectorTerm{
 						{
 							Group:   "",
 							Kind:    "Namespace",
@@ -131,7 +131,7 @@ var _ = Describe("placing wrapped resources using a CRP", func() {
 					Namespace: workNamespaceName,
 				},
 			}
-			crpStatusUpdatedActual := customizedCRPStatusUpdatedActual(crpName, wantSelectedResources, allMemberClusterNames, nil, "0", true)
+			crpStatusUpdatedActual := customizedPlacementStatusUpdatedActual(types.NamespacedName{Name: crpName}, wantSelectedResources, allMemberClusterNames, nil, "0", true)
 			Eventually(crpStatusUpdatedActual, workloadEventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update CRP status as expected")
 		})
 
@@ -176,7 +176,7 @@ var _ = Describe("placing wrapped resources using a CRP", func() {
 		})
 
 		It("should update CRP status as success again", func() {
-			crpStatusUpdatedActual := customizedCRPStatusUpdatedActual(crpName, wantSelectedResources, allMemberClusterNames, nil, "2", true)
+			crpStatusUpdatedActual := customizedPlacementStatusUpdatedActual(types.NamespacedName{Name: crpName}, wantSelectedResources, allMemberClusterNames, nil, "2", true)
 			Eventually(crpStatusUpdatedActual, workloadEventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update CRP status as expected")
 		})
 
@@ -200,7 +200,7 @@ var _ = Describe("placing wrapped resources using a CRP", func() {
 		It("should remove placed resources from all member clusters", checkIfRemovedWorkResourcesFromAllMemberClusters)
 
 		It("should remove controller finalizers from CRP", func() {
-			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromCRPActual(crpName)
+			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromPlacementActual(types.NamespacedName{Name: crpName})
 			Eventually(finalizerRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove controller finalizers from CRP")
 		})
 
@@ -325,7 +325,7 @@ var _ = Describe("placing wrapped resources using a CRP", func() {
 							Condition: metav1.Condition{
 								Type:               string(placementv1beta1.PerClusterAvailableConditionType),
 								Status:             metav1.ConditionFalse,
-								Reason:             string(workapplier.ManifestProcessingAvailabilityResultTypeNotYetAvailable),
+								Reason:             string(workapplier.AvailabilityResultTypeNotYetAvailable),
 								ObservedGeneration: 1,
 							},
 						},
@@ -348,10 +348,10 @@ var _ = Describe("placing wrapped resources using a CRP", func() {
 				},
 			}
 			wantStatus := placementv1beta1.PlacementStatus{
-				Conditions:            crpNotAvailableConditions(1, false),
-				PlacementStatuses:     PlacementStatuses,
-				SelectedResources:     wantSelectedResources,
-				ObservedResourceIndex: "0",
+				Conditions:                  crpNotAvailableConditions(1, false),
+				PerClusterPlacementStatuses: PlacementStatuses,
+				SelectedResources:           wantSelectedResources,
+				ObservedResourceIndex:       "0",
 			}
 
 			Eventually(func() error {
@@ -360,7 +360,7 @@ var _ = Describe("placing wrapped resources using a CRP", func() {
 					return err
 				}
 
-				if diff := cmp.Diff(crp.Status, wantStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, wantStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -470,11 +470,11 @@ var _ = Describe("placing wrapped resources using a CRP", func() {
 
 				wantStatus := placementv1beta1.PlacementStatus{
 					Conditions: crpWorkSynchronizedFailedConditions(crp.Generation, false),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementWorkSynchronizedFailedConditions(crp.Generation, false),
+							Conditions:            perClusterWorkSynchronizedFailedConditions(crp.Generation, false),
 						},
 					},
 					SelectedResources: []placementv1beta1.ResourceIdentifier{
@@ -493,7 +493,7 @@ var _ = Describe("placing wrapped resources using a CRP", func() {
 					},
 					ObservedResourceIndex: "0",
 				}
-				if diff := cmp.Diff(crp.Status, wantStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, wantStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -590,7 +590,7 @@ var _ = Describe("Process objects with generate name", Ordered, func() {
 
 			wantStatus := placementv1beta1.PlacementStatus{
 				Conditions: crpAppliedFailedConditions(crp.Generation),
-				PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+				PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 					{
 						ClusterName:           memberCluster1EastProdName,
 						ObservedResourceIndex: "0",
@@ -609,12 +609,12 @@ var _ = Describe("Process objects with generate name", Ordered, func() {
 								Condition: metav1.Condition{
 									Type:               placementv1beta1.WorkConditionTypeApplied,
 									Status:             metav1.ConditionFalse,
-									Reason:             string(workapplier.ManifestProcessingApplyResultTypeFoundGenerateName),
+									Reason:             string(workapplier.ApplyOrReportDiffResTypeFoundGenerateName),
 									ObservedGeneration: 0,
 								},
 							},
 						},
-						Conditions: resourcePlacementApplyFailedConditions(crp.Generation),
+						Conditions: perClusterApplyFailedConditions(crp.Generation),
 					},
 				},
 				SelectedResources: []placementv1beta1.ResourceIdentifier{
@@ -633,7 +633,7 @@ var _ = Describe("Process objects with generate name", Ordered, func() {
 				},
 				ObservedResourceIndex: "0",
 			}
-			if diff := cmp.Diff(crp.Status, wantStatus, crpStatusCmpOptions...); diff != "" {
+			if diff := cmp.Diff(crp.Status, wantStatus, placementStatusCmpOptions...); diff != "" {
 				return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 			}
 			return nil
@@ -689,7 +689,7 @@ func checkForRolloutStuckOnOneFailedClusterStatus(wantSelectedResources []placem
 			Condition: metav1.Condition{
 				Type:   placementv1beta1.WorkConditionTypeApplied,
 				Status: metav1.ConditionFalse,
-				Reason: string(workapplier.ManifestProcessingApplyResultTypeFailedToApply),
+				Reason: string(workapplier.ApplyOrReportDiffResTypeFailedToApply),
 			},
 		},
 	}
@@ -700,16 +700,16 @@ func checkForRolloutStuckOnOneFailedClusterStatus(wantSelectedResources []placem
 			return err
 		}
 		wantCRPConditions := crpRolloutStuckConditions(crp.Generation)
-		if diff := cmp.Diff(crp.Status.Conditions, wantCRPConditions, crpStatusCmpOptions...); diff != "" {
+		if diff := cmp.Diff(crp.Status.Conditions, wantCRPConditions, placementStatusCmpOptions...); diff != "" {
 			return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 		}
 		// check the selected resources is still right
-		if diff := cmp.Diff(crp.Status.SelectedResources, wantSelectedResources, crpStatusCmpOptions...); diff != "" {
+		if diff := cmp.Diff(crp.Status.SelectedResources, wantSelectedResources, placementStatusCmpOptions...); diff != "" {
 			return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 		}
 		// check the placement status has a failed placement
 		applyFailed := false
-		for _, placementStatus := range crp.Status.PlacementStatuses {
+		for _, placementStatus := range crp.Status.PerClusterPlacementStatuses {
 			if len(placementStatus.FailedPlacements) != 0 {
 				applyFailed = true
 			}
@@ -717,22 +717,22 @@ func checkForRolloutStuckOnOneFailedClusterStatus(wantSelectedResources []placem
 		if !applyFailed {
 			return fmt.Errorf("CRP status does not have failed placement")
 		}
-		for _, placementStatus := range crp.Status.PlacementStatuses {
+		for _, placementStatus := range crp.Status.PerClusterPlacementStatuses {
 			// this is the cluster that got the new enveloped resource that was malformed
 			if len(placementStatus.FailedPlacements) != 0 {
-				if diff := cmp.Diff(placementStatus.FailedPlacements, wantFailedResourcePlacement, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(placementStatus.FailedPlacements, wantFailedResourcePlacement, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				// check that the applied error message is correct
 				if !strings.Contains(placementStatus.FailedPlacements[0].Condition.Message, "field is immutable") {
 					return fmt.Errorf("CRP failed resource placement does not have unsupported scope message")
 				}
-				if diff := cmp.Diff(placementStatus.Conditions, resourcePlacementApplyFailedConditions(crp.Generation), crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(placementStatus.Conditions, perClusterApplyFailedConditions(crp.Generation), placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 			} else {
 				// the cluster is stuck behind a rollout schedule since we now have 1 cluster that is not in applied ready status
-				if diff := cmp.Diff(placementStatus.Conditions, resourcePlacementSyncPendingConditions(crp.Generation), crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(placementStatus.Conditions, perClusterSyncPendingConditions(crp.Generation), placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 			}

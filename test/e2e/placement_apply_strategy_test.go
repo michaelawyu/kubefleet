@@ -82,7 +82,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 
 		AfterAll(func() {
 			By(fmt.Sprintf("deleting placement %s", crpName))
-			cleanupCRP(crpName)
+			cleanupPlacement(types.NamespacedName{Name: crpName})
 
 			By("deleting created work resources on member cluster")
 			cleanWorkResourcesOnCluster(allMemberClusters[0])
@@ -116,7 +116,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 		})
 
 		It("should remove controller finalizers from CRP", func() {
-			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromCRPActual(crpName)
+			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromPlacementActual(types.NamespacedName{Name: crpName})
 			Eventually(finalizerRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove controller finalizers from CRP %s", crpName)
 		})
 
@@ -141,7 +141,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 
 		AfterAll(func() {
 			By(fmt.Sprintf("deleting placement %s", crpName))
-			cleanupCRP(crpName)
+			cleanupPlacement(types.NamespacedName{Name: crpName})
 		})
 
 		It("should update CRP status as expected", func() {
@@ -170,7 +170,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 		It("should remove the selected resources on member clusters", checkIfRemovedWorkResourcesFromAllMemberClusters)
 
 		It("should remove controller finalizers from CRP", func() {
-			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromCRPActual(crpName)
+			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromPlacementActual(types.NamespacedName{Name: crpName})
 			Eventually(finalizerRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove controller finalizers from CRP %s", crpName)
 		})
 	})
@@ -194,7 +194,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 
 		AfterAll(func() {
 			By(fmt.Sprintf("deleting placement %s", crpName))
-			cleanupCRP(crpName)
+			cleanupPlacement(types.NamespacedName{Name: crpName})
 		})
 
 		It("should update CRP status as expected", func() {
@@ -223,7 +223,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 		It("should remove the selected resources on member clusters", checkIfRemovedWorkResourcesFromAllMemberClusters)
 
 		It("should remove controller finalizers from CRP", func() {
-			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromCRPActual(crpName)
+			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromPlacementActual(types.NamespacedName{Name: crpName})
 			Eventually(finalizerRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove controller finalizers from CRP %s", crpName)
 		})
 	})
@@ -247,7 +247,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 
 		AfterAll(func() {
 			By(fmt.Sprintf("deleting placement %s", crpName))
-			cleanupCRP(crpName)
+			cleanupPlacement(types.NamespacedName{Name: crpName})
 
 			By("deleting created work resources on member cluster")
 			cleanWorkResourcesOnCluster(allMemberClusters[0])
@@ -264,7 +264,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 				appConfigMapName := fmt.Sprintf(appConfigMapNameTemplate, GinkgoParallelProcess())
 				wantStatus := placementv1beta1.PlacementStatus{
 					Conditions: crpAppliedFailedConditions(crp.Generation),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
@@ -278,22 +278,22 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 									Condition: metav1.Condition{
 										Type:               placementv1beta1.WorkConditionTypeApplied,
 										Status:             metav1.ConditionFalse,
-										Reason:             string(workapplier.ManifestProcessingApplyResultTypeFailedToTakeOver),
+										Reason:             string(workapplier.ApplyOrReportDiffResTypeFailedToTakeOver),
 										ObservedGeneration: 0,
 									},
 								},
 							},
-							Conditions: resourcePlacementApplyFailedConditions(crp.Generation),
+							Conditions: perClusterApplyFailedConditions(crp.Generation),
 						},
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crp.Generation, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crp.Generation, true, false),
 						},
 						{
 							ClusterName:           memberCluster3WestProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crp.Generation, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crp.Generation, true, false),
 						},
 					},
 					SelectedResources: []placementv1beta1.ResourceIdentifier{
@@ -311,7 +311,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 					},
 					ObservedResourceIndex: "0",
 				}
-				if diff := cmp.Diff(crp.Status, wantStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, wantStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -336,7 +336,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 		})
 
 		It("should remove controller finalizers from CRP", func() {
-			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromCRPActual(crpName)
+			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromPlacementActual(types.NamespacedName{Name: crpName})
 			Eventually(finalizerRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove controller finalizers from CRP %s", crpName)
 		})
 
@@ -376,7 +376,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 
 		AfterAll(func() {
 			By(fmt.Sprintf("deleting placement %s", crpName))
-			cleanupCRP(crpName)
+			cleanupPlacement(types.NamespacedName{Name: crpName})
 
 			By("deleting created work resources on member cluster")
 			cleanWorkResourcesOnCluster(allMemberClusters[0])
@@ -412,7 +412,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 		})
 
 		It("should remove controller finalizers from CRP", func() {
-			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromCRPActual(crpName)
+			finalizerRemovedActual := allFinalizersExceptForCustomDeletionBlockerRemovedFromPlacementActual(types.NamespacedName{Name: crpName})
 			Eventually(finalizerRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove controller finalizers from CRP %s", crpName)
 		})
 
@@ -501,11 +501,11 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpAppliedFailedConditions(crpGeneration),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+							Conditions:            perClusterApplyFailedConditions(crpGeneration),
 							FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -516,7 +516,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 									Condition: metav1.Condition{
 										Type:   string(placementv1beta1.PerClusterAppliedConditionType),
 										Status: metav1.ConditionFalse,
-										Reason: string(workapplier.ManifestProcessingApplyResultTypeFailedToTakeOver),
+										Reason: string(workapplier.ApplyOrReportDiffResTypeFailedToTakeOver),
 									},
 								},
 								{
@@ -529,7 +529,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 									Condition: metav1.Condition{
 										Type:   string(placementv1beta1.PerClusterAppliedConditionType),
 										Status: metav1.ConditionFalse,
-										Reason: string(workapplier.ManifestProcessingApplyResultTypeFailedToTakeOver),
+										Reason: string(workapplier.ApplyOrReportDiffResTypeFailedToTakeOver),
 									},
 								},
 							},
@@ -546,7 +546,7 @@ var _ = Describe("validating CRP when resources exists", Ordered, func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(conflictedCRP.Generation)
 
-				if diff := cmp.Diff(conflictedCRP.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(conflictedCRP.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -968,11 +968,11 @@ var _ = Describe("switching apply strategies", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpAppliedFailedConditions(crpGeneration),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+							Conditions:            perClusterApplyFailedConditions(crpGeneration),
 							FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -983,7 +983,7 @@ var _ = Describe("switching apply strategies", func() {
 									Condition: metav1.Condition{
 										Type:   string(placementv1beta1.PerClusterAppliedConditionType),
 										Status: metav1.ConditionFalse,
-										Reason: string(workapplier.ManifestProcessingApplyResultTypeNotTakenOver),
+										Reason: string(workapplier.ApplyOrReportDiffResTypeNotTakenOver),
 									},
 								},
 							},
@@ -991,7 +991,7 @@ var _ = Describe("switching apply strategies", func() {
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 					},
 					ObservedResourceIndex: "0",
@@ -1005,7 +1005,7 @@ var _ = Describe("switching apply strategies", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -1035,11 +1035,11 @@ var _ = Describe("switching apply strategies", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpRolloutStuckConditions(crpGeneration),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "1",
-							Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+							Conditions:            perClusterApplyFailedConditions(crpGeneration),
 							FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1050,7 +1050,7 @@ var _ = Describe("switching apply strategies", func() {
 									Condition: metav1.Condition{
 										Type:   string(placementv1beta1.PerClusterAppliedConditionType),
 										Status: metav1.ConditionFalse,
-										Reason: string(workapplier.ManifestProcessingApplyResultTypeNotTakenOver),
+										Reason: string(workapplier.ApplyOrReportDiffResTypeNotTakenOver),
 									},
 								},
 							},
@@ -1058,7 +1058,7 @@ var _ = Describe("switching apply strategies", func() {
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "1",
-							Conditions:            resourcePlacementSyncPendingConditions(crpGeneration),
+							Conditions:            perClusterSyncPendingConditions(crpGeneration),
 						},
 					},
 					ObservedResourceIndex: "1",
@@ -1072,7 +1072,7 @@ var _ = Describe("switching apply strategies", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -1106,16 +1106,16 @@ var _ = Describe("switching apply strategies", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpDiffReportedConditions(crpGeneration, false),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "1",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 						},
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "1",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 							DiffedPlacements: []placementv1beta1.DiffedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1147,7 +1147,7 @@ var _ = Describe("switching apply strategies", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -1217,11 +1217,11 @@ var _ = Describe("switching apply strategies", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpDiffReportedConditions(crpGeneration, false),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 							DiffedPlacements: []placementv1beta1.DiffedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1256,7 +1256,7 @@ var _ = Describe("switching apply strategies", func() {
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 							DiffedPlacements: []placementv1beta1.DiffedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1299,7 +1299,7 @@ var _ = Describe("switching apply strategies", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -1329,11 +1329,11 @@ var _ = Describe("switching apply strategies", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpDiffReportedConditions(crpGeneration, false),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "1",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 							DiffedPlacements: []placementv1beta1.DiffedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1354,7 +1354,7 @@ var _ = Describe("switching apply strategies", func() {
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "1",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 							DiffedPlacements: []placementv1beta1.DiffedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1397,7 +1397,7 @@ var _ = Describe("switching apply strategies", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -1431,16 +1431,16 @@ var _ = Describe("switching apply strategies", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpRolloutCompletedConditions(crpGeneration, false),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "1",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "1",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 					},
 					ObservedResourceIndex: "1",
@@ -1454,7 +1454,7 @@ var _ = Describe("switching apply strategies", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil

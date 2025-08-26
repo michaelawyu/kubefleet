@@ -182,11 +182,11 @@ var _ = Describe("take over existing resources", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpAppliedFailedConditions(crpGeneration),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+							Conditions:            perClusterApplyFailedConditions(crpGeneration),
 							FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -199,7 +199,7 @@ var _ = Describe("take over existing resources", func() {
 										Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 										Status:             metav1.ConditionFalse,
 										ObservedGeneration: 0,
-										Reason:             string(workapplier.ManifestProcessingApplyResultTypeFailedToTakeOver),
+										Reason:             string(workapplier.ApplyOrReportDiffResTypeFailedToTakeOver),
 									},
 								},
 							},
@@ -225,12 +225,12 @@ var _ = Describe("take over existing resources", func() {
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 						{
 							ClusterName:           memberCluster3WestProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 					},
 					ObservedResourceIndex: "0",
@@ -244,7 +244,7 @@ var _ = Describe("take over existing resources", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -354,11 +354,11 @@ var _ = Describe("take over existing resources", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpAppliedFailedConditions(crpGeneration),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+							Conditions:            perClusterApplyFailedConditions(crpGeneration),
 							FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -370,7 +370,7 @@ var _ = Describe("take over existing resources", func() {
 										Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 										Status:             metav1.ConditionFalse,
 										ObservedGeneration: 0,
-										Reason:             string(workapplier.ManifestProcessingApplyResultTypeFailedToTakeOver),
+										Reason:             string(workapplier.ApplyOrReportDiffResTypeFailedToTakeOver),
 									},
 								},
 								{
@@ -384,7 +384,7 @@ var _ = Describe("take over existing resources", func() {
 										Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 										Status:             metav1.ConditionFalse,
 										ObservedGeneration: 0,
-										Reason:             string(workapplier.ManifestProcessingApplyResultTypeFailedToTakeOver),
+										Reason:             string(workapplier.ApplyOrReportDiffResTypeFailedToTakeOver),
 									},
 								},
 							},
@@ -424,12 +424,12 @@ var _ = Describe("take over existing resources", func() {
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 						{
 							ClusterName:           memberCluster3WestProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 					},
 					ObservedResourceIndex: "0",
@@ -443,7 +443,7 @@ var _ = Describe("take over existing resources", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -559,11 +559,11 @@ var _ = Describe("detect drifts on placed resources", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpRolloutCompletedConditions(crpGeneration, false),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 							FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 							DriftedPlacements: []placementv1beta1.DriftedResourcePlacement{
 								{
@@ -585,12 +585,12 @@ var _ = Describe("detect drifts on placed resources", func() {
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 						{
 							ClusterName:           memberCluster3WestProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 					},
 					ObservedResourceIndex: "0",
@@ -604,7 +604,7 @@ var _ = Describe("detect drifts on placed resources", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -698,11 +698,11 @@ var _ = Describe("detect drifts on placed resources", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpAppliedFailedConditions(crpGeneration),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+							Conditions:            perClusterApplyFailedConditions(crpGeneration),
 							FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -715,7 +715,7 @@ var _ = Describe("detect drifts on placed resources", func() {
 										Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 										Status:             metav1.ConditionFalse,
 										ObservedGeneration: 0,
-										Reason:             string(workapplier.ManifestProcessingApplyResultTypeFoundDrifts),
+										Reason:             string(workapplier.ApplyOrReportDiffResTypeFoundDrifts),
 									},
 								},
 							},
@@ -741,12 +741,12 @@ var _ = Describe("detect drifts on placed resources", func() {
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 						{
 							ClusterName:           memberCluster3WestProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 					},
 					ObservedResourceIndex: "0",
@@ -760,7 +760,7 @@ var _ = Describe("detect drifts on placed resources", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -882,11 +882,11 @@ var _ = Describe("detect drifts on placed resources", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpAppliedFailedConditions(crpGeneration),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+							Conditions:            perClusterApplyFailedConditions(crpGeneration),
 							FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 								{
 									ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -898,7 +898,7 @@ var _ = Describe("detect drifts on placed resources", func() {
 										Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 										Status:             metav1.ConditionFalse,
 										ObservedGeneration: 0,
-										Reason:             string(workapplier.ManifestProcessingApplyResultTypeFoundDrifts),
+										Reason:             string(workapplier.ApplyOrReportDiffResTypeFoundDrifts),
 									},
 								},
 								{
@@ -912,7 +912,7 @@ var _ = Describe("detect drifts on placed resources", func() {
 										Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 										Status:             metav1.ConditionFalse,
 										ObservedGeneration: 0,
-										Reason:             string(workapplier.ManifestProcessingApplyResultTypeFoundDrifts),
+										Reason:             string(workapplier.ApplyOrReportDiffResTypeFoundDrifts),
 									},
 								},
 							},
@@ -952,12 +952,12 @@ var _ = Describe("detect drifts on placed resources", func() {
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 						{
 							ClusterName:           memberCluster3WestProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+							Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						},
 					},
 					ObservedResourceIndex: "0",
@@ -971,7 +971,7 @@ var _ = Describe("detect drifts on placed resources", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -1087,11 +1087,11 @@ var _ = Describe("report diff mode", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpDiffReportedConditions(crpGeneration, false),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 							FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 							DiffedPlacements: []placementv1beta1.DiffedResourcePlacement{
 								{
@@ -1129,7 +1129,7 @@ var _ = Describe("report diff mode", func() {
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 							FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 							DiffedPlacements: []placementv1beta1.DiffedResourcePlacement{
 								{
@@ -1164,7 +1164,7 @@ var _ = Describe("report diff mode", func() {
 						{
 							ClusterName:           memberCluster3WestProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 							FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 							DiffedPlacements: []placementv1beta1.DiffedResourcePlacement{
 								{
@@ -1208,7 +1208,7 @@ var _ = Describe("report diff mode", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -1296,18 +1296,18 @@ var _ = Describe("report diff mode", func() {
 				return &placementv1beta1.PlacementStatus{
 					Conditions:        crpDiffReportedConditions(crpGeneration, false),
 					SelectedResources: workResourceIdentifiers(),
-					PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+					PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 						{
 							ClusterName:           memberCluster1EastProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 							FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 							DiffedPlacements:      []placementv1beta1.DiffedResourcePlacement{},
 						},
 						{
 							ClusterName:           memberCluster2EastCanaryName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 							FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 							DiffedPlacements: []placementv1beta1.DiffedResourcePlacement{
 								{
@@ -1342,7 +1342,7 @@ var _ = Describe("report diff mode", func() {
 						{
 							ClusterName:           memberCluster3WestProdName,
 							ObservedResourceIndex: "0",
-							Conditions:            resourcePlacementDiffReportedConditions(crpGeneration),
+							Conditions:            perClusterDiffReportedConditions(crpGeneration),
 							FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 							DiffedPlacements: []placementv1beta1.DiffedResourcePlacement{
 								{
@@ -1386,7 +1386,7 @@ var _ = Describe("report diff mode", func() {
 				}
 				wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-				if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+				if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 					return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 				}
 				return nil
@@ -1513,11 +1513,11 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 						Group:     "apps",
 					},
 				},
-				PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+				PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 					{
 						ClusterName:           memberCluster1EastProdName,
 						ObservedResourceIndex: "0",
-						Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+						Conditions:            perClusterApplyFailedConditions(crpGeneration),
 						FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 							{
 								ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1531,7 +1531,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 									Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 									Status:             metav1.ConditionFalse,
 									ObservedGeneration: 1,
-									Reason:             string(workapplier.ManifestProcessingApplyResultTypeFailedToTakeOver),
+									Reason:             string(workapplier.ApplyOrReportDiffResTypeFailedToTakeOver),
 								},
 							},
 						},
@@ -1558,7 +1558,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 					{
 						ClusterName:           memberCluster2EastCanaryName,
 						ObservedResourceIndex: "0",
-						Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+						Conditions:            perClusterApplyFailedConditions(crpGeneration),
 						FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 							{
 								ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1572,7 +1572,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 									Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 									Status:             metav1.ConditionFalse,
 									ObservedGeneration: 2,
-									Reason:             string(workapplier.ManifestProcessingApplyResultTypeFoundDrifts),
+									Reason:             string(workapplier.ApplyOrReportDiffResTypeFoundDrifts),
 								},
 							},
 						},
@@ -1599,7 +1599,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 					{
 						ClusterName:           memberCluster3WestProdName,
 						ObservedResourceIndex: "0",
-						Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+						Conditions:            perClusterApplyFailedConditions(crpGeneration),
 						FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 							{
 								ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1611,7 +1611,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 									Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 									Status:             metav1.ConditionFalse,
 									ObservedGeneration: 0,
-									Reason:             string(workapplier.ManifestProcessingApplyResultTypeFailedToTakeOver),
+									Reason:             string(workapplier.ApplyOrReportDiffResTypeFailedToTakeOver),
 								},
 							},
 							{
@@ -1626,7 +1626,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 									Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 									Status:             metav1.ConditionFalse,
 									ObservedGeneration: 2,
-									Reason:             string(workapplier.ManifestProcessingApplyResultTypeFoundDrifts),
+									Reason:             string(workapplier.ApplyOrReportDiffResTypeFoundDrifts),
 								},
 							},
 						},
@@ -1679,12 +1679,12 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 			}
 			wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-			if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+			if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 				return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 			}
 
 			// Populate the timestamps.
-			for _, placementStatus := range crp.Status.PlacementStatuses {
+			for _, placementStatus := range crp.Status.PerClusterPlacementStatuses {
 				switch placementStatus.ClusterName {
 				case memberCluster1EastProdName:
 					lastDeployDiffObservedTimeOnCluster1 = placementStatus.DiffedPlacements[0].ObservationTime
@@ -1760,11 +1760,11 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 						Namespace: nsName,
 					},
 				},
-				PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+				PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 					{
 						ClusterName:           memberCluster1EastProdName,
 						ObservedResourceIndex: "0",
-						Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+						Conditions:            perClusterApplyFailedConditions(crpGeneration),
 						FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 							{
 								ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1778,7 +1778,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 									Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 									Status:             metav1.ConditionFalse,
 									ObservedGeneration: 2,
-									Reason:             string(workapplier.ManifestProcessingApplyResultTypeFailedToTakeOver),
+									Reason:             string(workapplier.ApplyOrReportDiffResTypeFailedToTakeOver),
 								},
 							},
 						},
@@ -1805,7 +1805,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 					{
 						ClusterName:           memberCluster2EastCanaryName,
 						ObservedResourceIndex: "0",
-						Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+						Conditions:            perClusterApplyFailedConditions(crpGeneration),
 						FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 							{
 								ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1819,7 +1819,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 									Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 									Status:             metav1.ConditionFalse,
 									ObservedGeneration: 3,
-									Reason:             string(workapplier.ManifestProcessingApplyResultTypeFoundDrifts),
+									Reason:             string(workapplier.ApplyOrReportDiffResTypeFoundDrifts),
 								},
 							},
 						},
@@ -1846,7 +1846,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 					{
 						ClusterName:           memberCluster3WestProdName,
 						ObservedResourceIndex: "0",
-						Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+						Conditions:            perClusterApplyFailedConditions(crpGeneration),
 						FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 							{
 								ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -1858,7 +1858,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 									Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 									Status:             metav1.ConditionFalse,
 									ObservedGeneration: 0,
-									Reason:             string(workapplier.ManifestProcessingApplyResultTypeFailedToTakeOver),
+									Reason:             string(workapplier.ApplyOrReportDiffResTypeFailedToTakeOver),
 								},
 							},
 							{
@@ -1873,7 +1873,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 									Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 									Status:             metav1.ConditionFalse,
 									ObservedGeneration: 2,
-									Reason:             string(workapplier.ManifestProcessingApplyResultTypeFoundDrifts),
+									Reason:             string(workapplier.ApplyOrReportDiffResTypeFoundDrifts),
 								},
 							},
 						},
@@ -1926,12 +1926,12 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 			}
 			wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-			if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+			if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 				return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 			}
 
 			// Populate the timestamps.
-			for _, placementStatus := range crp.Status.PlacementStatuses {
+			for _, placementStatus := range crp.Status.PerClusterPlacementStatuses {
 				switch placementStatus.ClusterName {
 				case memberCluster1EastProdName:
 					refreshedLastDeployDiffObservedTimeOnCluster1 = placementStatus.DiffedPlacements[0].ObservationTime
@@ -1997,25 +1997,25 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 						Namespace: nsName,
 					},
 				},
-				PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+				PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 					{
 						ClusterName:           memberCluster1EastProdName,
 						ObservedResourceIndex: "0",
-						Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+						Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 						DiffedPlacements:      []placementv1beta1.DiffedResourcePlacement{},
 					},
 					{
 						ClusterName:           memberCluster2EastCanaryName,
 						ObservedResourceIndex: "0",
-						Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+						Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 						DriftedPlacements:     []placementv1beta1.DriftedResourcePlacement{},
 					},
 					{
 						ClusterName:           memberCluster3WestProdName,
 						ObservedResourceIndex: "0",
-						Conditions:            resourcePlacementApplyFailedConditions(crpGeneration),
+						Conditions:            perClusterApplyFailedConditions(crpGeneration),
 						FailedPlacements: []placementv1beta1.FailedResourcePlacement{
 							{
 								ResourceIdentifier: placementv1beta1.ResourceIdentifier{
@@ -2027,7 +2027,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 									Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 									Status:             metav1.ConditionFalse,
 									ObservedGeneration: 0,
-									Reason:             string(workapplier.ManifestProcessingApplyResultTypeFailedToTakeOver),
+									Reason:             string(workapplier.ApplyOrReportDiffResTypeFailedToTakeOver),
 								},
 							},
 							{
@@ -2042,7 +2042,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 									Type:               string(placementv1beta1.PerClusterAppliedConditionType),
 									Status:             metav1.ConditionFalse,
 									ObservedGeneration: 2,
-									Reason:             string(workapplier.ManifestProcessingApplyResultTypeFoundDrifts),
+									Reason:             string(workapplier.ApplyOrReportDiffResTypeFoundDrifts),
 								},
 							},
 						},
@@ -2095,7 +2095,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 			}
 			wantCRPStatus := buildWantCRPStatus(crp.Generation)
 
-			if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+			if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 				return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 			}
 			return nil
@@ -2151,25 +2151,25 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 						Namespace: nsName,
 					},
 				},
-				PlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
+				PerClusterPlacementStatuses: []placementv1beta1.PerClusterPlacementStatus{
 					{
 						ClusterName:           memberCluster1EastProdName,
 						ObservedResourceIndex: observedResourceIndex,
-						Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+						Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 						DiffedPlacements:      []placementv1beta1.DiffedResourcePlacement{},
 					},
 					{
 						ClusterName:           memberCluster2EastCanaryName,
 						ObservedResourceIndex: observedResourceIndex,
-						Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+						Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 						DriftedPlacements:     []placementv1beta1.DriftedResourcePlacement{},
 					},
 					{
 						ClusterName:           memberCluster3WestProdName,
 						ObservedResourceIndex: observedResourceIndex,
-						Conditions:            resourcePlacementRolloutCompletedConditions(crpGeneration, true, false),
+						Conditions:            perClusterRolloutCompletedConditions(crpGeneration, true, false),
 						FailedPlacements:      []placementv1beta1.FailedResourcePlacement{},
 						DiffedPlacements:      []placementv1beta1.DiffedResourcePlacement{},
 						DriftedPlacements:     []placementv1beta1.DriftedResourcePlacement{},
@@ -2189,7 +2189,7 @@ var _ = Describe("mixed diff and drift reportings", Ordered, func() {
 			// for comparison.
 			wantCRPStatus := buildWantCRPStatus(crp.Generation, crp.Status.ObservedResourceIndex)
 
-			if diff := cmp.Diff(crp.Status, *wantCRPStatus, crpStatusCmpOptions...); diff != "" {
+			if diff := cmp.Diff(crp.Status, *wantCRPStatus, placementStatusCmpOptions...); diff != "" {
 				return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
 			}
 			return nil

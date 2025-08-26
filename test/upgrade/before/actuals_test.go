@@ -387,10 +387,10 @@ func customizedCRPStatusUpdatedActual(crpName string,
 		// * The CRP is of the PickN placement type and the required N count cannot be fulfilled; or
 		// * The CRP is of the PickFixed placement type and the list of target clusters specified cannot be fulfilled.
 		wantStatus := placementv1beta1.PlacementStatus{
-			Conditions:            wantCRPConditions,
-			PlacementStatuses:     wantPlacementStatus,
-			SelectedResources:     wantSelectedResourceIdentifiers,
-			ObservedResourceIndex: wantObservedResourceIndex,
+			Conditions:                  wantCRPConditions,
+			PerClusterPlacementStatuses: wantPlacementStatus,
+			SelectedResources:           wantSelectedResourceIdentifiers,
+			ObservedResourceIndex:       wantObservedResourceIndex,
 		}
 		if diff := cmp.Diff(crp.Status, wantStatus, crpStatusCmpOptions...); diff != "" {
 			return fmt.Errorf("CRP status diff (-got, +want): %s", diff)
@@ -428,7 +428,7 @@ func crpWithOneFailedAvailabilityCheckStatusUpdatedActual(
 							Status: metav1.ConditionFalse,
 							// The new and old applier uses the same reason string to make things
 							// a bit easier.
-							Reason:             string(workapplier.ManifestProcessingAvailabilityResultTypeNotYetAvailable),
+							Reason:             string(workapplier.AvailabilityResultTypeNotYetAvailable),
 							ObservedGeneration: wantFailedResourceObservedGeneration,
 						},
 					},
@@ -444,10 +444,10 @@ func crpWithOneFailedAvailabilityCheckStatusUpdatedActual(
 		}
 
 		wantStatus := placementv1beta1.PlacementStatus{
-			Conditions:            crpNotAvailableConditions(crp.Generation, false),
-			PlacementStatuses:     wantPlacementStatus,
-			SelectedResources:     wantSelectedResourceIdentifiers,
-			ObservedResourceIndex: wantObservedResourceIndex,
+			Conditions:                  crpNotAvailableConditions(crp.Generation, false),
+			PerClusterPlacementStatuses: wantPlacementStatus,
+			SelectedResources:           wantSelectedResourceIdentifiers,
+			ObservedResourceIndex:       wantObservedResourceIndex,
 		}
 
 		if diff := cmp.Diff(crp.Status, wantStatus, crpStatusCmpOptions...); diff != "" {
@@ -486,7 +486,7 @@ func crpWithOneFailedApplyOpStatusUpdatedActual(
 							Status: metav1.ConditionFalse,
 							// The new and old applier uses the same reason string to make things
 							// a bit easier.
-							Reason:             string(workapplier.ManifestProcessingApplyResultTypeFailedToApply),
+							Reason:             string(workapplier.ApplyOrReportDiffResTypeFailedToApply),
 							ObservedGeneration: wantFailedResourceObservedGeneration,
 						},
 					},
@@ -502,10 +502,10 @@ func crpWithOneFailedApplyOpStatusUpdatedActual(
 		}
 
 		wantStatus := placementv1beta1.PlacementStatus{
-			Conditions:            crpNotAppliedConditions(crp.Generation),
-			PlacementStatuses:     wantPlacementStatus,
-			SelectedResources:     wantSelectedResourceIdentifiers,
-			ObservedResourceIndex: wantObservedResourceIndex,
+			Conditions:                  crpNotAppliedConditions(crp.Generation),
+			PerClusterPlacementStatuses: wantPlacementStatus,
+			SelectedResources:           wantSelectedResourceIdentifiers,
+			ObservedResourceIndex:       wantObservedResourceIndex,
 		}
 
 		if diff := cmp.Diff(crp.Status, wantStatus, crpStatusCmpOptions...); diff != "" {
@@ -578,7 +578,7 @@ func crpWithStuckRolloutDueToOneFailedAvailabilityCheckStatusUpdatedActual(
 						Status: metav1.ConditionFalse,
 						// The new and old applier uses the same reason string to make things
 						// a bit easier.
-						Reason:             string(workapplier.ManifestProcessingAvailabilityResultTypeNotYetAvailable),
+						Reason:             string(workapplier.AvailabilityResultTypeNotYetAvailable),
 						ObservedGeneration: failedResourceObservedGeneration,
 					},
 				},
@@ -624,10 +624,10 @@ func crpWithStuckRolloutDueToOneFailedAvailabilityCheckStatusUpdatedActual(
 		}
 
 		wantStatus := placementv1beta1.PlacementStatus{
-			Conditions:            wantCRPConditions,
-			PlacementStatuses:     wantPlacementStatus,
-			SelectedResources:     wantSelectedResourceIdentifiers,
-			ObservedResourceIndex: wantObservedResourceIndex,
+			Conditions:                  wantCRPConditions,
+			PerClusterPlacementStatuses: wantPlacementStatus,
+			SelectedResources:           wantSelectedResourceIdentifiers,
+			ObservedResourceIndex:       wantObservedResourceIndex,
 		}
 
 		if diff := cmp.Diff(crp.Status, wantStatus, crpWithStuckRolloutStatusCmpOptions...); diff != "" {
@@ -694,7 +694,7 @@ func crpWithStuckRolloutDueToOneFailedApplyOpStatusUpdatedActual(
 						Status: metav1.ConditionFalse,
 						// The new and old applier uses the same reason string to make things
 						// a bit easier.
-						Reason:             string(workapplier.ManifestProcessingApplyResultTypeFailedToApply),
+						Reason:             string(workapplier.ApplyOrReportDiffResTypeFailedToApply),
 						ObservedGeneration: failedResourceObservedGeneration,
 					},
 				},
@@ -740,10 +740,10 @@ func crpWithStuckRolloutDueToOneFailedApplyOpStatusUpdatedActual(
 		}
 
 		wantStatus := placementv1beta1.PlacementStatus{
-			Conditions:            wantCRPConditions,
-			PlacementStatuses:     wantPlacementStatus,
-			SelectedResources:     wantSelectedResourceIdentifiers,
-			ObservedResourceIndex: wantObservedResourceIndex,
+			Conditions:                  wantCRPConditions,
+			PerClusterPlacementStatuses: wantPlacementStatus,
+			SelectedResources:           wantSelectedResourceIdentifiers,
+			ObservedResourceIndex:       wantObservedResourceIndex,
 		}
 
 		if diff := cmp.Diff(crp.Status, wantStatus, crpWithStuckRolloutStatusCmpOptions...); diff != "" {
@@ -804,10 +804,10 @@ func crpWithStuckRolloutDueToUntrackableResourcesStatusUpdatedActual(
 		}
 
 		wantStatus := placementv1beta1.PlacementStatus{
-			Conditions:            wantCRPConditions,
-			PlacementStatuses:     wantPlacementStatus,
-			SelectedResources:     wantSelectedResourceIdentifiers,
-			ObservedResourceIndex: wantObservedResourceIndex,
+			Conditions:                  wantCRPConditions,
+			PerClusterPlacementStatuses: wantPlacementStatus,
+			SelectedResources:           wantSelectedResourceIdentifiers,
+			ObservedResourceIndex:       wantObservedResourceIndex,
 		}
 
 		if diff := cmp.Diff(crp.Status, wantStatus, crpWithStuckRolloutStatusCmpOptions...); diff != "" {
