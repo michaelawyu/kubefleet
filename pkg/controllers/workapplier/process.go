@@ -67,7 +67,7 @@ func (r *Reconciler) processManifests(
 	for idx := range processingWaves {
 		bundlesInWave := processingWaves[idx].bundles
 
-		// TO-DO (chenyu1): evaluate if there is a way to avoid repeated closure
+		// TO-DO (chenyu1): evaluate if there is a need to avoid repeated closure
 		// assignment just for capturing variables.
 		doWork := func(piece int) {
 			if bundlesInWave[piece].applyOrReportDiffErr != nil {
