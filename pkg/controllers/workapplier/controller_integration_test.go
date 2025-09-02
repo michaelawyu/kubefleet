@@ -791,7 +791,7 @@ var _ = Describe("applying manifests", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -816,7 +816,7 @@ var _ = Describe("applying manifests", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 1,
 						},
 					},
@@ -973,7 +973,7 @@ var _ = Describe("applying manifests", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -998,7 +998,7 @@ var _ = Describe("applying manifests", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 1,
 						},
 					},
@@ -1091,7 +1091,7 @@ var _ = Describe("applying manifests", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -1270,7 +1270,7 @@ var _ = Describe("applying manifests", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -1429,7 +1429,7 @@ var _ = Describe("applying manifests", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -1469,7 +1469,7 @@ var _ = Describe("applying manifests", func() {
 						{
 							Type:   fleetv1beta1.WorkConditionTypeAvailable,
 							Status: metav1.ConditionTrue,
-							Reason: string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason: string(AvailabilityResultTypeAvailable),
 						},
 					},
 				},
@@ -1623,7 +1623,7 @@ var _ = Describe("applying manifests", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -1788,7 +1788,7 @@ var _ = Describe("work applier garbage collection", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -1813,7 +1813,7 @@ var _ = Describe("work applier garbage collection", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 1,
 						},
 					},
@@ -2059,7 +2059,7 @@ var _ = Describe("work applier garbage collection", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -2084,7 +2084,7 @@ var _ = Describe("work applier garbage collection", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 1,
 						},
 					},
@@ -2108,7 +2108,7 @@ var _ = Describe("work applier garbage collection", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -2378,7 +2378,7 @@ var _ = Describe("work applier garbage collection", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -2403,7 +2403,7 @@ var _ = Describe("work applier garbage collection", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 1,
 						},
 					},
@@ -2427,7 +2427,7 @@ var _ = Describe("work applier garbage collection", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -2694,7 +2694,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:   fleetv1beta1.WorkConditionTypeAvailable,
 							Status: metav1.ConditionTrue,
-							Reason: string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason: string(AvailabilityResultTypeAvailable),
 						},
 					},
 				},
@@ -2718,7 +2718,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 2,
 						},
 					},
@@ -2971,7 +2971,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -3423,7 +3423,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -3448,7 +3448,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 1,
 						},
 					},
@@ -3663,7 +3663,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -4223,7 +4223,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -4463,7 +4463,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -4589,7 +4589,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -4720,7 +4720,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -4950,7 +4950,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -5081,7 +5081,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -5409,7 +5409,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 1,
 						},
 					},
@@ -6790,7 +6790,7 @@ var _ = Describe("handling different apply strategies", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -6815,7 +6815,7 @@ var _ = Describe("handling different apply strategies", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionFalse,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeNotYetAvailable),
+							Reason:             string(AvailabilityResultTypeNotYetAvailable),
 							ObservedGeneration: 2,
 						},
 					},
@@ -7004,7 +7004,7 @@ var _ = Describe("handling different apply strategies", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -7029,7 +7029,7 @@ var _ = Describe("handling different apply strategies", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionFalse,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeNotYetAvailable),
+							Reason:             string(AvailabilityResultTypeNotYetAvailable),
 							ObservedGeneration: 1,
 						},
 					},
@@ -7444,7 +7444,7 @@ var _ = Describe("handling different apply strategies", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -7684,7 +7684,7 @@ var _ = Describe("handling different apply strategies", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -7709,7 +7709,7 @@ var _ = Describe("handling different apply strategies", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
