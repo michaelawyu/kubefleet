@@ -3832,7 +3832,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
@@ -3857,7 +3857,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeNotTrackable),
+							Reason:             string(AvailabilityResultTypeNotTrackable),
 							ObservedGeneration: 1,
 						},
 					},
@@ -3962,7 +3962,7 @@ var _ = Describe("drift detection and takeover", func() {
 						{
 							Type:               fleetv1beta1.WorkConditionTypeAvailable,
 							Status:             metav1.ConditionTrue,
-							Reason:             string(ManifestProcessingAvailabilityResultTypeAvailable),
+							Reason:             string(AvailabilityResultTypeAvailable),
 							ObservedGeneration: 0,
 						},
 					},
