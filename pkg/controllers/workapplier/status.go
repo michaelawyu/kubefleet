@@ -620,7 +620,7 @@ func prepareRebuiltManifestCondQIdx(bundles []*manifestProcessingBundle) map[str
 	for idx := range bundles {
 		bundle := bundles[idx]
 
-		if len(bundle.wriStr) == 0 {
+		if len(bundle.workResourceIdentifierStr) == 0 {
 			// There might be manifest conditions without a valid identifier in the bundle set
 			// (e.g., decoding error has occurred when processing a bundle).
 			// Fleet will skip these bundles, as there is no need to port back
@@ -628,7 +628,7 @@ func prepareRebuiltManifestCondQIdx(bundles []*manifestProcessingBundle) map[str
 			// identifiable). This is not considered as an error.
 			continue
 		}
-		rebuiltManifestCondQIdx[bundle.wriStr] = idx
+		rebuiltManifestCondQIdx[bundle.workResourceIdentifierStr] = idx
 	}
 	return rebuiltManifestCondQIdx
 }

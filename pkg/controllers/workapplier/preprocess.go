@@ -87,11 +87,12 @@ func (r *Reconciler) preProcessManifests(
 			// fail if and only if the manifest data cannot be decoded (a failure in the previous
 			// step); normally this branch will never run as such error should have already terminated
 			// the pre-processing stage.
-			klog.ErrorS(err, "Failed to format the work resource identifier as a string", "ordinal", pieces, "work", klog.KObj(work))
-			_ = controller.NewUnexpectedBehaviorError(fmt.Errorf("failed to format the work resource identifier as a string: %w", err))
+			klog.ErrorS(controller.NewUnexpectedBehaviorError(fmt.Errorf("failed to format the work resource identifier as a string: %w", err)),
+				"Failed to format the work resource identifier as a string",
+				"ordinal", pieces, "work", klog.KObj(work))
 			return
 		}
-		bundle.wriStr = wriStr
+		bundle.workResourceIdentifierStr = wriStr
 
 		klog.V(2).InfoS("Decoded a manifest",
 			"manifestObj", klog.KObj(manifestObj),
@@ -181,11 +182,11 @@ func (r *Reconciler) writeAheadManifestProcessingAttempts(
 		}
 
 		// Prepare the manifest conditions for the write-ahead process.
-		manifestCondForWA := prepareManifestCondForWriteAhead(bundle.wriStr, bundle.id, work.Generation, existingManifestCondQIdx, work.Status.ManifestConditions)
+		manifestCondForWA := prepareManifestCondForWriteAhead(bundle.workResourceIdentifierStr, bundle.id, work.Generation, existingManifestCondQIdx, work.Status.ManifestConditions)
 		manifestCondsForWA = append(manifestCondsForWA, manifestCondForWA)
 
 		klog.V(2).InfoS("Prepared write-ahead information for a manifest",
-			"manifestObj", klog.KObj(bundle.manifestObj), "workResourceID", bundle.wriStr, "work", workRef)
+			"manifestObj", klog.KObj(bundle.manifestObj), "workResourceID", bundle.workResourceIdentifierStr, "work", workRef)
 	}
 
 	// Identify any manifests from previous runs that might have been applied and are now left
@@ -291,14 +292,14 @@ func checkForDuplicatedManifests(bundles []*manifestProcessingBundle, work *flee
 			continue
 		}
 
-		if _, found := checked[bundle.wriStr]; found {
+		if _, found := checked[bundle.workResourceIdentifierStr]; found {
 			klog.V(2).InfoS("A duplicate manifest has been found",
-				"ordinal", idx, "work", klog.KObj(work), "workResourceID", bundle.wriStr)
+				"ordinal", idx, "work", klog.KObj(work), "workResourceID", bundle.workResourceIdentifierStr)
 			bundle.applyOrReportDiffErr = fmt.Errorf("a duplicate manifest has been found")
 			bundle.applyOrReportDiffResTyp = ApplyOrReportDiffResTypeDuplicated
 			continue
 		}
-		checked[bundle.wriStr] = true
+		checked[bundle.workResourceIdentifierStr] = true
 	}
 	klog.V(2).InfoS("Completed the duplicated manifest checking process", "work", klog.KObj(work))
 }

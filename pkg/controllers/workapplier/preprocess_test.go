@@ -111,24 +111,24 @@ func TestCheckForDuplicatedManifests(t *testing.T) {
 			name: "no duplicates",
 			bundles: []*manifestProcessingBundle{
 				{
-					wriStr: wriStr1,
+					workResourceIdentifierStr: wriStr1,
 				},
 				{
-					wriStr: wriStr2,
+					workResourceIdentifierStr: wriStr2,
 				},
 				{
-					wriStr: wriStr3,
+					workResourceIdentifierStr: wriStr3,
 				},
 			},
 			wantBundles: []*manifestProcessingBundle{
 				{
-					wriStr: wriStr1,
+					workResourceIdentifierStr: wriStr1,
 				},
 				{
-					wriStr: wriStr2,
+					workResourceIdentifierStr: wriStr2,
 				},
 				{
-					wriStr: wriStr3,
+					workResourceIdentifierStr: wriStr3,
 				},
 			},
 		},
@@ -136,26 +136,26 @@ func TestCheckForDuplicatedManifests(t *testing.T) {
 			name: "with duplicates",
 			bundles: []*manifestProcessingBundle{
 				{
-					wriStr: wriStr1,
+					workResourceIdentifierStr: wriStr1,
 				},
 				{
-					wriStr: wriStr2,
+					workResourceIdentifierStr: wriStr2,
 				},
 				{
-					wriStr: wriStr1,
+					workResourceIdentifierStr: wriStr1,
 				},
 			},
 			wantBundles: []*manifestProcessingBundle{
 				{
-					wriStr: wriStr1,
+					workResourceIdentifierStr: wriStr1,
 				},
 				{
-					wriStr: wriStr2,
+					workResourceIdentifierStr: wriStr2,
 				},
 				{
-					wriStr:                  wriStr1,
-					applyOrReportDiffResTyp: ApplyOrReportDiffResTypeDuplicated,
-					applyOrReportDiffErr:    fmt.Errorf("a duplicate manifest has been found"),
+					workResourceIdentifierStr: wriStr1,
+					applyOrReportDiffResTyp:   ApplyOrReportDiffResTypeDuplicated,
+					applyOrReportDiffErr:      fmt.Errorf("a duplicate manifest has been found"),
 				},
 			},
 		},

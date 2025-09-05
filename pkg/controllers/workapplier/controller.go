@@ -362,7 +362,11 @@ type manifestProcessingBundle struct {
 	id *fleetv1beta1.WorkResourceIdentifier
 	// A string representation of the work resource identifier (sans the resources field).
 	// This is only populated if the manifest data can be successfully decoded.
-	wriStr string
+	//
+	// It is of the format `GV=API_GROUP/VERSION, Kind=KIND, Namespace=NAMESPACE, Name=NAME`,
+	// where API_GROUP, VERSION, KIND, NAMESPACE, and NAME are the API group/version/kind of the
+	// manifest object, and its owner namespace (if applicable) and name, respectively.
+	workResourceIdentifierStr string
 	// The manifest data, decoded as a Kubernetes API object.
 	manifestObj *unstructured.Unstructured
 	// The object in the member cluster that corresponds to the manifest object.
