@@ -38,6 +38,7 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/bindingwatcher"
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/clusterinventory/clusterprofile"
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/clusterresourceplacementeviction"
+	"github.com/kubefleet-dev/kubefleet/pkg/controllers/clusterresourceplacementstatuswatcher"
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/memberclusterplacement"
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/overrider"
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/placement"
@@ -96,6 +97,7 @@ var (
 		placementv1beta1.GroupVersion.WithKind(placementv1beta1.ClusterResourceOverrideSnapshotKind),
 		placementv1beta1.GroupVersion.WithKind(placementv1beta1.ResourceOverrideKind),
 		placementv1beta1.GroupVersion.WithKind(placementv1beta1.ResourceOverrideSnapshotKind),
+		placementv1beta1.GroupVersion.WithKind(placementv1beta1.ClusterResourcePlacementStatusKind),
 	}
 
 	// There's a prerequisite that v1Beta1RequiredGVKs must be installed too.
@@ -219,6 +221,15 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 			Client:              mgr.GetClient(),
 		}).SetupWithManagerForClusterResourceBinding(mgr); err != nil {
 			klog.ErrorS(err, "Unable to set up the clusterResourceBinding watcher")
+			return err
+		}
+
+		klog.Info("Setting up clusterResourcePlacementStatus watcher")
+		if err := (&clusterresourceplacementstatuswatcher.Reconciler{
+			Client:              mgr.GetClient(),
+			PlacementController: clusterResourcePlacementControllerV1Beta1,
+		}).SetupWithManager(mgr); err != nil {
+			klog.ErrorS(err, "Unable to set up the clusterResourcePlacementStatus watcher")
 			return err
 		}
 
