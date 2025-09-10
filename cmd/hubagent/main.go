@@ -32,6 +32,7 @@ import (
 	clusterinventory "sigs.k8s.io/cluster-inventory-api/apis/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -124,7 +125,33 @@ func main() {
 	mgrOpts := ctrl.Options{
 		Scheme: scheme,
 		Cache: cache.Options{
-			SyncPeriod: &opts.ResyncPeriod.Duration,
+			SyncPeriod:       &opts.ResyncPeriod.Duration,
+			DefaultTransform: cache.TransformStripManagedFields(),
+			ByObject: map[client.Object]cache.ByObject{
+				// Specifically, for the work objects, strip both the managedFields field
+				// in the object meta and the embedded workloads in the spec.
+				&placementv1beta1.Work{}: {
+					Transform: func(objI interface{}) (interface{}, error) {
+						obj, ok := objI.(*placementv1beta1.Work)
+						if !ok {
+							// The cast failed unexpected; no need to perform the transformation,
+							// return the object as it is.
+							return objI, nil
+						}
+
+						// Drop the managedFields field in the object meta.
+						obj.SetManagedFields(nil)
+
+						// Drop the workloads embedded in the spec as the hub agent only writes
+						// to them via Update ops, but never reads them.
+						//
+						// Important (chenyu1): drop this transformation if a read op is added
+						// in the future.
+						obj.Spec.Workload.Manifests = nil
+						return obj, nil
+					},
+				},
+			},
 		},
 		LeaderElection:             opts.LeaderElection.LeaderElect,
 		LeaderElectionID:           opts.LeaderElection.ResourceName,
