@@ -7051,7 +7051,7 @@ var _ = Describe("negative cases", func() {
 			malformedConfigMapJSON := marshalK8sObjJSON(malformedConfigMap)
 
 			// Create a Work object with all the manifest JSONs.
-			createWorkObject(workName, nil, regularNSJSON, malformedConfigMapJSON, regularConfigMapJson)
+			createWorkObject(workName, memberReservedNSName1, nil, regularNSJSON, malformedConfigMapJSON, regularConfigMapJson)
 		})
 
 		It("should add cleanup finalizer to the Work object", func() {
@@ -7071,13 +7071,13 @@ var _ = Describe("negative cases", func() {
 			regularNSObjectAppliedActual := regularNSObjectAppliedActual(nsName, appliedWorkOwnerRef)
 			Eventually(regularNSObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the namespace object")
 
-			Expect(memberClient.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
+			Expect(memberClient1.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
 
 			// Ensure that the ConfigMap object has been applied as expected.
 			regularConfigMapAppliedActual := regularConfigMapObjectAppliedActual(nsName, configMapName, appliedWorkOwnerRef)
 			Eventually(regularConfigMapAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the ConfigMap object")
 
-			Expect(memberClient.Get(ctx, client.ObjectKey{Namespace: nsName, Name: configMapName}, regularConfigMap)).To(Succeed(), "Failed to retrieve the ConfigMap object")
+			Expect(memberClient1.Get(ctx, client.ObjectKey{Namespace: nsName, Name: configMapName}, regularConfigMap)).To(Succeed(), "Failed to retrieve the ConfigMap object")
 		})
 
 		It("should update the Work object status", func() {
@@ -7198,7 +7198,7 @@ var _ = Describe("negative cases", func() {
 
 		AfterAll(func() {
 			// Delete the Work object and related resources.
-			deleteWorkObject(workName)
+			deleteWorkObject(workName, memberReservedNSName1)
 
 			// Ensure applied manifest has been removed.
 			regularConfigMapRemovedActual := regularConfigMapRemovedActual(nsName, configMapName)
@@ -7244,7 +7244,7 @@ var _ = Describe("negative cases", func() {
 			regularConfigMapJSON := marshalK8sObjJSON(regularConfigMap)
 
 			// Create a Work object with all the manifest JSONs.
-			createWorkObject(workName, nil, regularNSJSON, regularConfigMapJSON)
+			createWorkObject(workName, memberReservedNSName1, nil, regularNSJSON, regularConfigMapJSON)
 		})
 
 		It("should add cleanup finalizer to the Work object", func() {
@@ -7264,7 +7264,7 @@ var _ = Describe("negative cases", func() {
 			regularNSObjectAppliedActual := regularNSObjectAppliedActual(nsName, appliedWorkOwnerRef)
 			Eventually(regularNSObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the namespace object")
 
-			Expect(memberClient.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
+			Expect(memberClient1.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
 		})
 
 		It("should update the Work object status", func() {
@@ -7349,7 +7349,7 @@ var _ = Describe("negative cases", func() {
 
 		AfterAll(func() {
 			// Delete the Work object and related resources.
-			deleteWorkObject(workName)
+			deleteWorkObject(workName, memberReservedNSName1)
 
 			// Kubebuilder suggests that in a testing environment like this, to check for the existence of the AppliedWork object
 			// OwnerReference in the Namespace object (https://book.kubebuilder.io/reference/envtest.html#testing-considerations).
@@ -7395,7 +7395,7 @@ var _ = Describe("negative cases", func() {
 			duplicatedConfigMap.Data[dummyLabelKey] = dummyLabelValue2
 
 			// Create a Work object with all the manifest JSONs.
-			createWorkObject(workName, nil, regularNSJSON, regularConfigMapJSON, duplicatedConfigMapJSON)
+			createWorkObject(workName, memberReservedNSName1, nil, regularNSJSON, regularConfigMapJSON, duplicatedConfigMapJSON)
 		})
 
 		It("should add cleanup finalizer to the Work object", func() {
@@ -7415,13 +7415,13 @@ var _ = Describe("negative cases", func() {
 			regularNSObjectAppliedActual := regularNSObjectAppliedActual(nsName, appliedWorkOwnerRef)
 			Eventually(regularNSObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the namespace object")
 
-			Expect(memberClient.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
+			Expect(memberClient1.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
 
 			// Ensure that the ConfigMap object has been applied as expected.
 			regularConfigMapAppliedActual := regularConfigMapObjectAppliedActual(nsName, configMapName, appliedWorkOwnerRef)
 			Eventually(regularConfigMapAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the ConfigMap object")
 
-			Expect(memberClient.Get(ctx, client.ObjectKey{Namespace: nsName, Name: configMapName}, regularConfigMap)).To(Succeed(), "Failed to retrieve the ConfigMap object")
+			Expect(memberClient1.Get(ctx, client.ObjectKey{Namespace: nsName, Name: configMapName}, regularConfigMap)).To(Succeed(), "Failed to retrieve the ConfigMap object")
 		})
 
 		It("should update the Work object status", func() {
@@ -7590,7 +7590,7 @@ var _ = Describe("negative cases", func() {
 			duplicatedConfigMapJSON := marshalK8sObjJSON(duplicatedConfigMap)
 
 			// Create a Work object with all the manifest JSONs.
-			createWorkObject(workName, nil, regularNSJSON, regularConfigMapJSON, malformedConfigMapJSON, configMapWithGenerateNameJSON, duplicatedConfigMapJSON)
+			createWorkObject(workName, memberReservedNSName1, nil, regularNSJSON, regularConfigMapJSON, malformedConfigMapJSON, configMapWithGenerateNameJSON, duplicatedConfigMapJSON)
 		})
 
 		It("should add cleanup finalizer to the Work object", func() {
@@ -7610,13 +7610,13 @@ var _ = Describe("negative cases", func() {
 			regularNSObjectAppliedActual := regularNSObjectAppliedActual(nsName, appliedWorkOwnerRef)
 			Eventually(regularNSObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the namespace object")
 
-			Expect(memberClient.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
+			Expect(memberClient1.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
 
 			// Ensure that the ConfigMap object has been applied as expected.
 			regularConfigMapAppliedActual := regularConfigMapObjectAppliedActual(nsName, configMapName, appliedWorkOwnerRef)
 			Eventually(regularConfigMapAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the ConfigMap object")
 
-			Expect(memberClient.Get(ctx, client.ObjectKey{Namespace: nsName, Name: configMapName}, regularConfigMap)).To(Succeed(), "Failed to retrieve the ConfigMap object")
+			Expect(memberClient1.Get(ctx, client.ObjectKey{Namespace: nsName, Name: configMapName}, regularConfigMap)).To(Succeed(), "Failed to retrieve the ConfigMap object")
 		})
 
 		It("should update the Work object status", func() {
@@ -7774,7 +7774,7 @@ var _ = Describe("negative cases", func() {
 
 		AfterAll(func() {
 			// Delete the Work object and related resources.
-			deleteWorkObject(workName)
+			deleteWorkObject(workName, memberReservedNSName1)
 
 			// Ensure applied manifest has been removed.
 			regularConfigMapRemovedActual := regularConfigMapRemovedActual(nsName, configMapName)
