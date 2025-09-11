@@ -122,37 +122,42 @@ func main() {
 	config := ctrl.GetConfigOrDie()
 	config.QPS, config.Burst = float32(opts.HubQPS), opts.HubBurst
 
-	mgrOpts := ctrl.Options{
-		Scheme: scheme,
-		Cache: cache.Options{
-			SyncPeriod:       &opts.ResyncPeriod.Duration,
-			DefaultTransform: cache.TransformStripManagedFields(),
-			ByObject: map[client.Object]cache.ByObject{
-				// Specifically, for the work objects, strip both the managedFields field
-				// in the object meta and the embedded workloads in the spec.
-				&placementv1beta1.Work{}: {
-					Transform: func(objI interface{}) (interface{}, error) {
-						obj, ok := objI.(*placementv1beta1.Work)
-						if !ok {
-							// The cast failed unexpected; no need to perform the transformation,
-							// return the object as it is.
-							return objI, nil
-						}
+	cacheOpts := cache.Options{
+		SyncPeriod:       &opts.ResyncPeriod.Duration,
+		DefaultTransform: cache.TransformStripManagedFields(),
+	}
+	if opts.EnableV1Beta1APIs {
+		// If the v1beta1 APIs are enabled, set up a cache transformer specifically for
+		// the v1beta1 Work objects.
+		cacheOpts.ByObject = map[client.Object]cache.ByObject{
+			// Specifically, for the work objects, strip both the managedFields field
+			// in the object meta and the embedded workloads in the spec.
+			&placementv1beta1.Work{}: {
+				Transform: func(objI interface{}) (interface{}, error) {
+					obj, ok := objI.(*placementv1beta1.Work)
+					if !ok {
+						// The cast failed unexpectedly; no need to perform the transformation,
+						// return the object as it is.
+						return objI, nil
+					}
 
-						// Drop the managedFields field in the object meta.
-						obj.SetManagedFields(nil)
+					// Drop the managedFields field in the object meta.
+					obj.SetManagedFields(nil)
 
-						// Drop the workloads embedded in the spec as the hub agent only writes
-						// to them via Update ops, but never reads them.
-						//
-						// Important (chenyu1): drop this transformation if a read op is added
-						// in the future.
-						obj.Spec.Workload.Manifests = nil
-						return obj, nil
-					},
+					// Drop the workloads embedded in the spec as the hub agent only writes
+					// to them via Update ops, but never reads them.
+					//
+					// Important (chenyu1): drop this transformation if a read op is added
+					// in the future.
+					obj.Spec.Workload.Manifests = nil
+					return obj, nil
 				},
 			},
-		},
+		}
+	}
+	mgrOpts := ctrl.Options{
+		Scheme:                     scheme,
+		Cache:                      cacheOpts,
 		LeaderElection:             opts.LeaderElection.LeaderElect,
 		LeaderElectionID:           opts.LeaderElection.ResourceName,
 		LeaderElectionNamespace:    opts.LeaderElection.ResourceNamespace,
