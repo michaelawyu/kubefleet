@@ -858,6 +858,34 @@ spec:
                   - identifier
                   type: object
                 type: array
+              supplementalInfo:
+                description: |-
+                  SupplementalInfo provides additional information about the current status of the Work object
+                  and/or some of the manifests embedded in the Work object.
+                items:
+                  description: |-
+                    SupplementalInformation is a piece of additional information about the current status of the Work object
+                    and/or some of the manifests embedded in the Work object.
+                  properties:
+                    category:
+                      description: |-
+                        Category is the category of the information.
+
+                        It is used to distinguish between different types of supplemental information.
+                      type: string
+                    data:
+                      description: |-
+                        Data is the content of the supplemental information.
+
+                        If the supplemental information is of a supported category, KubeFleet will parse and process
+                        the data accordingly.
+                      type: object
+                      x-kubernetes-embedded-resource: true
+                      x-kubernetes-preserve-unknown-fields: true
+                  required:
+                  - category
+                  type: object
+                type: array
             required:
             - conditions
             type: object

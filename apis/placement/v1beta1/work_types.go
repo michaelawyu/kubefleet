@@ -99,6 +99,11 @@ type WorkStatus struct {
 	// spoke cluster.
 	// +optional
 	ManifestConditions []ManifestCondition `json:"manifestConditions,omitempty"`
+
+	// SupplementalInfo provides additional information about the current status of the Work object
+	// and/or some of the manifests embedded in the Work object.
+	// +optional
+	SupplementalInfo []SupplementalInformation `json:"supplementalInfo,omitempty"`
 }
 
 // WorkResourceIdentifier provides the identifiers needed to interact with any arbitrary object.
@@ -228,6 +233,24 @@ type ManifestCondition struct {
 	//
 	// +kubebuilder:validation:Optional
 	DiffDetails *DiffDetails `json:"diffDetails,omitempty"`
+}
+
+// SupplementalInformation is a piece of additional information about the current status of the Work object
+// and/or some of the manifests embedded in the Work object.
+type SupplementalInformation struct {
+	// Category is the category of the information.
+	//
+	// It is used to distinguish between different types of supplemental information.
+	// +kubebuilder:validation:Required
+	Category string `json:"category"`
+
+	// Data is the content of the supplemental information.
+	//
+	// If the supplemental information is of a supported category, KubeFleet will parse and process
+	// the data accordingly.
+	// +kubebuilder:validation:EmbeddedResource
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Data runtime.RawExtension `json:"data,omitempty"`
 }
 
 // +genclient
