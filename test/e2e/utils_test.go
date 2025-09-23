@@ -86,6 +86,18 @@ func createMemberCluster(name, svcAccountName string, labels, annotations map[st
 	Expect(hubClient.Create(ctx, mcObj)).To(Succeed(), "Failed to create member cluster object %s", name)
 }
 
+func updateMemberClusterDeleteOptions(name string, deleteOptions *clusterv1beta1.DeleteOptions) {
+	Eventually(func() error {
+		mcObj := &clusterv1beta1.MemberCluster{}
+		if err := hubClient.Get(ctx, types.NamespacedName{Name: name}, mcObj); err != nil {
+			return err
+		}
+
+		mcObj.Spec.DeleteOptions = deleteOptions
+		return hubClient.Update(ctx, mcObj)
+	}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update member cluster delete options")
+}
+
 // markMemberClusterAsHealthy marks the specified member cluster as healthy.
 func markMemberClusterAsHealthy(name string) {
 	Eventually(func() error {
@@ -740,6 +752,29 @@ func cleanupConfigMapOnCluster(cluster *framework.Cluster) {
 	Eventually(configMapRemovedActual, workloadEventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove config map from %s cluster", cluster.ClusterName)
 }
 
+func cleanupAnotherConfigMapOnMemberCluster(name types.NamespacedName, cluster *framework.Cluster) {
+	cm := &corev1.ConfigMap{}
+	err := cluster.KubeClient.Get(ctx, name, cm)
+	if err != nil && k8serrors.IsNotFound(err) {
+		return
+	}
+	Expect(err).To(Succeed(), "Failed to get config map %s", name)
+
+	Expect(cluster.KubeClient.Delete(ctx, cm)).To(Succeed(), "Failed to delete config map %s", name)
+
+	Eventually(func() error {
+		cm := &corev1.ConfigMap{}
+		err := cluster.KubeClient.Get(ctx, name, cm)
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}
+		return fmt.Errorf("config map %s still exists", name)
+	}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to wait for config map %s to be deleted", name)
+}
+
 // setMemberClusterToLeave sets a specific member cluster to leave the fleet.
 func setMemberClusterToLeave(memberCluster *framework.Cluster) {
 	mcObj := &clusterv1beta1.MemberCluster{
@@ -845,6 +880,26 @@ func checkIfPlacedWorkResourcesOnMemberClustersConsistently(clusters []*framewor
 
 		workResourcesPlacedActual := workNamespaceAndConfigMapPlacedOnClusterActual(memberCluster)
 		Consistently(workResourcesPlacedActual, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Failed to place work resources on member cluster %s consistently", memberCluster.ClusterName)
+	}
+}
+
+func checkIfPlacedWorkResourcesOnAllMemberClusters() {
+	checkIfPlacedWorkResourcesOnMemberClusters(allMemberClusters)
+}
+
+func checkIfPlacedWorkResourcesOnMemberClusters(clusters []*framework.Cluster) {
+	for idx := range clusters {
+		memberCluster := clusters[idx]
+		workResourcesPlacedActual := workNamespaceAndConfigMapPlacedOnClusterActual(memberCluster)
+		Eventually(workResourcesPlacedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to place work resources on member cluster %s", memberCluster.ClusterName)
+	}
+}
+
+func checkIfPlacedWorkResourcesOnMemberClustersInUpdateRun(clusters []*framework.Cluster) {
+	for idx := range clusters {
+		memberCluster := clusters[idx]
+		workResourcesPlacedActual := workNamespaceAndConfigMapPlacedOnClusterActual(memberCluster)
+		Eventually(workResourcesPlacedActual, updateRunEventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to place work resources on member cluster %s", memberCluster.ClusterName)
 	}
 }
 
@@ -1157,14 +1212,14 @@ func ensureCRPDisruptionBudgetDeleted(crpDisruptionBudgetName string) {
 // This is mostly used for simulating member agents for virtual clusters.
 //
 // Note that this utility function currently assumes that there is only one work object.
-func verifyWorkPropagationAndMarkAsAvailable(memberClusterName, crpName string, resourceIdentifiers []placementv1beta1.ResourceIdentifier) {
+func verifyWorkPropagationAndMarkAsAvailable(memberClusterName, placementName string, resourceIdentifiers []placementv1beta1.ResourceIdentifier) {
 	memberClusterReservedNS := fmt.Sprintf(utils.NamespaceNameFormat, memberClusterName)
 	// Wait until the works are created.
 	workList := placementv1beta1.WorkList{}
 	Eventually(func() error {
 		workList = placementv1beta1.WorkList{}
 		matchLabelOptions := client.MatchingLabels{
-			placementv1beta1.PlacementTrackingLabel: crpName,
+			placementv1beta1.PlacementTrackingLabel: placementName,
 		}
 		if err := hubClient.List(ctx, &workList, client.InNamespace(memberClusterReservedNS), matchLabelOptions); err != nil {
 			return err
@@ -1465,12 +1520,17 @@ func checkIfStatusErrorWithMessage(err error, errorMsg string) error {
 	return fmt.Errorf("error message %s not found in error %w", errorMsg, err)
 }
 
-// buildOwnerReference builds an owner reference given a cluster and a CRP name.
+// buildOwnerReference builds an owner reference given a cluster and a placement name.
 //
-// This function assumes that the CRP has only one associated Work object (no resource snapshot
+// This function assumes that the placement has only one associated Work object (no resource snapshot
 // sub-index, no envelope object used).
-func buildOwnerReference(cluster *framework.Cluster, crpName string) *metav1.OwnerReference {
-	workName := fmt.Sprintf("%s-work", crpName)
+func buildOwnerReference(cluster *framework.Cluster, placementName, placementNamespace string) *metav1.OwnerReference {
+	var workName string
+	if placementNamespace == "" {
+		workName = fmt.Sprintf("%s-work", placementName)
+	} else {
+		workName = fmt.Sprintf("%s.%s-work", placementNamespace, placementName)
+	}
 
 	appliedWork := placementv1beta1.AppliedWork{}
 	Expect(cluster.KubeClient.Get(ctx, types.NamespacedName{Name: workName}, &appliedWork)).Should(Succeed(), "Failed to get applied work object")

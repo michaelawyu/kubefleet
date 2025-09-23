@@ -83,7 +83,7 @@ var _ = Describe("take over existing resources", func() {
 		})
 
 		It("should take over the existing resources on clusters", func() {
-			expectedOwnerRef := buildOwnerReference(memberCluster1EastProd, crpName)
+			expectedOwnerRef := buildOwnerReference(memberCluster1EastProd, crpName, "")
 
 			ns := &corev1.Namespace{}
 			nsName := fmt.Sprintf(workNamespaceNameTemplate, GinkgoParallelProcess())
@@ -252,7 +252,7 @@ var _ = Describe("take over existing resources", func() {
 		})
 
 		It("should take over existing resources with no diff on clusters", func() {
-			expectedOwnerRef := buildOwnerReference(memberCluster1EastProd, crpName)
+			expectedOwnerRef := buildOwnerReference(memberCluster1EastProd, crpName, "")
 
 			ns := &corev1.Namespace{}
 			Expect(memberCluster1EastProdClient.Get(ctx, client.ObjectKey{Name: nsName}, ns)).To(Succeed())
@@ -614,7 +614,7 @@ var _ = Describe("detect drifts on placed resources", func() {
 		})
 
 		It("should overwrite drifts on managed fields", func() {
-			expectedOwnerRef := buildOwnerReference(memberCluster1EastProd, crpName)
+			expectedOwnerRef := buildOwnerReference(memberCluster1EastProd, crpName, "")
 
 			cm := &corev1.ConfigMap{}
 			Expect(memberCluster1EastProdClient.Get(ctx, client.ObjectKey{Name: cmName, Namespace: nsName}, cm)).To(Succeed())
@@ -770,7 +770,7 @@ var _ = Describe("detect drifts on placed resources", func() {
 		})
 
 		It("should not overwrite drifts on fields", func() {
-			expectedOwnerRef := buildOwnerReference(memberCluster1EastProd, crpName)
+			expectedOwnerRef := buildOwnerReference(memberCluster1EastProd, crpName, "")
 
 			ns := &corev1.Namespace{}
 			Expect(memberCluster1EastProdClient.Get(ctx, client.ObjectKey{Name: nsName}, ns)).To(Succeed())
@@ -981,7 +981,7 @@ var _ = Describe("detect drifts on placed resources", func() {
 		})
 
 		It("should not overwrite drifts on fields", func() {
-			expectedOwnerRef := buildOwnerReference(memberCluster1EastProd, crpName)
+			expectedOwnerRef := buildOwnerReference(memberCluster1EastProd, crpName, "")
 
 			ns := &corev1.Namespace{}
 			Expect(memberCluster1EastProdClient.Get(ctx, client.ObjectKey{Name: nsName}, ns)).To(Succeed())

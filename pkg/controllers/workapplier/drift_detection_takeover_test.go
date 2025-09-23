@@ -130,7 +130,7 @@ func TestTakeOverPreExistingObject(t *testing.T) {
 			workObj: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "dummy-work",
-					Namespace: memberReservedNSName,
+					Namespace: memberReservedNSName1,
 				},
 			},
 			applyStrategy: &fleetv1beta1.ApplyStrategy{
@@ -207,7 +207,7 @@ func TestTakeOverPreExistingObject(t *testing.T) {
 			r := &Reconciler{
 				hubClient:          fakeHubClient,
 				spokeDynamicClient: fakeMemberClient,
-				workNameSpace:      memberReservedNSName,
+				workNameSpace:      memberReservedNSName1,
 			}
 
 			takenOverObj, patchDetails, diffCalculatedInDegradedMode, err := r.takeOverPreExistingObject(
@@ -500,7 +500,7 @@ func TestRemoveLeftBehindAppliedWorkOwnerRefs(t *testing.T) {
 			workObj: &fleetv1beta1.Work{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      workName,
-					Namespace: memberReservedNSName,
+					Namespace: memberReservedNSName1,
 				},
 			},
 		},
@@ -516,7 +516,7 @@ func TestRemoveLeftBehindAppliedWorkOwnerRefs(t *testing.T) {
 
 			r := &Reconciler{
 				hubClient:     fakeHubClient,
-				workNameSpace: memberReservedNSName,
+				workNameSpace: memberReservedNSName1,
 			}
 
 			gotOwnerRefs, err := r.removeLeftBehindAppliedWorkOwnerRefs(ctx, tc.ownerRefs)
