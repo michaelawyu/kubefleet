@@ -27,6 +27,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
@@ -93,11 +94,8 @@ const (
 	memberReservedNSName1 = "fleet-member-experimental-1"
 	memberReservedNSName2 = "fleet-member-experimental-2"
 	memberReservedNSName3 = "fleet-member-experimental-3"
-
-	parallelizerFixedDelay = 5 * time.Second
 )
 
-// parallelizerWithFixedDelay implements the parallelizer.Parallelizer interface that allows running
 // tasks in parallel with a fixed delay after completing each task group.
 //
 // This is added to help verify the behavior of waved parallel processing in the work applier.
@@ -211,6 +209,12 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred())
 	Expect(memberCfg3).ToNot(BeNil())
 
+	memberCfg2, err = memberEnv2.Start()
+	Expect(err).ToNot(HaveOccurred())
+	Expect(memberCfg2).ToNot(BeNil())
+
+	err = batchv1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
 	err = fleetv1beta1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 	err = testv1alpha1.AddToScheme(scheme.Scheme)
@@ -352,7 +356,7 @@ var _ = BeforeSuite(func() {
 		regularParallelizer: parallelizer.NewParallelizer(parallelizer.DefaultNumOfWorkers),
 		// To avoid flakiness, use a fixed delay of 5 seconds so that we could reliably verify
 		// if manifests are actually being processed in waves.
-		delay: parallelizerFixedDelay,
+		delay: time.Second * 5,
 	}
 	workApplier3 = NewReconciler(
 		hubClient,
