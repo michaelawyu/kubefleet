@@ -447,7 +447,7 @@ func workStatusUpdated(
 	return func() error {
 		// Retrieve the Work object.
 		work := &fleetv1beta1.Work{}
-		if err := hubClient.Get(ctx, client.ObjectKey{Name: workName, Namespace: memberReservedNSName1}, work); err != nil {
+		if err := hubClient.Get(ctx, client.ObjectKey{Name: workName, Namespace: memberReservedNSName}, work); err != nil {
 			return fmt.Errorf("failed to retrieve the Work object: %w", err)
 		}
 
@@ -3866,7 +3866,7 @@ var _ = Describe("drift detection and takeover", func() {
 				},
 			}
 
-			workStatusUpdatedActual := workStatusUpdated(workName, workConds, manifestConds, nil, nil)
+			workStatusUpdatedActual := workStatusUpdated(memberReservedNSName1, workName, workConds, manifestConds, nil, nil)
 			Eventually(workStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update work status")
 		})
 
@@ -8057,7 +8057,7 @@ var _ = Describe("negative cases", func() {
 				},
 			}
 
-			workStatusUpdatedActual := workStatusUpdated(workName, memberReservedNSName1, workConds, manifestConds, nil, nil)
+			workStatusUpdatedActual := workStatusUpdated(memberReservedNSName1, workName, workConds, manifestConds, nil, nil)
 			Eventually(workStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update work status")
 			Consistently(workStatusUpdatedActual, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Work status changed unexpectedly")
 		})

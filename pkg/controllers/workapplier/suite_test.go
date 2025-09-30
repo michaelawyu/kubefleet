@@ -94,6 +94,8 @@ const (
 	memberReservedNSName1 = "fleet-member-experimental-1"
 	memberReservedNSName2 = "fleet-member-experimental-2"
 	memberReservedNSName3 = "fleet-member-experimental-3"
+
+	parallelizerFixedDelay = time.Second * 5
 )
 
 // tasks in parallel with a fixed delay after completing each task group.
@@ -356,7 +358,7 @@ var _ = BeforeSuite(func() {
 		regularParallelizer: parallelizer.NewParallelizer(parallelizer.DefaultNumOfWorkers),
 		// To avoid flakiness, use a fixed delay of 5 seconds so that we could reliably verify
 		// if manifests are actually being processed in waves.
-		delay: time.Second * 5,
+		delay: parallelizerFixedDelay,
 	}
 	workApplier3 = NewReconciler(
 		hubClient,
