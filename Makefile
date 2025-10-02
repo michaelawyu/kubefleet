@@ -11,6 +11,23 @@ HUB_AGENT_IMAGE_NAME ?= hub-agent
 MEMBER_AGENT_IMAGE_NAME ?= member-agent
 REFRESH_TOKEN_IMAGE_NAME := refresh-token
 
+TARGET_OS ?= linux
+TARGET_ARCH ?= amd64
+AUTO_DETECT_ARCH ?= TRUE
+
+# Auto-detect system architecture if it is allowed and the necessary commands are available on the system.
+ifeq ($(AUTO_DETECT_ARCH), TRUE)
+ARCH_CMD_INSTALLED := $(shell command -v arch 2>/dev/null)
+ifdef ARCH_CMD_INSTALLED
+TARGET_ARCH := $(shell arch)
+$(info Auto-detected system architecture: $(TARGET_ARCH))
+endif
+endif
+
+# Note (chenyu1): switch to the `plain` progress type to see the full outputs in the docker build
+# progress.
+BUILDKIT_PROGRESS_TYPE ?= auto
+
 KUBECONFIG ?= $(HOME)/.kube/config
 HUB_SERVER_URL ?= https://172.19.0.2:6443
 
@@ -287,9 +304,22 @@ push:
 
 # By default, docker buildx create will pull image moby/buildkit:buildx-stable-1 and hit the too many requests error
 .PHONY: docker-buildx-builder
+# Note (chenyu1): the step below sets up emulation for building/running non-native binaries on the host. The original
+# setup assumes that the Makefile is always run on an x86_64 platform, and adds support for non-x86_64 hosts. Here
+# we keep the original setup if the build target is x86_64 platforms (default) for compatibility reasons, but will switch to
+# a more general setup for non-x86_64 hosts.
+#
+# On some systems the emulation setup might not work at all (e.g., macOS on Apple Silicon -> Rosetta 2 will be used 
+# by Docker Desktop as the default emulation option for AMD64 on ARM64 container compatibility).
 docker-buildx-builder:
 	@if ! docker buildx ls | grep $(BUILDX_BUILDER_NAME); then \
-		docker run --rm --privileged mcr.microsoft.com/mirror/docker/multiarch/qemu-user-static:$(QEMU_VERSION) --reset -p yes; \
+		if [ "$(TARGET_ARCH)" = "amd64" ] ; then \
+			echo "The target is an x86_64 platform; setting up emulation for other known architectures"; \
+			docker run --rm --privileged mcr.microsoft.com/mirror/docker/multiarch/qemu-user-static:$(QEMU_VERSION) --reset -p yes; \
+		else \
+			echo "Setting up emulation for known architectures"; \
+			docker run --rm --privileged tonistiigi/binfmt --install all; \
+		fi ;\
 		docker buildx create --driver-opt image=mcr.microsoft.com/oss/v2/moby/buildkit:$(BUILDKIT_VERSION) --name $(BUILDX_BUILDER_NAME) --use; \
 		docker buildx inspect $(BUILDX_BUILDER_NAME) --bootstrap; \
 	fi
@@ -299,27 +329,36 @@ docker-build-hub-agent: docker-buildx-builder
 	docker buildx build \
 		--file docker/$(HUB_AGENT_IMAGE_NAME).Dockerfile \
 		--output=$(OUTPUT_TYPE) \
-		--platform="linux/amd64" \
+		--platform=$(TARGET_OS)/$(TARGET_ARCH) \
 		--pull \
-		--tag $(REGISTRY)/$(HUB_AGENT_IMAGE_NAME):$(HUB_AGENT_IMAGE_VERSION) .
+		--tag $(REGISTRY)/$(HUB_AGENT_IMAGE_NAME):$(HUB_AGENT_IMAGE_VERSION) \
+		--progress=$(BUILDKIT_PROGRESS_TYPE) \
+		--build-arg GOARCH=$(TARGET_ARCH) \
+		--build-arg GOOS=$(TARGET_OS) .
 
 .PHONY: docker-build-member-agent
 docker-build-member-agent: docker-buildx-builder
 	docker buildx build \
 		--file docker/$(MEMBER_AGENT_IMAGE_NAME).Dockerfile \
 		--output=$(OUTPUT_TYPE) \
-		--platform="linux/amd64" \
+		--platform=$(TARGET_OS)/$(TARGET_ARCH) \
 		--pull \
-		--tag $(REGISTRY)/$(MEMBER_AGENT_IMAGE_NAME):$(MEMBER_AGENT_IMAGE_VERSION) .
+		--tag $(REGISTRY)/$(MEMBER_AGENT_IMAGE_NAME):$(MEMBER_AGENT_IMAGE_VERSION) \
+		--progress=$(BUILDKIT_PROGRESS_TYPE) \
+		--build-arg GOARCH=$(TARGET_ARCH) \
+		--build-arg GOOS=$(TARGET_OS) .
 
 .PHONY: docker-build-refresh-token
 docker-build-refresh-token: docker-buildx-builder
 	docker buildx build \
 		--file docker/$(REFRESH_TOKEN_IMAGE_NAME).Dockerfile \
 		--output=$(OUTPUT_TYPE) \
-		--platform="linux/amd64" \
+		--platform=$(TARGET_OS)/$(TARGET_ARCH) \
 		--pull \
-		--tag $(REGISTRY)/$(REFRESH_TOKEN_IMAGE_NAME):$(REFRESH_TOKEN_IMAGE_VERSION) .
+		--tag $(REGISTRY)/$(REFRESH_TOKEN_IMAGE_NAME):$(REFRESH_TOKEN_IMAGE_VERSION) \
+		--progress=$(BUILDKIT_PROGRESS_TYPE) \
+		--build-arg GOARCH=$(TARGET_ARCH) \
+		--build-arg GOOS=${TARGET_OS} .
 
 ## -----------------------------------
 ## Cleanup
