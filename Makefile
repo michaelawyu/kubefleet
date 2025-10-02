@@ -20,6 +20,13 @@ ifeq ($(AUTO_DETECT_ARCH), TRUE)
 ARCH_CMD_INSTALLED := $(shell command -v arch 2>/dev/null)
 ifdef ARCH_CMD_INSTALLED
 TARGET_ARCH := $(shell arch)
+# The arch command may return arch strings that are aliases of expected TARGET_ARCH values;
+# do the mapping here.
+ifeq ($(TARGET_ARCH),$(filter $(TARGET_ARCH),x86_64))
+	TARGET_ARCH := amd64
+else ifeq ($(TARGET_ARCH),$(filter $(TARGET_ARCH),aarch64 arm))
+	TARGET_ARCH := arm64
+endif
 $(info Auto-detected system architecture: $(TARGET_ARCH))
 endif
 endif
