@@ -291,8 +291,6 @@ func (p *PropertyProvider) Collect(ctx context.Context) propertyprovider.Propert
 	// Collect node-count related properties.
 	p.collectNodeCountRelatedProperties(ctx, properties)
 
-	// Collect the per-SKU node count properties.
-
 	// Collect the cost properties (if enabled).
 	if p.isCostCollectionEnabled {
 		costConds := p.collectCosts(ctx, properties)
