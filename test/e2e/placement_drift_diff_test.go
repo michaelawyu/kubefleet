@@ -505,7 +505,10 @@ var _ = Describe("take over existing resources", func() {
 
 		AfterAll(func() {
 			// The CRP must be deleted first, otherwise the pre-existing namespace might get re-created.
-			ensureCRPAndRelatedResourcesDeleted(crpName, allMemberClusters)
+			//
+			// Also, do not attempt to verify deletion on the first member cluster, as a pre-existing namespace
+			// lives there.
+			ensureCRPAndRelatedResourcesDeleted(crpName, []*framework.Cluster{memberCluster2EastCanary, memberCluster3WestProd})
 
 			// The pre-existing namespace has not been taken over and must be deleted manually.
 			cleanWorkResourcesOnCluster(memberCluster1EastProd)
