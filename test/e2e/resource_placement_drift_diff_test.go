@@ -1579,7 +1579,14 @@ var _ = Describe("report diff mode using RP", Label("resourceplacement"), func()
 		})
 
 		AfterAll(func() {
-			ensureRPAndRelatedResourcesDeleted(types.NamespacedName{Name: rpName, Namespace: nsName}, allMemberClusters)
+			// Clean up the created resources.
+
+			// For the RP-related resources, ignore the first member cluster as it has pre-existing resources.
+			ensureRPAndRelatedResourcesDeleted(types.NamespacedName{Name: rpName, Namespace: nsName}, []*framework.Cluster{
+				memberCluster2EastCanary,
+				memberCluster3WestProd,
+			})
+			// Note that the pre-existing namespace (not the configMaps) has been taken over by the CRP.
 			ensureCRPAndRelatedResourcesDeleted(crpName, allMemberClusters)
 		})
 	})
