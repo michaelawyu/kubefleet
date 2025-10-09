@@ -1201,7 +1201,9 @@ var _ = Describe("report diff mode using RP", Label("resourceplacement"), func()
 			}
 			Expect(memberCluster1EastProdClient.Create(ctx, &cm2)).To(Succeed())
 
-			// Create the CRP with Namespace-only selector
+			// Create the CRP with Namespace-only selector.
+			//
+			// Note that this CRP will take over existing namespaces.
 			crp := &placementv1beta1.ClusterResourcePlacement{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: crpName,
@@ -1577,10 +1579,6 @@ var _ = Describe("report diff mode using RP", Label("resourceplacement"), func()
 		})
 
 		AfterAll(func() {
-			// The pre-existing namespace resources that have not been taken over and must be deleted manually.
-			cleanWorkResourcesOnCluster(memberCluster1EastProd)
-			cleanupAnotherConfigMapOnMemberCluster(types.NamespacedName{Name: cm2Name, Namespace: nsName}, memberCluster1EastProd)
-
 			ensureRPAndRelatedResourcesDeleted(types.NamespacedName{Name: rpName, Namespace: nsName}, allMemberClusters)
 			ensureCRPAndRelatedResourcesDeleted(crpName, allMemberClusters)
 		})
