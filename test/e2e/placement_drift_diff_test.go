@@ -504,10 +504,11 @@ var _ = Describe("take over existing resources", func() {
 		})
 
 		AfterAll(func() {
+			// The CRP must be deleted first, otherwise the pre-existing namespace might get re-created.
+			ensureCRPAndRelatedResourcesDeleted(crpName, allMemberClusters)
+
 			// The pre-existing namespace has not been taken over and must be deleted manually.
 			cleanWorkResourcesOnCluster(memberCluster1EastProd)
-
-			ensureCRPAndRelatedResourcesDeleted(crpName, allMemberClusters)
 		})
 	})
 })
