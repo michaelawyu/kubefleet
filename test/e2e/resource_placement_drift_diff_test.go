@@ -613,13 +613,10 @@ var _ = Describe("detect drifts on placed resources using RP", Ordered, Label("r
 	})
 
 	AfterEach(OncePerOrdered, func() {
-		// The pre-existing resource that have not been taken over and must be deleted manually.
-		cleanupAnotherConfigMapOnMemberCluster(types.NamespacedName{Name: cm2Name, Namespace: nsName}, memberCluster1EastProd)
-		cleanWorkResourcesOnCluster(memberCluster1EastProd)
-
 		// Clean up second configMap on the hub cluster.
 		cleanupAnotherConfigMap(types.NamespacedName{Name: cm2Name, Namespace: nsName})
 
+		// The CRP owns the namespace; do not verify if the namespace has been deleted until the CRP is gone.
 		ensureCRPAndRelatedResourcesDeleted(crpName, allMemberClusters)
 	})
 

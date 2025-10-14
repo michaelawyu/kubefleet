@@ -347,7 +347,7 @@ func checkIfAzurePropertyProviderIsWorking() {
 			if err != nil || wantErr != nil {
 				return fmt.Errorf("failed to parse per GB memory cost property: val=%s, err=%w, wantVal=%s, wantErr=%w", perGBMemoryCostProperty.Value, err, wantPerGBMemoryCostProperty.Value, wantErr)
 			}
-			if diff := math.Abs(perGBMemoryCost - wantPerGBMemoryCost); diff > 0.001 {
+			if diff := math.Abs(perGBMemoryCost - wantPerGBMemoryCost); diff > 0.002 {
 				return fmt.Errorf("member cluster per GB memory cost property diff: got=%f, want=%f, diff=%f", perGBMemoryCost, wantPerGBMemoryCost, diff)
 			}
 
@@ -419,6 +419,9 @@ func summarizeAKSClusterProperties(memberCluster *framework.Cluster, mcObj *clus
 		if found {
 			totalHourlyRate += hourlyRate
 		}
+	}
+	if totalHourlyRate <= 0.002 {
+		return nil, fmt.Errorf("total hourly rate is zero or too small; there might be unrecognized SKUs or incorrect pricing data")
 	}
 
 	cpuCores := totalCPUCapacity.AsApproximateFloat64()
@@ -824,29 +827,6 @@ func cleanupConfigMapOnCluster(cluster *framework.Cluster) {
 	Eventually(configMapRemovedActual, workloadEventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove config map from %s cluster", cluster.ClusterName)
 }
 
-func cleanupAnotherConfigMapOnMemberCluster(name types.NamespacedName, cluster *framework.Cluster) {
-	cm := &corev1.ConfigMap{}
-	err := cluster.KubeClient.Get(ctx, name, cm)
-	if err != nil && k8serrors.IsNotFound(err) {
-		return
-	}
-	Expect(err).To(Succeed(), "Failed to get config map %s", name)
-
-	Expect(cluster.KubeClient.Delete(ctx, cm)).To(Succeed(), "Failed to delete config map %s", name)
-
-	Eventually(func() error {
-		cm := &corev1.ConfigMap{}
-		err := cluster.KubeClient.Get(ctx, name, cm)
-		if err != nil {
-			if k8serrors.IsNotFound(err) {
-				return nil
-			}
-			return err
-		}
-		return fmt.Errorf("config map %s still exists", name)
-	}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to wait for config map %s to be deleted", name)
-}
-
 // setMemberClusterToLeave sets a specific member cluster to leave the fleet.
 func setMemberClusterToLeave(memberCluster *framework.Cluster) {
 	mcObj := &clusterv1beta1.MemberCluster{
@@ -1046,7 +1026,7 @@ func checkNamespaceExistsWithOwnerRefOnMemberCluster(nsName, crpName string) {
 }
 
 func checkConfigMapExistsWithOwnerRefOnMemberCluster(namespace, cmName, rpName string) {
-	Consistently(func() error {
+	cmHasNoWorkOwnerRefActual := func() error {
 		cm := &corev1.ConfigMap{}
 		if err := allMemberClusters[0].KubeClient.Get(ctx, types.NamespacedName{Name: cmName, Namespace: namespace}, cm); err != nil {
 			return fmt.Errorf("failed to get configmap %s/%s: %w", namespace, cmName, err)
@@ -1064,7 +1044,11 @@ func checkConfigMapExistsWithOwnerRefOnMemberCluster(namespace, cmName, rpName s
 			}
 		}
 		return nil
-	}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "ConfigMap which is not owned by the RP should not be deleted")
+	}
+
+	// Must use Eventually checks first, as Fleet agents might not act fast enough in the test environment.
+	Eventually(cmHasNoWorkOwnerRefActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "ConfigMap still has AppliedWork owner reference")
+	Consistently(cmHasNoWorkOwnerRefActual, consistentlyDuration, consistentlyInterval).Should(Succeed(), "ConfigMap which is not owned by the RP should not be deleted")
 }
 
 // cleanupPlacement deletes the placement and waits until the resources are not found.

@@ -240,7 +240,7 @@ var _ = Describe("placing resources using a CRP of PickFixed placement type", fu
 			Eventually(resourcePlacedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to place resources on specified clusters")
 		})
 
-		It("should add finalizer to work resources on the specified clusters", func() {
+		It("can add finalizer to work resources on the specified clusters", func() {
 			Eventually(func() error {
 				if err := memberCluster1EastProd.KubeClient.Get(ctx, types.NamespacedName{Namespace: workNamespaceName, Name: appConfigMapName}, &currentConfigMap); err != nil {
 					return err
@@ -280,12 +280,20 @@ var _ = Describe("placing resources using a CRP of PickFixed placement type", fu
 		})
 
 		It("configmap should still exists on previously specified cluster and be in deleting state", func() {
-			configMap := &corev1.ConfigMap{}
-			Expect(memberCluster1EastProd.KubeClient.Get(ctx, types.NamespacedName{Namespace: workNamespaceName, Name: appConfigMapName}, configMap)).Should(Succeed(), "Failed to get configmap")
-			Expect(configMap.DeletionTimestamp).ShouldNot(BeNil(), "ConfigMap should have a deletion timestamp")
+			// Use an Eventually block as the Fleet agent might not be fast enough.
+			Eventually(func() error {
+				configMap := &corev1.ConfigMap{}
+				if err := memberCluster1EastProd.KubeClient.Get(ctx, types.NamespacedName{Namespace: workNamespaceName, Name: appConfigMapName}, configMap); err != nil {
+					return err
+				}
+				if configMap.DeletionTimestamp == nil {
+					return fmt.Errorf("configMap %s has not yet been marked for deletion", appConfigMapName)
+				}
+				return nil
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to verify that configMap has been marked for deletion")
 		})
 
-		It("should remove finalizer from work resources on the specified clusters", func() {
+		It("can remove finalizer from work resources on the specified clusters", func() {
 			configMap := &corev1.ConfigMap{}
 			Expect(memberCluster1EastProd.KubeClient.Get(ctx, types.NamespacedName{Namespace: workNamespaceName, Name: appConfigMapName}, configMap)).Should(Succeed(), "Failed to get configmap")
 			controllerutil.RemoveFinalizer(configMap, "example.com/finalizer")
