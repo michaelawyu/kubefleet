@@ -25,7 +25,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -589,12 +588,12 @@ var _ = Describe("validating resource placement using different apply strategies
 						},
 					}
 
-					if err := hubClient.Delete(ctx, conflictedRP); err != nil && !errors.IsNotFound(err) {
+					if err := hubClient.Delete(ctx, conflictedRP); err != nil && !apierrors.IsNotFound(err) {
 						return fmt.Errorf("failed to delete RP %s: %w", conflictedRPName, err)
 					}
 
 					// Wait until the RP is fully deleted.
-					if err := hubClient.Get(ctx, types.NamespacedName{Name: conflictedRPName, Namespace: workNamespaceName}, conflictedRP); !errors.IsNotFound(err) {
+					if err := hubClient.Get(ctx, types.NamespacedName{Name: conflictedRPName, Namespace: workNamespaceName}, conflictedRP); !apierrors.IsNotFound(err) {
 						return fmt.Errorf("RP %s is still present or an unexpected error has occurred: %w", conflictedRPName, err)
 					}
 					return nil
