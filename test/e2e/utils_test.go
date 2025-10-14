@@ -1007,7 +1007,7 @@ func checkNamespaceExistsWithOwnerRefOnMemberCluster(nsName, crpName string) {
 }
 
 func checkConfigMapExistsWithOwnerRefOnMemberCluster(namespace, cmName, rpName string) {
-	Consistently(func() error {
+	cmHasNoWorkOwnerRefActual := func() error {
 		cm := &corev1.ConfigMap{}
 		if err := allMemberClusters[0].KubeClient.Get(ctx, types.NamespacedName{Name: cmName, Namespace: namespace}, cm); err != nil {
 			return fmt.Errorf("failed to get configmap %s/%s: %w", namespace, cmName, err)
@@ -1025,7 +1025,11 @@ func checkConfigMapExistsWithOwnerRefOnMemberCluster(namespace, cmName, rpName s
 			}
 		}
 		return nil
-	}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "ConfigMap which is not owned by the RP should not be deleted")
+	}
+
+	// Must use Eventually checks first, as Fleet agents might not act fast enough in the test environment.
+	Eventually(cmHasNoWorkOwnerRefActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "ConfigMap still has AppliedWork owner reference")
+	Consistently(cmHasNoWorkOwnerRefActual, consistentlyDuration, consistentlyInterval).Should(Succeed(), "ConfigMap which is not owned by the RP should not be deleted")
 }
 
 // cleanupPlacement deletes the placement and waits until the resources are not found.
