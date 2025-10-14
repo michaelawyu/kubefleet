@@ -155,7 +155,7 @@ var _ = Describe("ClusterResourcePlacement eviction of bound binding, no taint s
 
 	// The two test specs below use a longer timeout; due to the async nature of our controllers, the controllers
 	// might not act fast enough even if the eviction object has reported a successful eviction (the eviction controller
-	// considers an eviction to be sucessful as soon as the target binding has been marked for deletion; it will
+	// considers an eviction to be successful as soon as the target binding has been marked for deletion; it will
 	// not wait for its final removal), which might lead to a number of inconsistencies.
 	//
 	// TO-DO: longer timeouts are not an ultimate solution; identify better signals that can prove that the CRP
