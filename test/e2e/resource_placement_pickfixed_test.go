@@ -278,10 +278,22 @@ var _ = Describe("placing namespaced scoped resources using an RP with PickFixed
 		})
 
 		It("should have a deletion timestamp on work objects", func() {
-			work := &placementv1beta1.Work{}
-			workName := fmt.Sprintf("%s.%s-work", rpKey.Namespace, rpName)
-			Expect(hubClient.Get(ctx, types.NamespacedName{Namespace: fmt.Sprintf("fleet-member-%s", memberCluster1EastProdName), Name: workName}, work)).Should(Succeed(), "Failed to get work")
-			Expect(work.DeletionTimestamp).ShouldNot(BeNil(), "Work should have a deletion timestamp")
+			// Use an Eventually block as the Fleet controllers might not be fast enough.
+			//
+			// Note that the CRP controller will ignore deleted bindings when reporting status.
+			Eventually(func() error {
+				work := &placementv1beta1.Work{}
+				reservedMemberNSName := fmt.Sprintf("fleet-member-%s", memberCluster1EastProdName)
+				workName := fmt.Sprintf("%s.%s-work", rpKey.Namespace, rpName)
+				if err := hubClient.Get(ctx, types.NamespacedName{Namespace: reservedMemberNSName, Name: workName}, work); err != nil {
+					return fmt.Errorf("failed to get work: %w", err)
+				}
+
+				if work.DeletionTimestamp == nil {
+					return fmt.Errorf("work %s in namespace %s has not yet been marked for deletion", workName, reservedMemberNSName)
+				}
+				return nil
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to verify that work has been marked for deletion")
 		})
 
 		It("configmap should still exists on previously specified cluster and be in deleting state", func() {
