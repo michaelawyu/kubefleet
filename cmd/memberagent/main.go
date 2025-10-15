@@ -171,8 +171,8 @@ func main() {
 	mcNamespace := fmt.Sprintf(utils.NamespaceNameFormat, mcName)
 
 	memberConfig := ctrl.GetConfigOrDie()
-	hubConfig.QPS = float32(*memberQPS)
-	hubConfig.Burst = *memberBurst
+	memberConfig.QPS = float32(*memberQPS)
+	memberConfig.Burst = *memberBurst
 	// we place the leader election lease on the member cluster to avoid adding load to the hub
 	hubOpts := ctrl.Options{
 		Scheme: scheme,
