@@ -969,7 +969,7 @@ var _ = Describe("placing resources using a CRP of PickAll placement type", func
 														Name:     azure.PerGBMemoryCostProperty,
 														Operator: placementv1beta1.PropertySelectorGreaterThanOrEqualTo,
 														Values: []string{
-															"0",
+															"9999",
 														},
 													},
 												},

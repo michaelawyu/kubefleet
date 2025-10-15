@@ -820,7 +820,7 @@ var _ = Describe("placing namespaced scoped resources using a RP with PickAll po
 														Name:     azure.PerGBMemoryCostProperty,
 														Operator: placementv1beta1.PropertySelectorGreaterThanOrEqualTo,
 														Values: []string{
-															"0",
+															"9999",
 														},
 													},
 												},
