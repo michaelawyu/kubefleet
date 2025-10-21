@@ -850,7 +850,7 @@ var _ = Describe("placing namespaced scoped resources using a RP with PickAll po
 		It("should not place resources on any cluster", checkIfRemovedConfigMapFromAllMemberClusters)
 	})
 
-	FContext("with affinities, label and property selectors (VM size), no matching clusters", Ordered, func() {
+	Context("with affinities, label and property selectors (VM size), no matching clusters", Ordered, func() {
 		It("creating the RP should succeed", func() {
 			if !isAzurePropertyProviderEnabled {
 				Skip("Skipping this test spec as Azure property provider is not enabled in the test environment")

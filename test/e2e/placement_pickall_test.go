@@ -1005,7 +1005,7 @@ var _ = Describe("placing resources using a CRP of PickAll placement type", func
 
 	// TO-DO (chenyu1): modify the E2E setup to allow fixed node SKU assignment, so that the test suite can include
 	// a case where SKU-based scheduling can yield consistent non-empty results.
-	FContext("with affinities, property selectors only (VM size), no matching clusters", Ordered, func() {
+	Context("with affinities, property selectors only (VM size), no matching clusters", Ordered, func() {
 		crpName := fmt.Sprintf(crpNameTemplate, GinkgoParallelProcess())
 		// Cross-ref with the setup script to ensure that this VM size is not used at all.
 		absentVMSize := "Standard_D8s_v3"
