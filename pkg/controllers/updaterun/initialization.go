@@ -36,6 +36,7 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/annotations"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/condition"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/controller"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils/defaulter"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/overrider"
 )
 
@@ -95,6 +96,10 @@ func (r *Reconciler) validatePlacement(ctx context.Context, updateRun placementv
 		klog.ErrorS(err, "Failed to get placement", "placement", placementKey, "updateRun", updateRunRef)
 		return types.NamespacedName{}, controller.NewAPIServerError(true, err)
 	}
+
+	// fill out all the default values for placement, mutation webhook is not setup for resource placement.
+	// TODO: setup mutation webhook for resource placement.
+	defaulter.SetPlacementDefaults(placement)
 
 	// Check if the Placement has an external rollout strategy.
 	placementSpec := placement.GetPlacementSpec()
@@ -556,17 +561,18 @@ func (r *Reconciler) recordInitializationSucceeded(ctx context.Context, updateRu
 	return nil
 }
 
-// recordInitializationFailed records the failed initialization condition in the ClusterStagedUpdateRun status.
-func (r *Reconciler) recordInitializationFailed(ctx context.Context, updateRun *placementv1beta1.ClusterStagedUpdateRun, message string) error {
-	meta.SetStatusCondition(&updateRun.Status.Conditions, metav1.Condition{
+// recordInitializationFailed records the failed initialization condition in the updateRun status.
+func (r *Reconciler) recordInitializationFailed(ctx context.Context, updateRun placementv1beta1.UpdateRunObj, message string) error {
+	updateRunStatus := updateRun.GetUpdateRunStatus()
+	meta.SetStatusCondition(&updateRunStatus.Conditions, metav1.Condition{
 		Type:               string(placementv1beta1.StagedUpdateRunConditionInitialized),
 		Status:             metav1.ConditionFalse,
-		ObservedGeneration: updateRun.Generation,
+		ObservedGeneration: updateRun.GetGeneration(),
 		Reason:             condition.UpdateRunInitializeFailedReason,
 		Message:            message,
 	})
 	if updateErr := r.Client.Status().Update(ctx, updateRun); updateErr != nil {
-		klog.ErrorS(updateErr, "Failed to update the ClusterStagedUpdateRun status as failed to initialize", "clusterStagedUpdateRun", klog.KObj(updateRun))
+		klog.ErrorS(updateErr, "Failed to update the updateRun status as failed to initialize", "updateRun", klog.KObj(updateRun))
 		// updateErr can be retried.
 		return controller.NewUpdateIgnoreConflictError(updateErr)
 	}

@@ -43,7 +43,7 @@ import (
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
-	"github.com/kubefleet-dev/kubefleet/pkg/metrics"
+	hubmetrics "github.com/kubefleet-dev/kubefleet/pkg/metrics/hub"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/condition"
 	metricsutils "github.com/kubefleet-dev/kubefleet/test/utils/metrics"
@@ -233,7 +233,7 @@ var _ = Describe("Test the clusterStagedUpdateRun controller", func() {
 })
 
 func resetUpdateRunMetrics() {
-	metrics.FleetUpdateRunStatusLastTimestampSeconds.Reset()
+	hubmetrics.FleetUpdateRunStatusLastTimestampSeconds.Reset()
 }
 
 // validateUpdateRunMetricsEmitted validates the update run status metrics are emitted and are emitted in the correct order.
@@ -263,6 +263,7 @@ func generateMetricsLabels(
 	condition, status, reason string,
 ) []*prometheusclientmodel.LabelPair {
 	return []*prometheusclientmodel.LabelPair{
+		{Name: ptr.To("namespace"), Value: &updateRun.Namespace},
 		{Name: ptr.To("name"), Value: &updateRun.Name},
 		{Name: ptr.To("generation"), Value: ptr.To(strconv.FormatInt(updateRun.Generation, 10))},
 		{Name: ptr.To("condition"), Value: ptr.To(condition)},
@@ -662,7 +663,7 @@ func validateUpdateRunHasFinalizer(ctx context.Context, updateRun *placementv1be
 		if err := k8sClient.Get(ctx, namespacedName, updateRun); err != nil {
 			return fmt.Errorf("failed to get clusterStagedUpdateRun %s: %w", namespacedName, err)
 		}
-		if !controllerutil.ContainsFinalizer(updateRun, placementv1beta1.ClusterStagedUpdateRunFinalizer) {
+		if !controllerutil.ContainsFinalizer(updateRun, placementv1beta1.UpdateRunFinalizer) {
 			return fmt.Errorf("finalizer not added to clusterStagedUpdateRun %s", namespacedName)
 		}
 		return nil
