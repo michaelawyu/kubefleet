@@ -34,10 +34,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
-	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	fleetv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
-	"github.com/kubefleet-dev/kubefleet/pkg/metrics"
 )
 
 const (
@@ -46,6 +44,7 @@ const (
 	deployName      = "deploy-1"
 	jobName         = "job-1"
 	configMapName   = "configmap-1"
+	secretName      = "secret-1"
 	nsName          = "ns-1"
 	clusterRoleName = "clusterrole-1"
 )
@@ -160,6 +159,20 @@ var (
 		},
 	}
 
+	secret = &corev1.Secret{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Secret",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: nsName,
+			Name:      secretName,
+		},
+		Data: map[string][]byte{
+			dummyLabelKey: []byte(dummyLabelValue1),
+		},
+	}
+
 	clusterRole = &rbacv1.ClusterRole{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "rbac.authorization.k8s.io/v1",
@@ -245,12 +258,6 @@ func TestMain(m *testing.M) {
 
 	// Initialize the variables.
 	initializeVariables()
-
-	// Register the metrics.
-	ctrlmetrics.Registry.MustRegister(
-		metrics.FleetWorkProcessingRequestsTotal,
-		metrics.FleetManifestProcessingRequestsTotal,
-	)
 
 	os.Exit(m.Run())
 }
