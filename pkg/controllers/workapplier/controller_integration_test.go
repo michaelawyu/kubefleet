@@ -5678,7 +5678,7 @@ var _ = Describe("drift detection and takeover", func() {
 				},
 			}
 
-			workStatusUpdatedActual := workStatusUpdated(workName, workConds, manifestConds, nil, nil)
+			workStatusUpdatedActual := workStatusUpdated(memberReservedNSName1, workName, workConds, manifestConds, nil, nil)
 			Eventually(workStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update work status")
 		})
 
@@ -5942,7 +5942,7 @@ var _ = Describe("drift detection and takeover", func() {
 				},
 			}
 
-			workStatusUpdatedActual := workStatusUpdated(workName, workConds, manifestConds, nil, nil)
+			workStatusUpdatedActual := workStatusUpdated(memberReservedNSName1, workName, workConds, manifestConds, nil, nil)
 			Eventually(workStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update work status")
 		})
 
@@ -6073,7 +6073,7 @@ var _ = Describe("drift detection and takeover", func() {
 				},
 			}
 
-			workStatusUpdatedActual := workStatusUpdated(workName, workConds, manifestConds, nil, nil)
+			workStatusUpdatedActual := workStatusUpdated(memberReservedNSName1, workName, workConds, manifestConds, nil, nil)
 			Eventually(workStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update work status")
 		})
 
@@ -7314,7 +7314,7 @@ var _ = Describe("report diff", func() {
 				},
 			}
 
-			workStatusUpdatedActual := workStatusUpdated(workName, workConds, manifestConds, nil, nil)
+			workStatusUpdatedActual := workStatusUpdated(memberReservedNSName1, workName, workConds, manifestConds, nil, nil)
 			Eventually(workStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update work status")
 		})
 
@@ -7460,7 +7460,7 @@ var _ = Describe("report diff", func() {
 				},
 			}
 
-			workStatusUpdatedActual := workStatusUpdated(workName, workConds, manifestConds, nil, nil)
+			workStatusUpdatedActual := workStatusUpdated(memberReservedNSName1, workName, workConds, manifestConds, nil, nil)
 			Eventually(workStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update work status")
 		})
 
@@ -7589,7 +7589,7 @@ var _ = Describe("report diff", func() {
 				},
 			}
 
-			workStatusUpdatedActual := workStatusUpdated(workName, workConds, manifestConds, nil, nil)
+			workStatusUpdatedActual := workStatusUpdated(memberReservedNSName1, workName, workConds, manifestConds, nil, nil)
 			Eventually(workStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update work status")
 		})
 
