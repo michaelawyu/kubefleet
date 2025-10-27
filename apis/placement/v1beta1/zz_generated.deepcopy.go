@@ -1548,18 +1548,9 @@ func (in *DynamicResourceClaimStatus) DeepCopyInto(out *DynamicResourceClaimStat
 	*out = *in
 	if in.SuitableClusters != nil {
 		in, out := &in.SuitableClusters, &out.SuitableClusters
-		*out = make(map[string]*int64, len(*in))
+		*out = make(map[string]int64, len(*in))
 		for key, val := range *in {
-			var outVal *int64
-			if val == nil {
-				(*out)[key] = nil
-			} else {
-				inVal := (*in)[key]
-				in, out := &inVal, &outVal
-				*out = new(int64)
-				**out = **in
-			}
-			(*out)[key] = outVal
+			(*out)[key] = val
 		}
 	}
 	if in.Conditions != nil {
@@ -2412,6 +2403,11 @@ func (in *ResourceBindingSpec) DeepCopyInto(out *ResourceBindingSpec) {
 	if in.ApplyStrategy != nil {
 		in, out := &in.ApplyStrategy, &out.ApplyStrategy
 		*out = new(ApplyStrategy)
+		(*in).DeepCopyInto(*out)
+	}
+	if in.ReportBackStrategy != nil {
+		in, out := &in.ReportBackStrategy, &out.ReportBackStrategy
+		*out = new(ReportBackStrategy)
 		(*in).DeepCopyInto(*out)
 	}
 }

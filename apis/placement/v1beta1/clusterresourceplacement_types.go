@@ -264,7 +264,7 @@ type PlacementPolicy struct {
 	Tolerations []Toleration `json:"tolerations,omitempty"`
 
 	// +optional
-	DynamicResourceClaims []DynamicResourceClaim `json:"dynamicResourceClaim,omitempty"`
+	DynamicResourceClaims []DynamicResourceClaim `json:"dynamicResourceClaims,omitempty"`
 }
 
 // Affinity is a group of cluster affinity scheduling rules. More to be added.

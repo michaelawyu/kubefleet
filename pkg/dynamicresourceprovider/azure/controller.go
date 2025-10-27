@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 )
@@ -27,6 +30,9 @@ const (
 const (
 	clusterWithOverridenWeight1 = "model-server-cluster-1"
 	clusterWithOverridenWeight2 = "model-server-cluster-2"
+	clusterWithOverridenWeight3 = "kind-cluster-1"
+	clusterWithOverridenWeight4 = "kind-cluster-2"
+	clusterWithOverridenWeight5 = "model-server-cluster-3"
 )
 
 var (
@@ -36,11 +42,14 @@ var (
 	clustersWithWeightOverrides = map[string]int64{
 		clusterWithOverridenWeight1: 80,
 		clusterWithOverridenWeight2: 60,
+		clusterWithOverridenWeight3: 40,
+		clusterWithOverridenWeight4: 20,
+		clusterWithOverridenWeight5: 10,
 	}
 )
 
 type Reconciler struct {
-	hubClient client.Client
+	HubClient client.Client
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -59,7 +68,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	potentialClusters := placementSchedulingCtxObj.GetPlacementSchedulingContextSpec().PotentialClusters
 
-	dynamicResourceClaims, err := r.retrieveDynamicResourceClaims(ctx, req.Namespace, req.Name)
+	placementRef := placementSchedulingCtxObj.GetPlacementSchedulingContextSpec().PlacementRef
+	dynamicResourceClaims, err := r.retrieveDynamicResourceClaims(ctx, req.Namespace, placementRef)
 	if err != nil {
 		klog.ErrorS(err, "Failed to retrieve dynamic resource claims", "placementSchedulingCtx", placementSchedulingCtxRef)
 		return ctrl.Result{}, err
@@ -81,7 +91,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 		if !supportedResourceNames.Has(drc.ResourceName) {
 			klog.V(2).InfoS("Skip processing dynamic resource claim as the resource name is not supported by azure dynamic resource provider", "dynamicResourceName", drc.ResourceName, "placementSchedulingCtx", placementSchedulingCtxRef)
-			drcStatus.Conditions = append(drcStatus.Conditions, metav1.Condition{
+			meta.SetStatusCondition(&drcStatus.Conditions, metav1.Condition{
 				Type:               azureDynamicResProviderCondTypClaimProcessed,
 				Status:             metav1.ConditionFalse,
 				Reason:             azureDynamicResProviderCondTypClaimProcessedReasonResNotSupported,
@@ -96,13 +106,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		for _, clusterName := range potentialClusters {
 			if weight, isOverriden := clustersWithWeightOverrides[clusterName]; isOverriden {
 				suitableClusters[clusterName] = weight
-			} else {
-				// Default to a weight of 0.
-				suitableClusters[clusterName] = 0
 			}
 		}
 		drcStatus.SuitableClusters = suitableClusters
-		drcStatus.Conditions = append(drcStatus.Conditions, metav1.Condition{
+		meta.SetStatusCondition(&drcStatus.Conditions, metav1.Condition{
 			Type:               azureDynamicResProviderCondTypClaimProcessed,
 			Status:             metav1.ConditionTrue,
 			Reason:             azureDynamicResProviderCondTypClaimProcessedReasonCompleted,
@@ -123,28 +130,28 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 func (r *Reconciler) retrievePlacementSchedulingContextSpec(ctx context.Context, namespace, name string) (placementv1beta1.PlacementSchedulingContextObj, error) {
 	if namespace == "" {
 		crpSchedulingCtx := &placementv1beta1.ClusterResourcePlacementSchedulingContext{}
-		if err := r.hubClient.Get(ctx, client.ObjectKey{Name: name}, crpSchedulingCtx); err != nil {
-			klog.ErrorS(err, "Failed to get cluster resource placmeent scheduling context", "CRPSchedulingCtx", name)
+		if err := r.HubClient.Get(ctx, client.ObjectKey{Name: name}, crpSchedulingCtx); err != nil {
+			klog.ErrorS(err, "Failed to get cluster resource placement scheduling context", "CRPSchedulingCtx", name)
 			return nil, fmt.Errorf("failed to get cluster resource placement scheduling context: %w", err)
 		}
 		return crpSchedulingCtx, nil
 	}
 
 	rpSchedulingCtx := &placementv1beta1.ResourcePlacementSchedulingContext{}
-	if err := r.hubClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, rpSchedulingCtx); err != nil {
+	if err := r.HubClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, rpSchedulingCtx); err != nil {
 		klog.ErrorS(err, "Failed to get resource placement scheduling context", "RPSchedulingCtx", klog.KRef(namespace, name))
 		return nil, fmt.Errorf("failed to get resource placement scheduling context: %w", err)
 	}
 	return rpSchedulingCtx, nil
 }
 
-func (r *Reconciler) retrieveDynamicResourceClaims(ctx context.Context, namespace, placementSchedulingCtxName string) ([]*placementv1beta1.DynamicResourceClaim, error) {
+func (r *Reconciler) retrieveDynamicResourceClaims(ctx context.Context, placementNamespace, placementName string) ([]*placementv1beta1.DynamicResourceClaim, error) {
 	dynamicResourceClaims := []*placementv1beta1.DynamicResourceClaim{}
 
-	if namespace == "" {
+	if placementNamespace == "" {
 		crp := &placementv1beta1.ClusterResourcePlacement{}
-		crpName := placementSchedulingCtxName
-		if err := r.hubClient.Get(ctx, client.ObjectKey{Name: crpName}, crp); err != nil {
+		crpName := placementName
+		if err := r.HubClient.Get(ctx, client.ObjectKey{Name: crpName}, crp); err != nil {
 			klog.ErrorS(err, "Failed to get cluster resource placement", "CRP", crpName)
 			return nil, fmt.Errorf("failed to get cluster resource placement: %w", err)
 		}
@@ -161,9 +168,9 @@ func (r *Reconciler) retrieveDynamicResourceClaims(ctx context.Context, namespac
 	}
 
 	rp := &placementv1beta1.ResourcePlacement{}
-	rpName := placementSchedulingCtxName
-	if err := r.hubClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: rpName}, rp); err != nil {
-		klog.ErrorS(err, "Failed to get resource placement", "RP", klog.KRef(namespace, rpName))
+	rpName := placementName
+	if err := r.HubClient.Get(ctx, client.ObjectKey{Namespace: placementNamespace, Name: rpName}, rp); err != nil {
+		klog.ErrorS(err, "Failed to get resource placement", "RP", klog.KRef(placementNamespace, rpName))
 		return nil, fmt.Errorf("failed to get resource placement: %w", err)
 	}
 
@@ -184,9 +191,18 @@ func (r *Reconciler) updatePlacementSchedulingContextStatus(ctx context.Context,
 	}
 	placementSchedulingContext.SetPlacementSchedulingContextStatus(&placementSchedulingContextStatus)
 
-	if err := r.hubClient.Status().Update(ctx, placementSchedulingContext); err != nil {
+	if err := r.HubClient.Status().Update(ctx, placementSchedulingContext); err != nil {
 		klog.ErrorS(err, "Failed to update placement scheduling context status", "placementSchedulingCtx", klog.KObj(placementSchedulingContext))
 		return fmt.Errorf("failed to update placement scheduling context status: %w", err)
 	}
 	return nil
+}
+
+func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		Named(azureDynamicResourceProviderControllerName).
+		Watches(&placementv1beta1.ResourcePlacementSchedulingContext{}, &handler.EnqueueRequestForObject{}).
+		Watches(&placementv1beta1.ClusterResourcePlacementSchedulingContext{}, &handler.EnqueueRequestForObject{}).
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
+		Complete(r)
 }

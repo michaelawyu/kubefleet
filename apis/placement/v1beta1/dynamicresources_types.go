@@ -143,18 +143,19 @@ type DynamicResourceSliceList struct {
 
 // +genclient
 // +genclient:nonNamespaced
-// +kubebuilder:resource:scope=Cluster,categories={fleet,fleet-placement}
+// +kubebuilder:resource:scope="Cluster",categories={fleet,fleet-placement}
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
+// +kubebuilder:subresource:status
 type ClusterResourcePlacementSchedulingContext struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// +kubebuilder:validation:Required
 	// +required
-	Spec PlacementSchedulingContextSpec `json:"placementSchedulingSpec,omitempty"`
+	Spec PlacementSchedulingContextSpec `json:"spec,omitempty"`
 	// +optional
-	Status PlacementSchedulingContextStatus `json:"placementSchedulingStatus,omitempty"`
+	Status PlacementSchedulingContextStatus `json:"status,omitempty"`
 }
 
 func (c *ClusterResourcePlacementSchedulingContext) GetPlacementSchedulingContextSpec() *PlacementSchedulingContextSpec {
@@ -174,19 +175,20 @@ func (c *ClusterResourcePlacementSchedulingContext) SetPlacementSchedulingContex
 }
 
 // +genclient
-// +genclient:nonNamespaced
-// +kubebuilder:resource:scope=Cluster,categories={fleet,fleet-placement}
+// +genclient:Namespaced
+// +kubebuilder:resource:scope="Namespaced",categories={fleet,fleet-placement}
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
+// +kubebuilder:subresource:status
 type ResourcePlacementSchedulingContext struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// +kubebuilder:validation:Required
 	// +required
-	Spec PlacementSchedulingContextSpec `json:"placementSchedulingSpec,omitempty"`
+	Spec PlacementSchedulingContextSpec `json:"spec,omitempty"`
 	// +optional
-	Status PlacementSchedulingContextStatus `json:"placementSchedulingStatus,omitempty"`
+	Status PlacementSchedulingContextStatus `json:"status,omitempty"`
 }
 
 func (r *ResourcePlacementSchedulingContext) GetPlacementSchedulingContextSpec() *PlacementSchedulingContextSpec {
@@ -208,6 +210,9 @@ func (r *ResourcePlacementSchedulingContext) SetPlacementSchedulingContextStatus
 type PlacementSchedulingContextSpec struct {
 	// +optional
 	PotentialClusters []string `json:"potentialClusters,omitempty"`
+	// +required
+	// +kubebuilder:validation:Required
+	PlacementRef string `json:"placementRef,omitempty"`
 }
 
 type PlacementSchedulingContextStatus struct {
@@ -267,4 +272,13 @@ type PlacementSchedulingContextObj interface {
 	client.Object
 	PlacementSchedulingContextSpecGetterSetter
 	PlacementSchedulingContextStatusGetterSetter
+}
+
+func init() {
+	SchemeBuilder.Register(
+		&DynamicResourceClass{}, &DynamicResourceClassList{},
+		&DynamicResourceSlice{}, &DynamicResourceSliceList{},
+		&ClusterResourcePlacementSchedulingContext{}, &ClusterResourcePlacementSchedulingContextList{},
+		&ResourcePlacementSchedulingContext{}, &ResourcePlacementSchedulingContextList{},
+	)
 }

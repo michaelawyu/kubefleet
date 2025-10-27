@@ -38,14 +38,18 @@ spec:
             type: string
           metadata:
             type: object
-          placementSchedulingSpec:
+          spec:
             properties:
+              placementRef:
+                type: string
               potentialClusters:
                 items:
                   type: string
                 type: array
+            required:
+            - placementRef
             type: object
-          placementSchedulingStatus:
+          status:
             properties:
               dynamicResourceClaimStatus:
                 items:
@@ -120,7 +124,9 @@ spec:
                 type: array
             type: object
         required:
-        - placementSchedulingSpec
+        - spec
         type: object
     served: true
     storage: true
+    subresources:
+      status: {}

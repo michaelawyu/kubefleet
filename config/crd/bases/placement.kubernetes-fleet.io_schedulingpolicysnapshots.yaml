@@ -396,7 +396,7 @@ spec:
                       type: string
                     maxItems: 100
                     type: array
-                  dynamicResourceClaim:
+                  dynamicResourceClaims:
                     items:
                       properties:
                         controllerName:
