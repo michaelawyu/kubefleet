@@ -17,6 +17,10 @@ import (
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 )
 
+// Important: for simplicity reasons this controller is currently set up to return static
+// results. API behavior is for preview and demonstration purposes only, as the capacity support
+// is under development and is not yet publicly available.
+
 const (
 	azureDynamicResourceProviderControllerName = "azure-dynamic-resource-provider"
 )
