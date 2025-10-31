@@ -1228,7 +1228,7 @@ var _ = Describe("parallel processing with waves", func() {
 				switch {
 				case gvk.Group == "" && gvk.Kind == "PersistentVolume":
 					// Skip the PV resources as their deletion might get stuck in the test environment.
-					// This in most cases should have no side effect as the tests do not re-use namespaces and
+					// This in most cases should have no side effect as the tests do not reuse namespaces and
 					// the resources have random suffixes in their names.
 					continue
 				case gvk.Group == "" && gvk.Kind == "PersistentVolumeClaim":
