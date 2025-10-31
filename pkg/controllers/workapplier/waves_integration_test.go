@@ -1152,6 +1152,8 @@ var _ = Describe("parallel processing with waves", func() {
 					return fmt.Errorf("Work status conditions mismatch (-got, +want):\n%s", diff)
 				}
 				return nil
+				// As each wave starts with a fixed delay, and this specific test case involves all the waves,
+				// the test spec here uses a longer timeout and interval.
 			}, eventuallyDuration*10, eventuallyInterval*5).Should(Succeed(), "Failed to update work status")
 		})
 
@@ -1213,6 +1215,55 @@ var _ = Describe("parallel processing with waves", func() {
 
 				observedLatestCreationTimestampInLastWave = &timestamps[len(timestamps)-1]
 			}
+		})
+
+		AfterAll(func() {
+			// Delete the Work object and related resources.
+			deleteWorkObject(workName, memberReservedNSName3)
+
+			// Remove all the placed objects if they still exist.
+			for idx := range objectsOfVariousResourceTypes {
+				objCopy := objectsOfVariousResourceTypes[idx].DeepCopyObject().(client.Object)
+				gvk := objCopy.GetObjectKind().GroupVersionKind()
+				switch {
+				case gvk.Group == "" && gvk.Kind == "PersistentVolume":
+					// Skip the PV resources as their deletion might get stuck in the test environment.
+					// This in most cases should have no side effect as the tests do not re-use namespaces and
+					// the resources have random suffixes in their names.
+					continue
+				case gvk.Group == "" && gvk.Kind == "PersistentVolumeClaim":
+					// For the same reason as above, skip the PVC resources.
+					continue
+				case gvk.Group == "" && gvk.Kind == "ReplicationController":
+					// For the same reason as above, skip the RC resources.
+					continue
+				case gvk.Group == "batch" && gvk.Kind == "Job":
+					// For the same reason as above, skip the Job resources.
+					continue
+				}
+				placeholder := objCopy.DeepCopyObject().(client.Object)
+
+				Eventually(func() error {
+					if err := memberClient3.Delete(ctx, objCopy); err != nil && !errors.IsNotFound(err) {
+						return fmt.Errorf("failed to delete the object: %w", err)
+					}
+
+					// Check that the object has been deleted.
+					if err := memberClient3.Get(ctx, client.ObjectKey{Namespace: objCopy.GetNamespace(), Name: objCopy.GetName()}, placeholder); !errors.IsNotFound(err) {
+						return fmt.Errorf("object still exists or an unexpected error occurred: %w", err)
+					}
+					return nil
+				}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove a placed object (idx: %d)", idx)
+			}
+
+			// Ensure that the AppliedWork object has been removed.
+			appliedWorkRemovedActual := appliedWorkRemovedActual(workName, nsName)
+			Eventually(appliedWorkRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove the AppliedWork object")
+
+			workRemovedActual := workRemovedActual(workName)
+			Eventually(workRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove the Work object")
+			// The environment prepared by the envtest package does not support namespace
+			// deletion; consequently this test suite would not attempt to verify its deletion.
 		})
 	})
 })
