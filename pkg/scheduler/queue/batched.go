@@ -68,7 +68,8 @@ func (bq *batchedProcessingPlacementSchedulingQueue) Close() {
 	// Signal the mover goroutine to exit.
 	//
 	// Note that this will trigger the mover goroutine to attempt another key move, but the
-	// active queue will not be able to accept the key any more.
+	// active queue might not be able to accept the key any more (which is OK and does not
+	// result in an error).
 	close(bq.moveNow)
 
 	bq.batched.ShutDown()
@@ -82,9 +83,10 @@ func (bq *batchedProcessingPlacementSchedulingQueue) CloseWithDrain() {
 	// Signal that all items in the batched queue should be moved to the active queue right away.
 	close(bq.moveNow)
 
-	// Wait until all the items in the batched queue have been processed..
+	// Wait until all the items in the moving process from the batched queue to the active queue have completed
+	// their moves.
 	bq.batched.ShutDownWithDrain()
-	// Wait until all the items in the active queue have been processed.
+	// Wait until all the items that are currently being processed by the scheduler to finish.
 	bq.active.ShutDownWithDrain()
 }
 
@@ -102,9 +104,7 @@ func (bq *batchedProcessingPlacementSchedulingQueue) NextPlacementKey() (key Pla
 // Done marks a PlacementKey as done.
 func (bq *batchedProcessingPlacementSchedulingQueue) Done(placementKey PlacementKey) {
 	bq.active.Done(placementKey)
-	// It is OK for Done to be called on the batched queue even if the item has never been
-	// added to the batched queue before. In this case the call is simply a no-op.
-	bq.batched.Done(placementKey)
+	// The keys in the batched queue are marked as done as soon as they are moved to the active queue.
 }
 
 // Add adds a PlacementKey to the work queue for immediate processing.
@@ -130,9 +130,7 @@ func (bq *batchedProcessingPlacementSchedulingQueue) AddRateLimited(placementKey
 // Forget untracks a PlacementKey from rate limiter(s) (if any) set up with the queue.
 func (bq *batchedProcessingPlacementSchedulingQueue) Forget(placementKey PlacementKey) {
 	bq.active.Forget(placementKey)
-	// It is OK for Forget to be called on the batched queue even if the item has never been
-	// added to the batched queue before. In this case the call is simply a no-op.
-	bq.batched.Forget(placementKey)
+	// The keys in the batched queue are forgotten as soon as they are moved to the active queue.
 }
 
 // AddBatched tracks a PlacementKey and adds such keys in batch later to the work queue when appropriate.
@@ -188,7 +186,7 @@ func (bq *batchedProcessingPlacementSchedulingQueue) moveAllBatchedItemsToActive
 			// The keys popped from the batched queue are not yet added to the active queue, in other words,
 			// they are not yet marked as done; the batched queue will still track them and adding them
 			// to the batched queue again at this moment will not trigger the batched queue to yield the same
-			// keys again. This implies that the at maximum we will be movine a number of keys equal to
+			// keys again. This implies that the at maximum we will be moving a number of keys equal to
 			// the number of placement objects in the system at a time, which should be a finite number.
 			// Still, to be on the safer side here KubeFleet sets a cap the number of keys to move per go.
 			break
@@ -196,12 +194,14 @@ func (bq *batchedProcessingPlacementSchedulingQueue) moveAllBatchedItemsToActive
 	}
 
 	for _, key := range keysToMove {
-		// Add the keys to the active queue in batch. Here the implementation does not move keys one by one
-		// right after they are popped as this pattern risks synchronized processing (i.e., a key is popped
-		// from the batched queue, immeidiately added to the active queue and gets processed, then added
-		// back to the batched queue again by one of the watchers before the key moving attempt is finished,
-		// which results in perpetual key moving).
+		// Mark the keys as done in the batched queue and add the keys to the active queue in batch. Here the
+		// implementation keeps the keys in memory first and does not move keys right after they are popped as
+		// this pattern risks synchronized processing (i.e., a key is popped from the batched queue, immeidiately added to the
+		// active queue and gets marked as done by the scheduler, then added back to the batched queue again by
+		// one of the watchers before the key moving attempt is finished, which results in perpetual key moving).
 		bq.active.Add(key)
+		bq.batched.Done(key)
+		bq.batched.Forget(key)
 	}
 }
 

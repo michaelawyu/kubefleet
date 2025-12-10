@@ -55,7 +55,8 @@ func TestBatchedProcessingPlacementSchedulingQueue_BasicOps(t *testing.T) {
 // TestBatchedProcessingPlacementSchedulingQueue_BatchedOps tests the batched ops
 // (AddBatched) of a batchedProcessingPlacementSchedulingQueue.
 func TestBatchedProcessingPlacementSchedulingQueue_BatchedOps(t *testing.T) {
-	bq := NewBatchedProcessingPlacementSchedulingQueue("TestOnly", nil, nil, 5)
+	movePeriodSeconds := int32(5) // 5 seconds
+	bq := NewBatchedProcessingPlacementSchedulingQueue("TestOnly", nil, nil, movePeriodSeconds)
 	bq.Run()
 
 	addedTimestamp := time.Now()
@@ -78,16 +79,17 @@ func TestBatchedProcessingPlacementSchedulingQueue_BatchedOps(t *testing.T) {
 	if !cmp.Equal(keysToAddBatched, keysRecved) {
 		t.Fatalf("Received keys %v, want %v", keysRecved, keysToAddBatched)
 	}
-	// Allow some buffer time (1 second).
-	if timeSpent := time.Since(addedTimestamp); timeSpent < 4*time.Second {
-		t.Fatalf("time to move keys, want no less than %f seconds, got %f seconds", 4.0, timeSpent.Seconds())
+	// Allow some buffer time (+1 second).
+	if timeSpent := time.Since(addedTimestamp); timeSpent < time.Duration(movePeriodSeconds-1)*time.Second {
+		t.Fatalf("time to move keys, want no less than %f seconds, got %f seconds", float64(movePeriodSeconds-1), timeSpent.Seconds())
 	}
 }
 
 // TestBatchedProcessingPlacementSchedulingQueue_MoveNow tests the moveNow signal
 // built in a batchedProcessingPlacementSchedulingQueue.
 func TestBatchedProcessingPlacementSchedulingQueue_MoveNow(t *testing.T) {
-	bq := NewBatchedProcessingPlacementSchedulingQueue("TestOnly", nil, nil, 10)
+	movePeriodSeconds := int32(10) // 10 seconds
+	bq := NewBatchedProcessingPlacementSchedulingQueue("TestOnly", nil, nil, movePeriodSeconds)
 	bq.Run()
 
 	keysToAddBatched := []PlacementKey{"A", "B", "C"}
@@ -117,16 +119,17 @@ func TestBatchedProcessingPlacementSchedulingQueue_MoveNow(t *testing.T) {
 	if !cmp.Equal(keysToAddBatched, keysRecved) {
 		t.Fatalf("Received keys %v, want %v", keysRecved, keysToAddBatched)
 	}
-	// Allow some buffer time (1 second).
-	if timeSpent := time.Since(moveNowTriggeredTimestamp); timeSpent > 2*time.Second {
-		t.Fatalf("time to move keys after move now triggered, want no more than %f seconds, got %f seconds", 2.0, timeSpent.Seconds())
+	// Allow some buffer time (1 seconds).
+	if timeSpent := time.Since(moveNowTriggeredTimestamp); timeSpent > time.Second {
+		t.Fatalf("time to move keys after move now triggered, want no more than %f seconds, got %f seconds", 1.0, timeSpent.Seconds())
 	}
 }
 
 // TestBatchedProcessingPlacementSchedulingQueue_CloseWithDrain tests the CloseWithDrain
 // method of a batchedProcessingPlacementSchedulingQueue.
 func TestBatchedProcessingPlacementSchedulingQueue_CloseWithDrain(t *testing.T) {
-	bq := NewBatchedProcessingPlacementSchedulingQueue("TestOnly", nil, nil, 600)
+	movePeriodSeconds := int32(600) // 10 minutes
+	bq := NewBatchedProcessingPlacementSchedulingQueue("TestOnly", nil, nil, movePeriodSeconds)
 	bq.Run()
 
 	keysToAdd := []PlacementKey{"A", "B", "C"}
@@ -156,8 +159,9 @@ func TestBatchedProcessingPlacementSchedulingQueue_CloseWithDrain(t *testing.T) 
 		// Do not yet mark the keys as Done.
 	}
 
+	timerPeriodSeconds := int32(5)
 	go func() {
-		timer := time.NewTimer(5 * time.Second)
+		timer := time.NewTimer(time.Duration(timerPeriodSeconds) * time.Second)
 		<-timer.C
 		// Mark all keys as Done after 5 seconds.
 		for _, key := range keysRecved {
@@ -176,8 +180,8 @@ func TestBatchedProcessingPlacementSchedulingQueue_CloseWithDrain(t *testing.T) 
 	if !cmp.Equal(wantKeys, keysRecved) {
 		t.Fatalf("Received keys %v, want %v", keysRecved, wantKeys)
 	}
-	// Allow some buffer time (1 second).
-	if timeSpent := time.Since(closeWithDrainTimestamp); timeSpent > 6*time.Second {
-		t.Fatalf("time to close with drain, want no more than %f seconds, got %f seconds", 6.0, timeSpent.Seconds())
+	// Allow some buffer time (+1 second).
+	if timeSpent := time.Since(closeWithDrainTimestamp); timeSpent > time.Duration(timerPeriodSeconds+1)*time.Second {
+		t.Fatalf("time to close with drain, want no more than %f seconds, got %f seconds", float64(timerPeriodSeconds+1), timeSpent.Seconds())
 	}
 }
