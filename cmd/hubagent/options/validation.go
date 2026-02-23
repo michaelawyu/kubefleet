@@ -22,7 +22,38 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 )
 
-// TODO: Clean up the validations we don't need and add the ones we need
+// Validate checks OptionsRefreshed and return a slice of found errs.
+//
+// Note: the logic here concerns primarily cross-option validation; for single-option validation,
+// consider adding the logic directly as part of the flag parsing function, for clarity reasons.
+func (o *OptionsRefreshed) Validate() field.ErrorList {
+	errs := field.ErrorList{}
+	newPath := field.NewPath("OptionsRefreshed")
+
+	if float64(o.CtrlMgrOpts.HubBurst) < o.CtrlMgrOpts.HubQPS {
+		errs = append(errs, field.Invalid(newPath.Child("HubBurst"), o.CtrlMgrOpts.HubBurst, "The burst limit for client-side throttling must be greater than or equal to its QPS limit"))
+	}
+
+	// Note: this validation logic is a bit weird in the sense that the system accepts
+	// either a URL-based connection or a service-based connection for webhook calls,
+	// but here the logic enforces that a service name must be provided. The way we handle
+	// URLs is also problematic as the code will always format a service-targeted URL using
+	// the input. We keep this logic for now for compatibility reasons.
+	if o.WebhookOpts.EnableWebhooks && o.WebhookOpts.ServiceName == "" {
+		errs = append(errs, field.Invalid(newPath.Child("WebhookServiceName"), o.WebhookOpts.ServiceName, "A webhook service name is required when webhooks are enabled"))
+	}
+
+	if o.WebhookOpts.UseCertManager && !o.WebhookOpts.EnableWorkload {
+		errs = append(errs, field.Invalid(newPath.Child("UseCertManager"), o.WebhookOpts.UseCertManager, "If cert manager is used for securing webhook connections, the EnableWorkload option must be set to true, so that cert manager pods can run in the hub cluster."))
+	}
+
+	if o.FeatureFlags.EnableV1Alpha1APIs == true || o.FeatureFlags.EnableV1Beta1APIs == false {
+		errs = append(errs, field.Required(newPath.Child("EnableV1Alpha1APIs"), "Either EnableV1Alpha1APIs or EnableV1Beta1APIs is required"))
+	}
+
+
+	return errs
+}
 
 // Validate checks Options and return a slice of found errs.
 func (o *Options) Validate() field.ErrorList {
