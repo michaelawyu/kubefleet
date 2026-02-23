@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,58 +14,59 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package clusterprofile
+package controllers
 
 import (
 	"context"
-	"flag"
+	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"go.uber.org/zap/zapcore"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
-	clusterinventory "sigs.k8s.io/cluster-inventory-api/apis/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
+	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
+	"github.com/kubefleet-dev/kubefleet/pkg/propertyprovider/default/trackers"
 )
 
 var (
 	cfg       *rest.Config
-	mgr       manager.Manager
 	k8sClient client.Client
+	clientset *kubernetes.Clientset
 	testEnv   *envtest.Environment
 	ctx       context.Context
 	cancel    context.CancelFunc
+	mgr       manager.Manager
+	tracker   *trackers.NamespaceTracker
 )
+
+func TestMain(m *testing.M) {
+	// Configure logging for tests
+	logger := zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true))
+	klog.SetLogger(logger)
+	ctrllog.SetLogger(logger)
+
+	os.Exit(m.Run())
+}
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)
-
-	RunSpecs(t, "ClusterProfile Controller Suite")
+	RunSpecs(t, "Namespace Controller Integration Test Suite")
 }
 
 var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
-
-	By("Setup klog")
-	fs := flag.NewFlagSet("klog", flag.ContinueOnError)
-	klog.InitFlags(fs)
-	Expect(fs.Parse([]string{"--v", "5", "-add_dir_header", "true"})).Should(Succeed())
-
-	logger := zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true), zap.Level(zapcore.Level(-5)))
-	klog.SetLogger(logger)
-	ctrl.SetLogger(logger)
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
@@ -75,37 +76,42 @@ var _ = BeforeSuite(func() {
 
 	var err error
 	cfg, err = testEnv.Start()
-	Expect(err).Should(Succeed())
+	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	err = clusterinventory.AddToScheme(scheme.Scheme)
-	Expect(err).Should(Succeed())
-	err = clusterv1beta1.AddToScheme(scheme.Scheme)
-	Expect(err).Should(Succeed())
+	// Add placement APIs to scheme
+	err = placementv1beta1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
 
-	By("construct the k8s client")
+	By("creating the K8s client")
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
-	Expect(err).Should(Succeed())
+	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	By("starting the controller manager")
-	klog.InitFlags(flag.CommandLine)
-	flag.Parse()
+	By("creating the clientset")
+	// This is required to update the /finalize subresource of namespace.
+	clientset, err = kubernetes.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred())
 
+	By("starting the controller manager")
 	mgr, err = ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
 		Metrics: server.Options{
 			BindAddress: "0",
 		},
-		Logger: logger,
+		Logger: ctrllog.Log,
 	})
-	Expect(err).Should(Succeed())
-	err = (&Reconciler{
-		Client:                    mgr.GetClient(),
-		ClusterProfileNamespace:   clusterProfileNS,
-		ClusterUnhealthyThreshold: 5 * time.Second,
-	}).SetupWithManager(mgr)
-	Expect(err).Should(Succeed())
+	Expect(err).NotTo(HaveOccurred())
+
+	By("setting up the namespace controller and tracker")
+	tracker = trackers.NewNamespaceTracker(k8sClient)
+	reconciler := &NamespaceReconciler{
+		NamespaceTracker: tracker,
+		Client:           k8sClient,
+	}
+
+	err = reconciler.SetupWithManager(mgr, "namespace-controller")
+	Expect(err).NotTo(HaveOccurred())
 
 	go func() {
 		defer GinkgoRecover()
@@ -117,8 +123,7 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	defer klog.Flush()
 
-	cancel()
 	By("tearing down the test environment")
-	err := testEnv.Stop()
-	Expect(err).Should(Succeed())
+	cancel()
+	Expect(testEnv.Stop()).To(Succeed())
 })
