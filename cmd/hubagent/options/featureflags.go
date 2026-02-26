@@ -24,10 +24,6 @@ import (
 
 // FeatureFlags is a set of feature flags the KubeFleet hub agent exposes.
 type FeatureFlags struct {
-	// Enable the hub agent to watch the KubeFleet v1alpha1 APIs or not.
-	// TO-DO (weiweng): remove this field soon. Only kept for backward compatibility.
-	EnableV1Alpha1APIs bool
-
 	// Enable the hub agent to watch the KubeFleet v1beta1 APIs or not. This flag is kept only for
 	// compatibility reasons; it has no effect at this moment, as KubeFleet v1alpha1 APIs have
 	// been removed and the v1beta1 APIs are the storage version in use.
@@ -59,12 +55,6 @@ type FeatureFlags struct {
 
 // AddFlags adds flags for FeatureFlags to the specified FlagSet.
 func (o *FeatureFlags) AddFlags(flags *flag.FlagSet) {
-	flags.Var(
-		newEnableV1Alpha1APIsValueWithValidation(false, &o.EnableV1Alpha1APIs),
-		"enable-v1alpha1-apis",
-		"Enable the hub agent to watch the KubeFleet v1alpha1 APIs or not.",
-	)
-
 	flags.Var(
 		newEnableV1Beta1APIsValueWithValidation(true, &o.EnableV1Beta1APIs),
 		"enable-v1beta1-apis",
@@ -101,29 +91,6 @@ func (o *FeatureFlags) AddFlags(flags *flag.FlagSet) {
 }
 
 // A list of flag variables that allow pluggable validation logic when parsing the input args.
-
-type EnableV1Alpha1APIsValueWithValidation bool
-
-func (v *EnableV1Alpha1APIsValueWithValidation) String() string {
-	return fmt.Sprintf("%t", *v)
-}
-
-func (v *EnableV1Alpha1APIsValueWithValidation) Set(s string) error {
-	enabled, err := strconv.ParseBool(s)
-	if err != nil {
-		return fmt.Errorf("failed to parse bool value: %w", err)
-	}
-	if enabled {
-		return fmt.Errorf("the KubeFleet v1alpha1 APIs are obsolete and must be disabled")
-	}
-	*v = EnableV1Alpha1APIsValueWithValidation(enabled)
-	return nil
-}
-
-func newEnableV1Alpha1APIsValueWithValidation(defaultVal bool, p *bool) *EnableV1Alpha1APIsValueWithValidation {
-	*p = defaultVal
-	return (*EnableV1Alpha1APIsValueWithValidation)(p)
-}
 
 type EnableV1Beta1APIsValueWithValidation bool
 

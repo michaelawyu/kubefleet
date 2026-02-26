@@ -48,17 +48,6 @@ func (o *Options) Validate() field.ErrorList {
 		errs = append(errs, field.Invalid(newPath.Child("UseCertManager"), o.WebhookOpts.UseCertManager, "If cert manager is used for securing webhook connections, the EnableWorkload option must be set to true, so that cert manager pods can run in the hub cluster."))
 	}
 
-	// This validation is added for completeness reasons; in the per-flag validation it has been
-	// checked that the v1alpha1 APIs must be disabled and the v1beta1 APIs must be enabled.
-	if o.FeatureFlags.EnableV1Alpha1APIs || !o.FeatureFlags.EnableV1Beta1APIs {
-		if o.FeatureFlags.EnableV1Alpha1APIs {
-			errs = append(errs, field.Invalid(newPath.Child("EnableV1Alpha1APIs"), o.FeatureFlags.EnableV1Alpha1APIs, "v1alpha APIs must be disabled and v1beta APIs must be enabled"))
-		}
-		if !o.FeatureFlags.EnableV1Beta1APIs {
-			errs = append(errs, field.Invalid(newPath.Child("EnableV1Beta1APIs"), o.FeatureFlags.EnableV1Beta1APIs, "v1alpha APIs must be disabled and v1beta APIs must be enabled"))
-		}
-	}
-
 	if o.PlacementMgmtOpts.AllowedPropagatingAPIs != "" && o.PlacementMgmtOpts.SkippedPropagatingAPIs != "" {
 		errs = append(errs, field.Invalid(newPath.Child("AllowedPropagatingAPIs"), o.PlacementMgmtOpts.AllowedPropagatingAPIs, "AllowedPropagatingAPIs and SkippedPropagatingAPIs options are mutually exclusive"))
 	}
