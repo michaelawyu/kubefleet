@@ -58,7 +58,7 @@ func (o *ClusterManagementOptions) AddFlags(flags *flag.FlagSet) {
 	flags.Var(
 		newForceDeleteWaitTimeValueWithValidation(15*time.Minute, &o.ForceDeleteWaitTime),
 		"force-delete-wait-time",
-		"The duration the KubeFleet hub agent will wait before force-deleting a member cluster resource after it has been marked for deletion. Defaults to 15 minutes. Must be a duration in the range [5m, 1h].",
+		"The duration the KubeFleet hub agent will wait before force-deleting a member cluster resource after it has been marked for deletion. Defaults to 15 minutes. Must be a duration in the range [30s, 1h].",
 	)
 }
 
@@ -98,8 +98,8 @@ func (v *ForceDeleteWaitTimeValueWithValidation) Set(s string) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse duration: %w", err)
 	}
-	if duration < 5*time.Minute || duration > time.Hour {
-		return fmt.Errorf("duration must be in the range [5m, 1h]")
+	if duration < 30*time.Second || duration > time.Hour {
+		return fmt.Errorf("duration must be in the range [30s, 1h]")
 	}
 	v.Duration = duration
 	return nil

@@ -40,10 +40,6 @@ func newTestOptions(modifyOptions ModifyOptions) Options {
 			HubQPS:   250,
 			HubBurst: 1000,
 		},
-		FeatureFlags: FeatureFlags{
-			EnableV1Alpha1APIs: false,
-			EnableV1Beta1APIs:  true,
-		},
 		WebhookOpts: WebhookOptions{
 			ClientConnectionType: "url",
 			ServiceName:          testWebhookServiceName,
@@ -81,18 +77,6 @@ func TestValidateControllerManagerConfiguration(t *testing.T) {
 				options.CtrlMgrOpts.HubBurst = 50
 			}),
 			want: field.ErrorList{field.Invalid(newPath.Child("HubBurst"), 50, "The burst limit for client-side throttling must be greater than or equal to its QPS limit")},
-		},
-		"invalid EnableV1Alpha1APIs": {
-			opt: newTestOptions(func(options *Options) {
-				options.FeatureFlags.EnableV1Alpha1APIs = true
-			}),
-			want: field.ErrorList{field.Invalid(newPath.Child("EnableV1Alpha1APIs"), true, "v1alpha APIs must be disabled and v1beta APIs must be enabled")},
-		},
-		"invalid EnableV1Beta1APIs": {
-			opt: newTestOptions(func(options *Options) {
-				options.FeatureFlags.EnableV1Beta1APIs = false
-			}),
-			want: field.ErrorList{field.Invalid(newPath.Child("EnableV1Beta1APIs"), false, "v1alpha APIs must be disabled and v1beta APIs must be enabled")},
 		},
 		"WebhookServiceName is empty": {
 			opt: newTestOptions(func(option *Options) {

@@ -157,18 +157,22 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 	validator.RestMapper = mgr.GetRESTMapper()          // webhook needs this to validate GVK of resource selector
 
 	// Set up  a custom controller to reconcile placement objects
+	resourceSelectorResolver := controller.ResourceSelectorResolver{
+		RestMapper:        mgr.GetRESTMapper(),
+		InformerManager:   dynamicInformerManager,
+		ResourceConfig:    resourceConfig,
+		SkippedNamespaces: skippedNamespaces,
+		EnableWorkload:    opts.WebhookOpts.EnableWorkload,
+	}
+	resourceSnapshotResolver := controller.NewResourceSnapshotResolver(mgr.GetClient(), mgr.GetScheme())
+	resourceSnapshotResolver.Config = controller.NewResourceSnapshotConfig(opts.PlacementMgmtOpts.ResourceSnapshotCreationMinimumInterval, opts.PlacementMgmtOpts.ResourceChangesCollectionDuration)
 	pc := &placement.Reconciler{
-		Client:                                  mgr.GetClient(),
-		Recorder:                                mgr.GetEventRecorderFor(placementControllerName),
-		RestMapper:                              mgr.GetRESTMapper(),
-		InformerManager:                         dynamicInformerManager,
-		ResourceConfig:                          resourceConfig,
-		SkippedNamespaces:                       skippedNamespaces,
-		Scheme:                                  mgr.GetScheme(),
-		UncachedReader:                          mgr.GetAPIReader(),
-		ResourceSnapshotCreationMinimumInterval: opts.PlacementMgmtOpts.ResourceSnapshotCreationMinimumInterval,
-		ResourceChangesCollectionDuration:       opts.PlacementMgmtOpts.ResourceChangesCollectionDuration,
-		EnableWorkload:                          opts.WebhookOpts.EnableWorkload,
+		Client:                   mgr.GetClient(),
+		Recorder:                 mgr.GetEventRecorderFor(placementControllerName),
+		Scheme:                   mgr.GetScheme(),
+		UncachedReader:           mgr.GetAPIReader(),
+		ResourceSelectorResolver: resourceSelectorResolver,
+		ResourceSnapshotResolver: resourceSnapshotResolver,
 	}
 
 	rateLimiter := options.DefaultControllerRateLimiter(opts.PlacementMgmtOpts.PlacementControllerWorkQueueRateLimiterOpts)
@@ -306,8 +310,10 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 			}
 			klog.Info("Setting up clusterStagedUpdateRun controller")
 			if err = (&updaterun.Reconciler{
-				Client:          mgr.GetClient(),
-				InformerManager: dynamicInformerManager,
+				Client:                   mgr.GetClient(),
+				InformerManager:          dynamicInformerManager,
+				ResourceSelectorResolver: resourceSelectorResolver,
+				ResourceSnapshotResolver: resourceSnapshotResolver,
 			}).SetupWithManagerForClusterStagedUpdateRun(mgr); err != nil {
 				klog.ErrorS(err, "Unable to set up clusterStagedUpdateRun controller")
 				return err
@@ -322,8 +328,10 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 				}
 				klog.Info("Setting up stagedUpdateRun controller")
 				if err = (&updaterun.Reconciler{
-					Client:          mgr.GetClient(),
-					InformerManager: dynamicInformerManager,
+					Client:                   mgr.GetClient(),
+					InformerManager:          dynamicInformerManager,
+					ResourceSelectorResolver: resourceSelectorResolver,
+					ResourceSnapshotResolver: resourceSnapshotResolver,
 				}).SetupWithManagerForStagedUpdateRun(mgr); err != nil {
 					klog.ErrorS(err, "Unable to set up stagedUpdateRun controller")
 					return err
