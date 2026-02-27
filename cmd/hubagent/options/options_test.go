@@ -267,7 +267,6 @@ func TestFeatureFlags(t *testing.T) {
 			flagSetName: "allDefault",
 			args:        []string{},
 			wantFeatureFlags: FeatureFlags{
-				EnableV1Alpha1APIs:          false,
 				EnableV1Beta1APIs:           true,
 				EnableClusterInventoryAPIs:  true,
 				EnableStagedUpdateRunAPIs:   true,
@@ -279,7 +278,6 @@ func TestFeatureFlags(t *testing.T) {
 			name:        "all specified",
 			flagSetName: "allSpecified",
 			args: []string{
-				"--enable-v1alpha1-apis=false",
 				"--enable-v1beta1-apis=true",
 				"--enable-cluster-inventory-apis=false",
 				"--enable-staged-update-run-apis=false",
@@ -287,27 +285,12 @@ func TestFeatureFlags(t *testing.T) {
 				"--enable-resource-placement=false",
 			},
 			wantFeatureFlags: FeatureFlags{
-				EnableV1Alpha1APIs:          false,
 				EnableV1Beta1APIs:           true,
 				EnableClusterInventoryAPIs:  false,
 				EnableStagedUpdateRunAPIs:   false,
 				EnableEvictionAPIs:          false,
 				EnableResourcePlacementAPIs: false,
 			},
-		},
-		{
-			name:             "enable v1alpha1 API option parse error",
-			flagSetName:      "enableV1Alpha1ParseError",
-			args:             []string{"--enable-v1alpha1-apis=abc"},
-			wantErred:        true,
-			wantErrMsgSubStr: "failed to parse bool value",
-		},
-		{
-			name:             "enable v1alpha1 API validation error",
-			flagSetName:      "enableV1Alpha1ValidationError",
-			args:             []string{"--enable-v1alpha1-apis=true"},
-			wantErred:        true,
-			wantErrMsgSubStr: "KubeFleet v1alpha1 APIs are obsolete and must be disabled",
 		},
 		{
 			name:             "enable v1beta1 API option parse error",
@@ -419,16 +402,16 @@ func TestClusterManagementOptions(t *testing.T) {
 		{
 			name:             "force delete wait time out of range (too small)",
 			flagSetName:      "forceDeleteWaitTimeOutOfRangeTooSmall",
-			args:             []string{"--force-delete-wait-time=4m"},
+			args:             []string{"--force-delete-wait-time=20s"},
 			wantErred:        true,
-			wantErrMsgSubStr: "duration must be in the range [5m, 1h]",
+			wantErrMsgSubStr: "duration must be in the range [30s, 1h]",
 		},
 		{
 			name:             "force delete wait time out of range (too large)",
 			flagSetName:      "forceDeleteWaitTimeOutOfRangeTooLarge",
 			args:             []string{"--force-delete-wait-time=1h1s"},
 			wantErred:        true,
-			wantErrMsgSubStr: "duration must be in the range [5m, 1h]",
+			wantErrMsgSubStr: "duration must be in the range [30s, 1h]",
 		},
 	}
 
