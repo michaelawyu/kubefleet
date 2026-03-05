@@ -20,7 +20,7 @@ import (
 	"flag"
 )
 
-// Options is the options to use for running the KubeFleet hub agent.
+// Options is the options to use for running the KubeFleet member agent.
 type Options struct {
 	// Options that control how the KubeFleet member agent connects to the hub cluster.
 	HubConnectivityOpts HubConnectivityOptions
@@ -54,13 +54,13 @@ func (o *Options) AddFlags(flags *flag.FlagSet) {
 
 	// The flags set up below are added only for backwards compatibility reasons.
 	// They are no-op flags and their values are never read.
-	flag.BoolVar(
+	flags.BoolVar(
 		&o.UseV1Alpha1APIs,
 		"enable-v1alpha1-apis",
 		false,
 		"Use KubeFleet v1alpha1 APIs or not. This flag is obsolete; its value has no effect.")
 
-	flag.BoolVar(
+	flags.BoolVar(
 		&o.UseV1Beta1APIs,
 		"enable-v1beta1-apis",
 		true,

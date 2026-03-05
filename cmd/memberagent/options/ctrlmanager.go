@@ -88,96 +88,96 @@ type LeaderElectionOptions struct {
 }
 
 func (o *CtrlManagerOptions) AddFlags(flags *flag.FlagSet) {
-	flag.StringVar(
+	flags.StringVar(
 		&o.HubManagerOpts.HealthProbeBindAddress,
 		"hub-health-probe-bind-address",
 		":8081",
 		"The TCP address that the controller manager would bind to serve health probes. It can be set to '0' or the empty value to disable the health probe server.")
 
-	flag.StringVar(
+	flags.StringVar(
 		&o.HubManagerOpts.MetricsBindAddress,
 		"hub-metrics-bind-address",
 		":8080",
 		"The TCP address that the controller manager should bind to serve prometheus metrics. It can be set to '0' or the empty value to disable the metrics server.")
 
-	flag.IntVar(
+	flags.IntVar(
 		&o.HubManagerOpts.PprofPort,
 		"hub-pprof-port",
 		6066,
 		"The port in use by the pprof server for profiling the controller manager that connects to the hub cluster.")
 
-	flag.Var(
+	flags.Var(
 		newHubQPSValueWithValidation(50.0, &o.HubManagerOpts.QPS),
 		"hub-api-qps",
 		"The QPS limit set to the rate limiter of the Kubernetes client in use by the controller manager (and all of its managed controllers) that connects to the hub cluster, for client-side throttling purposes.")
 
-	flag.StringVar(
+	flags.StringVar(
 		&o.MemberManagerOpts.HealthProbeBindAddress,
 		"health-probe-bind-address",
 		":8091",
 		"The TCP address that the controller manager would bind to serve health probes. It can be set to '0' or the empty value to disable the health probe server.")
 
-	flag.StringVar(
+	flags.StringVar(
 		&o.MemberManagerOpts.MetricsBindAddress,
 		"metrics-bind-address",
 		":8090",
 		"The TCP address that the controller manager should bind to serve prometheus metrics. It can be set to '0' or the empty value to disable the metrics server.")
 
-	flag.IntVar(
+	flags.IntVar(
 		&o.MemberManagerOpts.PprofPort,
 		"pprof-port",
 		6065,
 		"The port in use by the pprof server for profiling the controller manager that connects to the member cluster.")
 
-	flag.Var(
+	flags.Var(
 		newHubBurstValueWithValidation(500, &o.HubManagerOpts.Burst),
 		"hub-api-burst",
 		"The burst limit set to the rate limiter of the Kubernetes client in use by the controller manager (and all of its managed controllers) that connects to the hub cluster, for client-side throttling purposes.")
 
-	flag.Var(
+	flags.Var(
 		newMemberQPSValueWithValidation(250.0, &o.MemberManagerOpts.QPS),
 		"member-api-qps",
 		"The QPS limit set to the rate limiter of the Kubernetes client in use by the controller manager (and all of its managed controllers) that connects to the member cluster, for client-side throttling purposes.")
 
-	flag.Var(
+	flags.Var(
 		newMemberBurstValueWithValidation(1000, &o.MemberManagerOpts.Burst),
 		"member-api-burst",
 		"The burst limit set to the rate limiter of the Kubernetes client in use by the controller manager (and all of its managed controllers) that connects to the member cluster, for client-side throttling purposes.")
 
-	flag.BoolVar(
+	flags.BoolVar(
 		&o.EnablePprof,
 		"enable-pprof",
 		false,
-		"Enable the pprof server for profiling the hub agent controller manager or not.")
+		"Enable the pprof server for profiling the member agent controller managers or not.")
 
-	flag.BoolVar(
+	flags.BoolVar(
 		&o.LeaderElectionOpts.LeaderElect,
 		"leader-elect",
 		false,
 		"Enable leader election on the controller managers in use by the KubeFleet member agent.")
 
 	// This input is sent to the controller manager for validation; no further check here.
-	flag.DurationVar(
+	flags.DurationVar(
 		&o.LeaderElectionOpts.LeaseDuration.Duration,
 		"leader-lease-duration",
 		15*time.Second,
 		"The duration of a leader election lease. This is the period where a non-leader candidate will wait after observing a leadership renewal before attempting to acquire leadership of the current leader. And it is also effectively the maximum duration that a leader can be stopped before it is replaced by another candidate. The option only applies if leader election is enabled.")
 
 	// This input is sent to the controller manager for validation; no further check here.
-	flag.DurationVar(
+	flags.DurationVar(
 		&o.LeaderElectionOpts.RenewDeadline.Duration,
 		"leader-renew-deadline",
 		10*time.Second,
 		"The interval between attempts by the acting master to renew a leadership slot before it stops leading. This must be less than or equal to the lease duration. The option only applies if leader election is enabled.")
 
 	// This input is sent to the controller manager for validation; no further check here.
-	flag.DurationVar(
+	flags.DurationVar(
 		&o.LeaderElectionOpts.RetryPeriod.Duration,
 		"leader-retry-period",
 		2*time.Second,
 		"The duration the clients should wait between attempting acquisition and renewal of a leadership. The option only applies if leader election is enabled.")
 
-	flag.StringVar(
+	flags.StringVar(
 		&o.LeaderElectionOpts.ResourceNamespace,
 		"leader-election-namespace",
 		"kube-system",

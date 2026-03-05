@@ -100,13 +100,13 @@ func main() {
 		klog.ErrorS(errors.New("hub server api cannot be empty"), "Failed to read URL for the hub cluster")
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
-	hubConfig, err := buildHubConfig(hubURL, opts.HubConnectivityOpts.UseCertificateAuth, opts.HubConnectivityOpts.UseCertificateAuth)
-	hubConfig.QPS = float32(opts.CtrlManagerOptions.HubManagerOpts.QPS)
-	hubConfig.Burst = opts.CtrlManagerOptions.HubManagerOpts.Burst
+	hubConfig, err := buildHubConfig(hubURL, opts.HubConnectivityOpts.UseCertificateAuth, opts.HubConnectivityOpts.UseInsecureTLSClient)
 	if err != nil {
 		klog.ErrorS(err, "Failed to build Kubernetes client configuration for the hub cluster")
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
+	hubConfig.QPS = float32(opts.CtrlManagerOptions.HubManagerOpts.QPS)
+	hubConfig.Burst = opts.CtrlManagerOptions.HubManagerOpts.Burst
 
 	mcName := os.Getenv("MEMBER_CLUSTER_NAME")
 	if mcName == "" {

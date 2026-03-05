@@ -36,7 +36,7 @@ type HubConnectivityOptions struct {
 
 	// Use an insecure client or not when connecting to the hub cluster.
 	//
-	// If this is set to true, provide with the member agent a file path to the CA
+	// If this is set to false, provide with the member agent a file path to the CA
 	// bundle to use for verifying the hub cluster's identity via the `CA_BUNDLE` environment
 	// variable; you can also give the member agent a file path to the CA data instead
 	// via the `HUB_CERTIFICATE_AUTHORITY` environment variable.

@@ -44,19 +44,19 @@ type PropertyProviderOptions struct {
 }
 
 func (o *PropertyProviderOptions) AddFlags(flags *flag.FlagSet) {
-	flag.StringVar(
+	flags.StringVar(
 		&o.Region,
 		"region",
 		"",
 		"The region where the member cluster resides.")
 
-	flag.StringVar(
+	flags.StringVar(
 		&o.Name,
 		"property-provider",
 		"none",
 		"The property provider to use in the KubeFleet member agent.")
 
-	flag.StringVar(
+	flags.StringVar(
 		&o.CloudConfigFilePath,
 		"cloud-config",
 		"/etc/kubernetes/provider/config.json",
@@ -74,7 +74,7 @@ func (o *PropertyProviderOptions) AddFlags(flags *flag.FlagSet) {
 		true,
 		"Enable support for available resource properties in the Azure property provider or not. This option applies only when the Azure property provider is in use.")
 
-	flag.BoolVar(
+	flags.BoolVar(
 		&o.EnableAzProviderNamespaceCollection,
 		"enable-namespace-collection-in-property-provider",
 		false,

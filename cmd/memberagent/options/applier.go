@@ -107,91 +107,91 @@ type ApplierOptions struct {
 }
 
 func (o *ApplierOptions) AddFlags(flags *flag.FlagSet) {
-	flag.Var(
-		newResForceDeletionWaitTimeSecondsValue(5, &o.ResourceForceDeletionWaitTimeMinutes),
+	flags.Var(
+		newResForceDeletionWaitTimeMinutesValue(5, &o.ResourceForceDeletionWaitTimeMinutes),
 		"deletion-wait-time",
-		"The time in seconds where the KubeFleet member agent will wait before force deleting all the resources from a member cluster if the placement that owns the resources has been removed from the hub cluster. Default is 5 seconds. The value must be in the range [1, 60].")
+		"The time in minutes where the KubeFleet member agent will wait before force deleting all the resources from a member cluster if the placement that owns the resources has been removed from the hub cluster. Default is 5 minutes. The value must be in the range [1, 60].")
 
-	flag.BoolVar(
+	flags.BoolVar(
 		&o.EnablePriorityQueue,
 		"enable-work-applier-priority-queue",
 		false,
 		"Enable prioritized processing of newly created/updated placements or not. Default is false, which means placements will be processed in a FIFO order.")
 
-	flag.Var(
+	flags.Var(
 		newRequeueAttemptsWithFixedDelayValue(1, &o.RequeueRateLimiterAttemptsWithFixedDelay),
 		"work-applier-requeue-rate-limiter-attempts-with-fixed-delay",
 		"The number of attempts with a fixed delay before the KubeFleet member agent switches to exponential backoff when re-processing a placement. Default is 1. The value must be in the range [1, 40].")
 
-	flag.Var(
+	flags.Var(
 		newRequeueFixedDelaySecondsValue(5, &o.RequeueRateLimiterFixedDelaySeconds),
 		"work-applier-requeue-rate-limiter-fixed-delay-seconds",
 		"The fixed delay in seconds for the KubeFleet member agent when re-processing a placement before switching to exponential backoff. Default is 5 seconds. The value must be in the range [2, 300].")
 
-	flag.Var(
+	flags.Var(
 		newRequeueExpBaseForSlowBackoffValue(1.2, &o.RequeueRateLimiterExponentialBaseForSlowBackoff),
 		"work-applier-requeue-rate-limiter-exponential-base-for-slow-backoff",
-		"The exponential delay growth base for the slow backoff stage when the KubeFleet member agent re-processes a placement. Default is 1.2. The value must be no less than 1.05.")
+		"The exponential delay growth base for the slow backoff stage when the KubeFleet member agent re-processes a placement. Default is 1.2. The value must be in the range [1.05, 100].")
 
-	flag.Var(
+	flags.Var(
 		newRequeueInitSlowBackoffDelaySecondsValue(2, &o.RequeueRateLimiterInitialSlowBackoffDelaySeconds),
 		"work-applier-requeue-rate-limiter-initial-slow-backoff-delay-seconds",
 		"The initial delay in seconds for the slow backoff stage when the KubeFleet member agent re-processes a placement. Default is 2 seconds. The value must be no less than 2.")
 
-	flag.Var(
+	flags.Var(
 		newRequeueMaxSlowBackoffDelaySecondsValue(15, &o.RequeueRateLimiterMaxSlowBackoffDelaySeconds),
 		"work-applier-requeue-rate-limiter-max-slow-backoff-delay-seconds",
 		"The maximum delay in seconds for the slow backoff stage when the KubeFleet member agent re-processes a placement. Default is 15 seconds. The value must be no less than 2.")
 
-	flag.Var(
+	flags.Var(
 		newRequeueExpBaseForFastBackoffValue(1.5, &o.RequeueRateLimiterExponentialBaseForFastBackoff),
 		"work-applier-requeue-rate-limiter-exponential-base-for-fast-backoff",
-		"The exponential delay growth base for the fast backoff stage when the KubeFleet member agent re-processes a placement. Default is 1.5. The value must be no greater than 100.")
+		"The exponential delay growth base for the fast backoff stage when the KubeFleet member agent re-processes a placement. Default is 1.5. The value must be in the range (1, 100].")
 
-	flag.Var(
+	flags.Var(
 		newRequeueMaxFastBackoffDelaySecondsValue(900, &o.RequeueRateLimiterMaxFastBackoffDelaySeconds),
 		"work-applier-requeue-rate-limiter-max-fast-backoff-delay-seconds",
-		"The maximum delay in seconds for the fast backoff stage when the KubeFleet member agent re-processes a placement. Default is 900 seconds. The value must be no greater than 3600.")
+		"The maximum delay in seconds for the fast backoff stage when the KubeFleet member agent re-processes a placement. Default is 900 seconds. The value must be in the range (0, 3600].")
 
-	flag.BoolVar(
+	flags.BoolVar(
 		&o.RequeueRateLimiterSkipToFastBackoffForAvailableOrDiffReportedWorkObjs,
 		"work-applier-requeue-rate-limiter-skip-to-fast-backoff-for-available-or-diff-reported-work-objs",
 		true,
 		"Allow placements that have been processed successfully to skip the slow backoff stage and jump to the fast backoff stage directly or not when periodically re-processing a placement. Default is true.")
 
-	flag.Var(
+	flags.Var(
 		newPriCoEffAValue(-3, &o.PriorityLinearEquationCoEffA),
 		"work-applier-priority-linear-equation-coeff-a",
 		"The coefficient A in the linear equation for calculating the priority score of a placement. The value must be a negative integer no less than -100. Default is -3.")
 
-	flag.Var(
+	flags.Var(
 		newPriCoEffBValue(100, &o.PriorityLinearEquationCoEffB),
 		"work-applier-priority-linear-equation-coeff-b",
 		"The coefficient B in the linear equation for calculating the priority score of a placement. The value must be a positive integer no greater than 1000. Default is 100.")
 }
 
-type ResForceDeletionWaitTimeSeconds int
+type ResForceDeletionWaitTimeMinutes int
 
-func (v *ResForceDeletionWaitTimeSeconds) String() string {
+func (v *ResForceDeletionWaitTimeMinutes) String() string {
 	return fmt.Sprintf("%d", *v)
 }
 
-func (v *ResForceDeletionWaitTimeSeconds) Set(s string) error {
+func (v *ResForceDeletionWaitTimeMinutes) Set(s string) error {
 	t, err := strconv.Atoi(s)
 	if err != nil {
 		return fmt.Errorf("failed to parse integer value: %w", err)
 	}
 
 	if t < 1 || t > 60 {
-		return fmt.Errorf("resource force deletion wait time in seconds is set to an invalid value (%d), must be a value in the range [1, 300]", t)
+		return fmt.Errorf("resource force deletion wait time in minutes is set to an invalid value (%d), must be a value in the range [1, 60]", t)
 	}
-	*v = ResForceDeletionWaitTimeSeconds(t)
+	*v = ResForceDeletionWaitTimeMinutes(t)
 	return nil
 }
 
-func newResForceDeletionWaitTimeSecondsValue(defaultValue int, p *int) *ResForceDeletionWaitTimeSeconds {
+func newResForceDeletionWaitTimeMinutesValue(defaultValue int, p *int) *ResForceDeletionWaitTimeMinutes {
 	*p = defaultValue
-	return (*ResForceDeletionWaitTimeSeconds)(p)
+	return (*ResForceDeletionWaitTimeMinutes)(p)
 }
 
 type RequeueAttemptsWithFixedDelay int
@@ -230,8 +230,8 @@ func (v *RequeueFixedDelaySeconds) Set(s string) error {
 		return fmt.Errorf("failed to parse integer value: %w", err)
 	}
 
-	if t < 2 {
-		return fmt.Errorf("requeue rate limiter fixed delay seconds is set to an invalid value (%d), must be a value no less than 2", t)
+	if t < 2 || t > 300 {
+		return fmt.Errorf("requeue rate limiter fixed delay seconds is set to an invalid value (%d), must be a value in the range [2, 300]", t)
 	}
 	*v = RequeueFixedDelaySeconds(t)
 	return nil
@@ -256,8 +256,8 @@ func (v *RequeueExpBaseForSlowBackoff) Set(s string) error {
 		return fmt.Errorf("failed to parse float value: %w", err)
 	}
 
-	if exp < 1.05 {
-		return fmt.Errorf("requeue rate limiter exponential base for slow backoff is set to an invalid value (%g), must be a value no less than 1.05.", exp)
+	if exp < 1.05 || exp > 100 {
+		return fmt.Errorf("requeue rate limiter exponential base for slow backoff is set to an invalid value (%g), must be a value in the range [1.05, 100]", exp)
 	}
 	*v = RequeueExpBaseForSlowBackoff(exp)
 	return nil
@@ -328,8 +328,8 @@ func (v *RequeueExpBaseForFastBackoff) Set(s string) error {
 		return fmt.Errorf("failed to parse float value: %w", err)
 	}
 
-	if exp > 100 {
-		return fmt.Errorf("requeue rate limiter exponential base for fast backoff is set to an invalid value (%g), must be a value no greater than 100", exp)
+	if exp <= 1 || exp > 100 {
+		return fmt.Errorf("requeue rate limiter exponential base for fast backoff is set to an invalid value (%g), must be a value in the range (1, 100]", exp)
 	}
 	*v = RequeueExpBaseForFastBackoff(exp)
 	return nil
@@ -352,8 +352,8 @@ func (v *RequeueMaxFastBackoffDelaySeconds) Set(s string) error {
 		return fmt.Errorf("failed to parse integer value: %w", err)
 	}
 
-	if t > 3600 {
-		return fmt.Errorf("requeue rate limiter max fast backoff delay seconds is set to an invalid value (%d), must be a value no greater than 3600", t)
+	if t <= 0 || t > 3600 {
+		return fmt.Errorf("requeue rate limiter max fast backoff delay seconds is set to an invalid value (%d), must be a value in the range (0, 3600]", t)
 	}
 	*v = RequeueMaxFastBackoffDelaySeconds(t)
 	return nil
