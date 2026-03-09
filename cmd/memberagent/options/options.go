@@ -38,8 +38,7 @@ type Options struct {
 
 	// The fields below are added only for backwards compatibility reasons.
 	// Their values are never read.
-	UseV1Alpha1APIs bool
-	UseV1Beta1APIs  bool
+	UseV1Beta1APIs bool
 }
 
 func NewOptions() *Options {
@@ -54,12 +53,6 @@ func (o *Options) AddFlags(flags *flag.FlagSet) {
 
 	// The flags set up below are added only for backwards compatibility reasons.
 	// They are no-op flags and their values are never read.
-	flags.BoolVar(
-		&o.UseV1Alpha1APIs,
-		"enable-v1alpha1-apis",
-		false,
-		"Use KubeFleet v1alpha1 APIs or not. This flag is obsolete; its value has no effect.")
-
 	flags.BoolVar(
 		&o.UseV1Beta1APIs,
 		"enable-v1beta1-apis",
