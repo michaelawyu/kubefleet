@@ -72,7 +72,7 @@ func (o *WebhookOptions) AddFlags(flags *flag.FlagSet) {
 	)
 
 	flags.Var(
-		newWebhookClientConnTypeValueWithValidation("url", &o.ClientConnectionType),
+		newWebhookClientConnTypeValueWithValidation(string(URL), &o.ClientConnectionType),
 		"webhook-client-connection-type",
 		"The connection type used by the webhook client. Valid values are `url` and `service`. Defaults to `url`. This option only applies if webhooks are enabled.",
 	)
