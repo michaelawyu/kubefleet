@@ -7,7 +7,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	"github.com/kubefleet-dev/kubefleet/hack/performancetest/1000stagedupdateruns/utils"
+	"github.com/kubefleet-dev/kubefleet/hack/perftest/1000stagedupdateruns/utils"
 )
 
 const (
