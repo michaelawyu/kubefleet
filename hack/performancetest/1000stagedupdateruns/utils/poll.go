@@ -30,7 +30,7 @@ func (r *Runner) LongPollStagedUpdateRuns(ctx context.Context) {
 				select {
 				case resIdx, readOk = <-r.toLongPollStagedUpdateRunsChan:
 					if !readOk {
-						println(fmt.Sprintf("long polling worker %d exits", workerIdx))
+						fmt.Printf("long polling worker %d exits\n", workerIdx)
 						return
 					}
 				case <-ctx.Done():
@@ -45,7 +45,7 @@ func (r *Runner) LongPollStagedUpdateRuns(ctx context.Context) {
 				// Read the staged update run to check if it's completed.
 				var stagedUpdateRun placementv1beta1.ClusterStagedUpdateRun
 				if err := r.hubClient.Get(ctx, client.ObjectKey{Name: fmt.Sprintf(stagedUpdateRunNameFmt, resIdx)}, &stagedUpdateRun); err != nil {
-					println(fmt.Sprintf("long polling worker %d: failed to get staged update run run-%d: %v", workerIdx, resIdx, err))
+					fmt.Printf("long polling worker %d: failed to get staged update run run-%d: %v\n", workerIdx, resIdx, err)
 					// Requeue the run; no need to retry here.
 					r.toLongPollStagedUpdateRunsChan <- resIdx
 					time.Sleep(r.longPollingCoolDownPeriod)
@@ -55,7 +55,7 @@ func (r *Runner) LongPollStagedUpdateRuns(ctx context.Context) {
 				// Check if the staged update run is completed.
 				runSucceededCond := meta.FindStatusCondition(stagedUpdateRun.Status.Conditions, string(placementv1beta1.StageUpdatingConditionSucceeded))
 				if runSucceededCond == nil || runSucceededCond.Status != metav1.ConditionTrue || runSucceededCond.ObservedGeneration != stagedUpdateRun.Generation {
-					println(fmt.Sprintf("long polling worker %d: staged update run run-%d is not completed yet, requeue it", workerIdx, resIdx))
+					fmt.Printf("long polling worker %d: staged update run run-%d is not completed yet, requeue it\n", workerIdx, resIdx)
 					// Requeue the run.
 					r.toLongPollStagedUpdateRunsChan <- resIdx
 					time.Sleep(r.longPollingCoolDownPeriod)
@@ -63,7 +63,7 @@ func (r *Runner) LongPollStagedUpdateRuns(ctx context.Context) {
 				} else {
 					// The staged update run has been completed.
 					newCount := r.completedStagedUpdateRunCount.Add(1)
-					println(fmt.Sprintf("long polling worker %d: staged update run run-%d is completed, total completed count: %d", workerIdx, resIdx, newCount))
+					fmt.Printf("long polling worker %d: staged update run run-%d is completed, total completed count: %d\n", workerIdx, resIdx, newCount)
 
 					// Track its latency.
 					creationTimestamp := stagedUpdateRun.CreationTimestamp.Time
@@ -80,7 +80,7 @@ func (r *Runner) LongPollStagedUpdateRuns(ctx context.Context) {
 	wg.Wait()
 
 	// Do a sanity check report.
-	println(fmt.Sprintf("long polling %d staged update runs, with %d completed", r.longPollingStagedUpdateRunsCount.Load(), r.completedStagedUpdateRunCount.Load()))
+	fmt.Printf("long polling %d staged update runs, with %d completed\n", r.longPollingStagedUpdateRunsCount.Load(), r.completedStagedUpdateRunCount.Load())
 
 	close(r.toTrackLatencyChan)
 }

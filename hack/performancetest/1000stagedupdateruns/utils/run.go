@@ -46,7 +46,7 @@ func (r *Runner) CreateStagedUpdateRuns(ctx context.Context) {
 				select {
 				case resIdx, readOk = <-r.toCreateStagedUpdateRunsChan:
 					if !readOk {
-						println(fmt.Sprintf("worker %d exits", workerIdx))
+						fmt.Printf("worker %d exits\n", workerIdx)
 						return
 					}
 				case <-ctx.Done():
@@ -70,10 +70,10 @@ func (r *Runner) CreateStagedUpdateRuns(ctx context.Context) {
 					return r.hubClient.Create(ctx, &stagedUpdateRun)
 				})
 				if errAfterRetries != nil && !errors.IsAlreadyExists(errAfterRetries) {
-					println(fmt.Sprintf("worker %d: failed to create staged update run run-%d after retries: %v", workerIdx, resIdx, errAfterRetries))
+					fmt.Printf("worker %d: failed to create staged update run run-%d after retries: %v\n", workerIdx, resIdx, errAfterRetries)
 					continue
 				}
-				println(fmt.Sprintf("worker %d: successfully created staged update run run-%d", workerIdx, resIdx))
+				fmt.Printf("worker %d: successfully created staged update run run-%d\n", workerIdx, resIdx)
 
 				// Submit the run for long polling.
 				r.toLongPollStagedUpdateRunsChan <- resIdx

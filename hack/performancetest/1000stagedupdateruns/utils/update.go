@@ -7,7 +7,6 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/util/retry"
@@ -46,7 +45,7 @@ func (r *Runner) UpdateResources(ctx context.Context) {
 				select {
 				case resIdx, readOk = <-r.toPatchResourcesChan:
 					if !readOk {
-						println(fmt.Sprintf("worker %d exits", workerIdx))
+						fmt.Printf("worker %d exits\n", workerIdx)
 						return
 					}
 				case <-ctx.Done():
@@ -54,21 +53,21 @@ func (r *Runner) UpdateResources(ctx context.Context) {
 				}
 
 				if err := r.updateNS(ctx, workerIdx, resIdx); err != nil {
-					println(fmt.Sprintf("worker %d: failed to update namespace work-%d: %v", workerIdx, resIdx, err))
+					fmt.Printf("worker %d: failed to update namespace work-%d: %v\n", workerIdx, resIdx, err)
 					continue
 				}
 
 				if err := r.updateConfigMap(ctx, workerIdx, resIdx); err != nil {
-					println(fmt.Sprintf("worker %d: failed to update configmap data-%d: %v", workerIdx, resIdx, err))
+					fmt.Printf("worker %d: failed to update configmap data-%d: %v\n", workerIdx, resIdx, err)
 					continue
 				}
 
 				if err := r.updateDeploy(ctx, workerIdx, resIdx); err != nil {
-					println(fmt.Sprintf("worker %d: failed to update deployment deploy-%d: %v", workerIdx, resIdx, err))
+					fmt.Printf("worker %d: failed to update deployment deploy-%d: %v\n", workerIdx, resIdx, err)
 					continue
 				}
 
-				println(fmt.Sprintf("worker %d: successfully updated resources group of idx %d", workerIdx, resIdx))
+				fmt.Printf("worker %d: successfully updated resources group of idx %d\n", workerIdx, resIdx)
 
 				r.resourcesPatchedCount.Add(1)
 			}
@@ -78,103 +77,88 @@ func (r *Runner) UpdateResources(ctx context.Context) {
 	wg.Wait()
 
 	// Do a sanity check report.
-	println(fmt.Sprintf("patched %d out of %d resources in total", r.resourcesPatchedCount.Load(), r.maxCRPToUpdateCount))
+	fmt.Printf("patched %d out of %d resources in total\n", r.resourcesPatchedCount.Load(), r.maxCRPToUpdateCount)
 }
 
 func (r *Runner) updateNS(ctx context.Context, workerIdx, resIdx int) error {
-	// Retrieve the namespace.
-	ns := &corev1.Namespace{}
 	nsName := fmt.Sprintf(nsNameFmt, resIdx)
-	errAfterRetries := retry.OnError(r.retryOpsBackoff, func(err error) bool {
-		return err != nil && !errors.IsAlreadyExists(err)
-	}, func() error {
-		return r.hubClient.Get(ctx, types.NamespacedName{Name: nsName}, ns)
-	})
-	if errAfterRetries != nil {
-		return fmt.Errorf("worker %d: failed to get namespace work-%d after retries: %w", workerIdx, resIdx, errAfterRetries)
-	}
-
-	labels := ns.GetLabels()
-	if labels == nil {
-		labels = make(map[string]string)
-	}
-	labels[randomUUIDLabelKey] = string(uuid.NewUUID())
-	ns.SetLabels(labels)
 
 	// Update the namespace with the new label.
-	errAfterRetries = retry.OnError(r.retryOpsBackoff, func(err error) bool {
+	errAfterRetries := retry.OnError(r.retryOpsBackoff, func(err error) bool {
 		return err != nil
 	}, func() error {
-		return r.hubClient.Update(ctx, ns)
+		ns := &corev1.Namespace{}
+		if err := r.hubClient.Get(ctx, types.NamespacedName{Name: nsName}, ns); err != nil {
+			return fmt.Errorf("failed to get namespace %s before update: %w", nsName, err)
+		}
+
+		labels := ns.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+		labels[randomUUIDLabelKey] = string(uuid.NewUUID())
+		ns.SetLabels(labels)
+
+		if err := r.hubClient.Update(ctx, ns); err != nil {
+			return fmt.Errorf("failed to update namespace %s: %w", nsName, err)
+		}
+		return nil
 	})
-	if errAfterRetries != nil {
-		return fmt.Errorf("worker %d: failed to update namespace work-%d after retries: %w", workerIdx, resIdx, errAfterRetries)
-	}
-	return nil
+	return errAfterRetries
 }
 
 func (r *Runner) updateConfigMap(ctx context.Context, workerIdx, resIdx int) error {
-	// Retrieve the configmap.
-	cm := &corev1.ConfigMap{}
 	cmName := fmt.Sprintf(configMapNameFmt, resIdx)
 	cmNamespace := fmt.Sprintf(nsNameFmt, resIdx)
-	errAfterRetries := retry.OnError(r.retryOpsBackoff, func(err error) bool {
-		return err != nil && !errors.IsAlreadyExists(err)
-	}, func() error {
-		return r.hubClient.Get(ctx, types.NamespacedName{Name: cmName, Namespace: cmNamespace}, cm)
-	})
-	if errAfterRetries != nil {
-		return fmt.Errorf("worker %d: failed to get configmap data-%d after retries: %w", workerIdx, resIdx, errAfterRetries)
-	}
-
-	labels := cm.GetLabels()
-	if labels == nil {
-		labels = make(map[string]string)
-	}
-	labels[randomUUIDLabelKey] = string(uuid.NewUUID())
-	cm.SetLabels(labels)
 
 	// Update the configmap with the new label.
-	errAfterRetries = retry.OnError(r.retryOpsBackoff, func(err error) bool {
+	errAfterRetries := retry.OnError(r.retryOpsBackoff, func(err error) bool {
 		return err != nil
 	}, func() error {
-		return r.hubClient.Update(ctx, cm)
+		cm := &corev1.ConfigMap{}
+		if err := r.hubClient.Get(ctx, types.NamespacedName{Name: cmName, Namespace: cmNamespace}, cm); err != nil {
+			return fmt.Errorf("failed to get configmap %s in namespace %s before update: %w", cmName, cmNamespace, err)
+		}
+
+		labels := cm.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+		labels[randomUUIDLabelKey] = string(uuid.NewUUID())
+		cm.SetLabels(labels)
+
+		if err := r.hubClient.Update(ctx, cm); err != nil {
+			return fmt.Errorf("failed to update configmap %s in namespace %s: %w", cmName, cmNamespace, err)
+		}
+		return nil
 	})
-	if errAfterRetries != nil {
-		return fmt.Errorf("worker %d: failed to update configmap data-%d after retries: %w", workerIdx, resIdx, errAfterRetries)
-	}
-	return nil
+	return errAfterRetries
 }
 
 func (r *Runner) updateDeploy(ctx context.Context, workerIdx, resIdx int) error {
-	// Retrieve the deployment.
-	deploy := &appsv1.Deployment{}
 	deployName := fmt.Sprintf(deployNameFmt, resIdx)
 	deployNamespace := fmt.Sprintf(nsNameFmt, resIdx)
-	errAfterRetries := retry.OnError(r.retryOpsBackoff, func(err error) bool {
-		return err != nil && !errors.IsAlreadyExists(err)
-	}, func() error {
-		return r.hubClient.Get(ctx, types.NamespacedName{Name: deployName, Namespace: deployNamespace}, deploy)
-	})
-	if errAfterRetries != nil {
-		return fmt.Errorf("worker %d: failed to get deployment deploy-%d after retries: %w", workerIdx, resIdx, errAfterRetries)
-	}
-
-	labels := deploy.GetLabels()
-	if labels == nil {
-		labels = make(map[string]string)
-	}
-	labels[randomUUIDLabelKey] = string(uuid.NewUUID())
-	deploy.SetLabels(labels)
 
 	// Update the deployment with the new label.
-	errAfterRetries = retry.OnError(r.retryOpsBackoff, func(err error) bool {
+	errAfterRetries := retry.OnError(r.retryOpsBackoff, func(err error) bool {
 		return err != nil
 	}, func() error {
-		return r.hubClient.Update(ctx, deploy)
+		deploy := &appsv1.Deployment{}
+		if err := r.hubClient.Get(ctx, types.NamespacedName{Name: deployName, Namespace: deployNamespace}, deploy); err != nil {
+			return fmt.Errorf("failed to get deployment %s in namespace %s before update: %w", deployName, deployNamespace, err)
+		}
+
+		labels := deploy.GetLabels()
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+		labels[randomUUIDLabelKey] = string(uuid.NewUUID())
+		deploy.SetLabels(labels)
+
+		if err := r.hubClient.Update(ctx, deploy); err != nil {
+			return fmt.Errorf("failed to update deployment %s in namespace %s: %w", deployName, deployNamespace, err)
+		}
+		return nil
 	})
-	if errAfterRetries != nil {
-		return fmt.Errorf("worker %d: failed to update deployment deploy-%d after retries: %w", workerIdx, resIdx, errAfterRetries)
-	}
-	return nil
+	return errAfterRetries
 }

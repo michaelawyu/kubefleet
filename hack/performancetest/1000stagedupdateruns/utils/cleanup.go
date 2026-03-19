@@ -31,7 +31,7 @@ func (r *Runner) cleanUpStrategy(ctx context.Context) {
 		return r.hubClient.Delete(ctx, stagedUpdatedRunStrategy)
 	})
 	if errAfterReties != nil && !errors.IsNotFound(errAfterReties) {
-		println(fmt.Sprintf("failed to delete staged update run strategy %s after retries: %v", commonStagedUpdateRunStrategyName, errAfterReties))
+		fmt.Printf("failed to delete staged update run strategy %s after retries: %v\n", commonStagedUpdateRunStrategyName, errAfterReties)
 	}
 }
 
@@ -68,7 +68,7 @@ func (r *Runner) cleanUpRuns(ctx context.Context) {
 				select {
 				case resIdx, readOk = <-r.toDeleteChan:
 					if !readOk {
-						println(fmt.Sprintf("worker %d exits", workerIdx))
+						fmt.Printf("worker %d exits\n", workerIdx)
 						return
 					}
 				case <-ctx.Done():
@@ -87,7 +87,7 @@ func (r *Runner) cleanUpRuns(ctx context.Context) {
 					return r.hubClient.Delete(ctx, stagedUpdateRun)
 				})
 				if errAfterReties != nil && !errors.IsNotFound(errAfterReties) {
-					println(fmt.Sprintf("worker %d: failed to delete staged update run %s after retries: %v", workerIdx, stagedUpdateRun.Name, errAfterReties))
+					fmt.Printf("worker %d: failed to delete staged update run %s after retries: %v\n", workerIdx, stagedUpdateRun.Name, errAfterReties)
 					continue
 				}
 
@@ -103,9 +103,9 @@ func (r *Runner) cleanUpRuns(ctx context.Context) {
 					return err
 				})
 				if errAfterReties == nil || !errors.IsNotFound(errAfterReties) {
-					println(fmt.Sprintf("worker %d: failed to wait for staged update run %s to be deleted after retries: %v", workerIdx, stagedUpdateRun.Name, errAfterReties))
+					fmt.Printf("worker %d: failed to wait for staged update run %s to be deleted after retries: %v\n", workerIdx, stagedUpdateRun.Name, errAfterReties)
 				} else {
-					println(fmt.Sprintf("worker %d: deleted staged update run %s", workerIdx, stagedUpdateRun.Name))
+					fmt.Printf("worker %d: deleted staged update run %s\n", workerIdx, stagedUpdateRun.Name)
 				}
 			}
 		}(i)

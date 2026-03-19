@@ -24,7 +24,7 @@ func (r *Runner) TrackLatency(ctx context.Context) {
 				if !readOK {
 					return
 				}
-				println(fmt.Sprintf("latency tracker: staged update run run-%d has latency %v seconds", attempt.resIdx, attempt.latency.Seconds()))
+				fmt.Printf("latency tracker: staged update run run-%d has latency %v seconds\n", attempt.resIdx, attempt.latency.Seconds())
 				r.stagedUpdateRunCompletionLatencyByRunName[fmt.Sprintf("run-%d", attempt.resIdx)] = attempt.latency
 			case <-ctx.Done():
 				return
@@ -48,6 +48,6 @@ func (r *Runner) TallyLatencyQuantiles() {
 	q75 := int(math.Floor(float64(len(latencies)) * 0.75))
 	q90 := int(math.Floor(float64(len(latencies)) * 0.90))
 	q99 := int(math.Floor(float64(len(latencies)) * 0.99))
-	println(fmt.Sprintf("latencies (seconds): 25th=%v, 50th=%v, 75th=%v, 90th=%v, 99th=%v",
-		latencies[q25], latencies[q50], latencies[q75], latencies[q90], latencies[q99]))
+	fmt.Printf("latencies (seconds): 25th=%v, 50th=%v, 75th=%v, 90th=%v, 99th=%v\n",
+		latencies[q25], latencies[q50], latencies[q75], latencies[q90], latencies[q99])
 }
