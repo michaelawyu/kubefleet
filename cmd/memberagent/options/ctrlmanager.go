@@ -231,7 +231,7 @@ func (v *HubBurstValueWithValidation) Set(s string) error {
 	}
 
 	if burst < 10 || burst > 2000 {
-		return fmt.Errorf("Burst limit is set to an invalid value (%d), must be a value in the range [10, 2000]", burst)
+		return fmt.Errorf("burst limit is set to an invalid value (%d), must be a value in the range [10, 2000]", burst)
 	}
 	*v = HubBurstValueWithValidation(burst)
 	return nil
@@ -289,7 +289,7 @@ func (v *MemberBurstValueWithValidation) Set(s string) error {
 	}
 
 	if burst < 10 || burst > 20000 {
-		return fmt.Errorf("Burst limit is set to an invalid value (%d), must be a value in the range [10, 20000]", burst)
+		return fmt.Errorf("burst limit is set to an invalid value (%d), must be a value in the range [10, 20000]", burst)
 	}
 	*v = MemberBurstValueWithValidation(burst)
 	return nil
