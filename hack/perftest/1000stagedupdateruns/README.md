@@ -9,7 +9,7 @@ The program is added for the purpose of testing the performance and scalability 
 
 * Set up 1K placements using the utility program in `../1000placements` before running this utility program.
 * Make sure that all placements have been updated to use the `External` update strategy (via the staged update run APIs).
-* Make sure that all member clusters are labelled with `env=[canary|staging|production]` as appropriate so that KubeFleet
+* Make sure that all member clusters are labelled with `env=[canary|staging|prod]` as appropriate so that KubeFleet
 can assign them to their respective stages.
 
 > If you have followed the instructions in `../../README.md` and have used the given scripts and utility programs
@@ -29,5 +29,5 @@ reports the progress in the output.
 After the program completes, run the commands below to clean up the created 1K staged update runs:
 
 ```bash
-CLEANUP=true go run main.go
+CLEANUP=set go run main.go
 ```

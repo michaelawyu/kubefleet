@@ -19,19 +19,19 @@ func (r *Runner) CleanUp(ctx context.Context) {
 }
 
 func (r *Runner) cleanUpStrategy(ctx context.Context) {
-	stagedUpdatedRunStrategy := &placementv1beta1.ClusterStagedUpdateStrategy{
+	stagedUpdateRunStrategy := &placementv1beta1.ClusterStagedUpdateStrategy{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: commonStagedUpdateRunStrategyName,
 		},
 	}
 
-	errAfterReties := retry.OnError(r.retryOpsBackoff, func(err error) bool {
+	errAfterRetries := retry.OnError(r.retryOpsBackoff, func(err error) bool {
 		return err != nil && !errors.IsNotFound(err)
 	}, func() error {
-		return r.hubClient.Delete(ctx, stagedUpdatedRunStrategy)
+		return r.hubClient.Delete(ctx, stagedUpdateRunStrategy)
 	})
-	if errAfterReties != nil && !errors.IsNotFound(errAfterReties) {
-		fmt.Printf("failed to delete staged update run strategy %s after retries: %v\n", commonStagedUpdateRunStrategyName, errAfterReties)
+	if errAfterRetries != nil && !errors.IsNotFound(errAfterRetries) {
+		fmt.Printf("failed to delete staged update run strategy %s after retries: %v\n", commonStagedUpdateRunStrategyName, errAfterRetries)
 	}
 }
 
@@ -81,18 +81,18 @@ func (r *Runner) cleanUpRuns(ctx context.Context) {
 						Name: fmt.Sprintf(stagedUpdateRunNameFmt, resIdx),
 					},
 				}
-				errAfterReties := retry.OnError(r.retryOpsBackoff, func(err error) bool {
+				errAfterRetries := retry.OnError(r.retryOpsBackoff, func(err error) bool {
 					return err != nil && !errors.IsNotFound(err)
 				}, func() error {
 					return r.hubClient.Delete(ctx, stagedUpdateRun)
 				})
-				if errAfterReties != nil && !errors.IsNotFound(errAfterReties) {
-					fmt.Printf("worker %d: failed to delete staged update run %s after retries: %v\n", workerIdx, stagedUpdateRun.Name, errAfterReties)
+				if errAfterRetries != nil && !errors.IsNotFound(errAfterRetries) {
+					fmt.Printf("worker %d: failed to delete staged update run %s after retries: %v\n", workerIdx, stagedUpdateRun.Name, errAfterRetries)
 					continue
 				}
 
 				// Wait until the staged update run is deleted.
-				errAfterReties = retry.OnError(r.retryOpsBackoff, func(err error) bool {
+				errAfterRetries = retry.OnError(r.retryOpsBackoff, func(err error) bool {
 					return err != nil && !errors.IsNotFound(err)
 				}, func() error {
 					stagedUpdateRun := &placementv1beta1.ClusterStagedUpdateRun{}
@@ -102,8 +102,8 @@ func (r *Runner) cleanUpRuns(ctx context.Context) {
 					}
 					return err
 				})
-				if errAfterReties == nil || !errors.IsNotFound(errAfterReties) {
-					fmt.Printf("worker %d: failed to wait for staged update run %s to be deleted after retries: %v\n", workerIdx, stagedUpdateRun.Name, errAfterReties)
+				if errAfterRetries == nil || !errors.IsNotFound(errAfterRetries) {
+					fmt.Printf("worker %d: failed to wait for staged update run %s to be deleted after retries: %v\n", workerIdx, stagedUpdateRun.Name, errAfterRetries)
 				} else {
 					fmt.Printf("worker %d: deleted staged update run %s\n", workerIdx, stagedUpdateRun.Name)
 				}

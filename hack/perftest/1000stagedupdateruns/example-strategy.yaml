@@ -14,7 +14,7 @@ spec:
         matchLabels:
           env: canary
       maxConcurrency: 25%
-    - name: production
+    - name: prod
       labelSelector:
         matchLabels:
           env: prod

@@ -53,7 +53,7 @@ func (r *Runner) LongPollStagedUpdateRuns(ctx context.Context) {
 				}
 
 				// Check if the staged update run is completed.
-				runSucceededCond := meta.FindStatusCondition(stagedUpdateRun.Status.Conditions, string(placementv1beta1.StageUpdatingConditionSucceeded))
+				runSucceededCond := meta.FindStatusCondition(stagedUpdateRun.Status.Conditions, string(placementv1beta1.StagedUpdateRunConditionSucceeded))
 				if runSucceededCond == nil || runSucceededCond.Status != metav1.ConditionTrue || runSucceededCond.ObservedGeneration != stagedUpdateRun.Generation {
 					fmt.Printf("long polling worker %d: staged update run run-%d is not completed yet, requeue it\n", workerIdx, resIdx)
 					// Requeue the run.
