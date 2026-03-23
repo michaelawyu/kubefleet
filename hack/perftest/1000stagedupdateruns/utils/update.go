@@ -33,7 +33,7 @@ func (r *Runner) UpdateResources(ctx context.Context) {
 	}()
 
 	// Run the workers to add a label to each existing resource.
-	for i := 0; i < r.concurrentWorkerCount; i++ {
+	for i := 0; i < r.resourceSetupWorkerCount; i++ {
 		wg.Add(1)
 		go func(workerIdx int) {
 			defer wg.Done()

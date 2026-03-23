@@ -44,7 +44,7 @@ type latencyTrackAttempt struct {
 type Runner struct {
 	hubClient client.Client
 
-	concurrentWorkerCount      int
+	resourceSetupWorkerCount   int
 	longPollingWorkerCount     int
 	betweenStageCoolDownPeriod time.Duration
 	longPollingCoolDownPeriod  time.Duration
@@ -87,7 +87,7 @@ func New(
 
 	return &Runner{
 		hubClient:                                 hubClient,
-		concurrentWorkerCount:                     concurrentWorkerCount,
+		resourceSetupWorkerCount:                  concurrentWorkerCount,
 		longPollingWorkerCount:                    longPollingWorkerCount,
 		betweenStageCoolDownPeriod:                betweenStageCoolDownPeriod,
 		longPollingCoolDownPeriod:                 longPollingCoolDownPeriod,

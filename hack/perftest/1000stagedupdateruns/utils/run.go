@@ -33,7 +33,7 @@ func (r *Runner) CreateStagedUpdateRuns(ctx context.Context) {
 	}()
 
 	// Run the workers to create staged update runs.
-	for i := 0; i < r.concurrentWorkerCount; i++ {
+	for i := 0; i < r.resourceSetupWorkerCount; i++ {
 		wg.Add(1)
 
 		go func(workerIdx int) {

@@ -56,7 +56,7 @@ func (r *Runner) cleanUpRuns(ctx context.Context) {
 	}()
 
 	// Run the workers.
-	for i := 0; i < r.concurrentWorkerCount; i++ {
+	for i := 0; i < r.resourceSetupWorkerCount; i++ {
 		wg.Add(1)
 		go func(workerIdx int) {
 			defer wg.Done()
