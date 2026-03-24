@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	usrFriendlyDenialErrMsgFmt = "PDBs %s/%s cannot be directly created in the hub cluster due to potential side effects; to place a PDB to member clusters, consider wrapping it in a resource envelope. see https://aka.ms/fleet-place-resources-wrapped-in-envelopes for more information."
+	usrFriendlyDenialErrMsgFmt = "PDBs %s/%s cannot be directly created in the hub cluster due to potential side effects; to place a PDB to member clusters, consider wrapping it in a resource envelope."
 )
 
 var (
