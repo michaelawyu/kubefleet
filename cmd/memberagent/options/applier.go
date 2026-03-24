@@ -131,7 +131,7 @@ func (o *ApplierOptions) AddFlags(flags *flag.FlagSet) {
 	flags.Var(
 		newRequeueExpBaseForSlowBackoffValue(1.2, &o.RequeueRateLimiterExponentialBaseForSlowBackoff),
 		"work-applier-requeue-rate-limiter-exponential-base-for-slow-backoff",
-		"The exponential delay growth base for the slow backoff stage when the KubeFleet member agent re-processes a placement. Default is 1.2. The value must be in the range [1.05, 100].")
+		"The exponential delay growth base for the slow backoff stage when the KubeFleet member agent re-processes a placement. Default is 1.2. The value must be in the range [1.05, 2].")
 
 	flags.Var(
 		newRequeueInitSlowBackoffDelaySecondsValue(2, &o.RequeueRateLimiterInitialSlowBackoffDelaySeconds),
@@ -146,7 +146,7 @@ func (o *ApplierOptions) AddFlags(flags *flag.FlagSet) {
 	flags.Var(
 		newRequeueExpBaseForFastBackoffValue(1.5, &o.RequeueRateLimiterExponentialBaseForFastBackoff),
 		"work-applier-requeue-rate-limiter-exponential-base-for-fast-backoff",
-		"The exponential delay growth base for the fast backoff stage when the KubeFleet member agent re-processes a placement. Default is 1.5. The value must be in the range (1, 100].")
+		"The exponential delay growth base for the fast backoff stage when the KubeFleet member agent re-processes a placement. Default is 1.5. The value must be in the range (1, 2].")
 
 	flags.Var(
 		newRequeueMaxFastBackoffDelaySecondsValue(900, &o.RequeueRateLimiterMaxFastBackoffDelaySeconds),
@@ -256,8 +256,8 @@ func (v *RequeueExpBaseForSlowBackoff) Set(s string) error {
 		return fmt.Errorf("failed to parse float value: %w", err)
 	}
 
-	if exp < 1.05 || exp > 100 {
-		return fmt.Errorf("requeue rate limiter exponential base for slow backoff is set to an invalid value (%g), must be a value in the range [1.05, 100]", exp)
+	if exp < 1.05 || exp > 2 {
+		return fmt.Errorf("requeue rate limiter exponential base for slow backoff is set to an invalid value (%g), must be a value in the range [1.05, 2]", exp)
 	}
 	*v = RequeueExpBaseForSlowBackoff(exp)
 	return nil
@@ -328,8 +328,8 @@ func (v *RequeueExpBaseForFastBackoff) Set(s string) error {
 		return fmt.Errorf("failed to parse float value: %w", err)
 	}
 
-	if exp <= 1 || exp > 100 {
-		return fmt.Errorf("requeue rate limiter exponential base for fast backoff is set to an invalid value (%g), must be a value in the range (1, 100]", exp)
+	if exp <= 1 || exp > 2 {
+		return fmt.Errorf("requeue rate limiter exponential base for fast backoff is set to an invalid value (%g), must be a value in the range (1, 2]", exp)
 	}
 	*v = RequeueExpBaseForFastBackoff(exp)
 	return nil
