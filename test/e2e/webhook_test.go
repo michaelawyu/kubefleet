@@ -34,6 +34,7 @@ import (
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/defaulter"
 )
 
@@ -1695,6 +1696,30 @@ var _ = Describe("webhook tests for PodDisruptionBudget CREATE operations", func
 				},
 			}
 			Expect(checkIfStatusErrorWithMessage(hubClient.Create(ctx, &pdb), "cannot be directly created in the hub cluster")).Should(Succeed())
+		})
+	})
+
+	Context("allow PDB creation in reserved namespaces for master users", Ordered, func() {
+		var pdb policyv1.PodDisruptionBudget
+
+		AfterAll(func() {
+			Expect(hubClient.Delete(ctx, &pdb)).Should(SatisfyAny(Succeed(), utils.NotFoundMatcher{}))
+		})
+
+		It("should allow CREATE operation on PDB in kube-system namespace for master users", func() {
+			pdb = policyv1.PodDisruptionBudget{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pdb-kube-system",
+					Namespace: "kube-system",
+				},
+				Spec: policyv1.PodDisruptionBudgetSpec{
+					MinAvailable: ptr.To(intstr.FromInt32(1)),
+					Selector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "test"},
+					},
+				},
+			}
+			Expect(hubClient.Create(ctx, &pdb)).Should(Succeed())
 		})
 	})
 })

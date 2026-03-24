@@ -41,7 +41,7 @@ var (
 	ValidationPath = fmt.Sprintf(utils.ValidationPathFmt, policyv1.SchemeGroupVersion.Group, policyv1.SchemeGroupVersion.Version, "poddisruptionbudget")
 )
 
-// Add registers the webhook for K8s bulit-in object types.
+// Add registers the webhook for K8s built-in object types.
 func Add(mgr manager.Manager) error {
 	hookServer := mgr.GetWebhookServer()
 	hookServer.Register(ValidationPath, &webhook.Admission{Handler: &pdbValidator{admission.NewDecoder(mgr.GetScheme())}})
@@ -70,7 +70,7 @@ func (v *pdbValidator) Handle(_ context.Context, req admission.Request) admissio
 			return admission.Denied(fmt.Sprintf(usrFriendlyDenialErrMsgFmt, pdb.Namespace, pdb.Name))
 		}
 	}
-	klog.V(3).InfoS("Allowing creation of PDBs in reserved namespaces",
+	klog.V(3).InfoS("Allowing operations on PDBs",
 		"user", req.UserInfo.Username, "groups", req.UserInfo.Groups,
 		"operation", req.Operation,
 		"GVK", req.RequestKind,
