@@ -1,0 +1,30 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ClusterStagedUpdateStrategy
+metadata:
+  name: "staging-canary-prod"
+spec:
+  stages:
+    - name: staging
+      labelSelector:
+        matchLabels:
+          rollout-env: staging
+      maxConcurrency: 25%
+      afterStageTasks:
+        - type: TimedWait
+          waitTime: 30s
+    - name: canary
+      labelSelector:
+        matchLabels:
+          rollout-env: canary
+      maxConcurrency: 25%
+      afterStageTasks:
+        - type: TimedWait
+          waitTime: 30s
+    - name: prod
+      labelSelector:
+        matchLabels:
+          rollout-env: prod
+      maxConcurrency: 25%
+      afterStageTasks:
+        - type: TimedWait
+          waitTime: 30s

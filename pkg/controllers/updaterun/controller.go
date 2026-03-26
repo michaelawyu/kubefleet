@@ -66,6 +66,9 @@ type Reconciler struct {
 
 	// ResourceSnapshotResolver gets or creates resource snapshots.
 	ResourceSnapshotResolver controller.ResourceSnapshotResolver
+
+	// Demo-only code.
+	PlacementController controller.Controller
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req runtime.Request) (runtime.Result, error) {
@@ -81,6 +84,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req runtime.Request) (runtim
 		klog.ErrorS(err, "Failed to get updateRun object", "updateRun", req.NamespacedName)
 		return runtime.Result{}, client.IgnoreNotFound(err)
 	}
+
+	r.PlacementController.Enqueue(controller.GetObjectKeyFromNamespaceName(updateRun.GetNamespace(), updateRun.GetUpdateRunSpec().PlacementName))
+	klog.Infof("Enqueued the placement for the updateRun, placementName: %s, updateRun: %s", updateRun.GetUpdateRunSpec().PlacementName, klog.KObj(updateRun))
+	defer func() {
+		r.PlacementController.Enqueue(controller.GetObjectKeyFromNamespaceName(updateRun.GetNamespace(), updateRun.GetUpdateRunSpec().PlacementName))
+		klog.Infof("Enqueued the placement for the updateRun, placementName: %s, updateRun: %s", updateRun.GetUpdateRunSpec().PlacementName, klog.KObj(updateRun))
+	}()
 
 	// Update all existing conditions' ObservedGeneration to the current generation.
 	updateAllStatusConditionsGeneration(updateRun.GetUpdateRunStatus(), updateRun.GetGeneration())
