@@ -744,7 +744,7 @@ func (r *Reconciler) setPlacementStatus(
 			switch {
 			case succeededCond == nil:
 			case succeededCond.Status == metav1.ConditionTrue:
-				stateByRollout[updateRunName] = "Succeeded"
+				stateByRollout[updateRunName] = "Completed"
 				continue
 			case succeededCond.Status == metav1.ConditionFalse:
 				stateByRollout[updateRunName] = "Failed"
@@ -756,18 +756,20 @@ func (r *Reconciler) setPlacementStatus(
 			case progressingCond == nil:
 				continue
 			case progressingCond.Status == metav1.ConditionTrue:
-				stateByRollout[updateRunName] = "Progressing"
+				stateByRollout[updateRunName] = "InProgress"
 			case progressingCond.Status == metav1.ConditionFalse && progressingCond.Reason == condition.UpdateRunStoppedReason:
 				stateByRollout[updateRunName] = "Stopped"
 			case progressingCond.Status == metav1.ConditionFalse && progressingCond.Reason == condition.UpdateRunStuckReason:
 				stateByRollout[updateRunName] = "Stuck"
 			case progressingCond.Status == metav1.ConditionFalse && progressingCond.Reason == condition.UpdateRunWaitingReason:
-				stateByRollout[updateRunName] = "Progressing"
+				stateByRollout[updateRunName] = "InProgress"
 			case progressingCond.Status == metav1.ConditionUnknown:
 				stateByRollout[updateRunName] = "Stopping"
 			default:
 			}
+		}
 
+		for updateRunName, updateRunStatus := range updateRunStatuses {
 			if _, ok := stateByRollout[updateRunName]; ok {
 				for sIdx := range updateRunStatus.StagesStatus {
 					stageStatus := &updateRunStatus.StagesStatus[sIdx]
@@ -779,6 +781,7 @@ func (r *Reconciler) setPlacementStatus(
 						if cStateByRollout == nil {
 							cStateByRollout = map[string]string{}
 						}
+						perClusterStateByRollout[cName] = cStateByRollout
 
 						succeededCond := meta.FindStatusCondition(cStatus.Conditions, string(fleetv1beta1.ClusterUpdatingConditionSucceeded))
 						switch {
@@ -800,7 +803,6 @@ func (r *Reconciler) setPlacementStatus(
 						case startedCond.Status == metav1.ConditionTrue:
 							cStateByRollout[updateRunName] = "InProgress"
 						}
-
 					}
 				}
 			}
@@ -808,11 +810,13 @@ func (r *Reconciler) setPlacementStatus(
 
 		// Merge the states into the placement status.
 		placementStatus.RolloutManagedBy = stateByRollout
+		klog.Infof("Watch me: %+v", perClusterStateByRollout)
 
 		for idx := range placementStatus.PerClusterPlacementStatuses {
 			cStatus := &placementStatus.PerClusterPlacementStatuses[idx]
 
 			cStatus.RolloutState = perClusterStateByRollout[cStatus.ClusterName]
+			klog.Infof("Watch me again: %+v", cStatus.RolloutState)
 		}
 	}
 

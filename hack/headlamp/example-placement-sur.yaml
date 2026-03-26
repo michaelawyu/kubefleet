@@ -1,0 +1,15 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ClusterResourcePlacement
+metadata:
+  name: crp-1
+spec:
+  policy:
+    placementType: PickAll
+  resourceSelectors:
+    - group: ""
+      kind: Namespace
+      version: v1
+      name: work-1
+  strategy:
+    type: External
+
