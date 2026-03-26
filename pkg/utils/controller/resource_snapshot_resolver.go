@@ -95,7 +95,7 @@ func (r *ResourceSnapshotResolver) GetOrCreateResourceSnapshot(ctx context.Conte
 	}
 
 	// latestResourceSnapshotIndex should be -1 when there is no snapshot.
-	latestResourceSnapshot, latestResourceSnapshotIndex, err := r.lookupLatestResourceSnapshot(ctx, placement)
+	latestResourceSnapshot, latestResourceSnapshotIndex, err := r.LookupLatestResourceSnapshot(ctx, placement)
 	if err != nil {
 		return ctrl.Result{}, nil, err
 	}
@@ -215,7 +215,7 @@ func (r *ResourceSnapshotResolver) GetOrCreateResourceSnapshot(ctx context.Conte
 // Return error when 1) cannot list the snapshots 2) there are more than one active resource snapshots 3) snapshot has the
 // invalid label value.
 // 2 & 3 should never happen.
-func (r *ResourceSnapshotResolver) lookupLatestResourceSnapshot(ctx context.Context, placement fleetv1beta1.PlacementObj) (fleetv1beta1.ResourceSnapshotObj, int, error) {
+func (r *ResourceSnapshotResolver) LookupLatestResourceSnapshot(ctx context.Context, placement fleetv1beta1.PlacementObj) (fleetv1beta1.ResourceSnapshotObj, int, error) {
 	placementKObj := klog.KObj(placement)
 
 	// Use the existing FetchLatestMasterResourceSnapshot function to get the master snapshot

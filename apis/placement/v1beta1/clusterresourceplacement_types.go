@@ -1048,6 +1048,18 @@ type PlacementStatus struct {
 	// conditions except `ClusterResourcePlacementScheduled` will be empty or set to Unknown.
 	// +kubebuilder:validation:Optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// Demo only fields.
+
+	// +kubebuilder:validation:Optional
+	ResourceSnapshotSynchronized bool `json:"resourceSnapshotSynchronized,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	LatestResourceSnapshotIndex string `json:"latestResourceSnapshotIndex,omitempty"`
+
+	// +kubebuilder:validation:Optional
+	// staged update run name <-> status (Completed, InProgress, Stopping, Stopped, Stuck, Failed)
+	RolloutManagedBy map[string]string `json:"rolloutManagedBy,omitempty"`
 }
 
 // ResourceIdentifier identifies one Kubernetes resource.
@@ -1176,6 +1188,11 @@ type PerClusterPlacementStatus struct {
 	// For example, the condition of type `RolloutStarted` is observing the rollout status of the resource snapshot with index `ObservedResourceIndex`.
 	// +kubebuilder:validation:Optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// Demo only fields.
+	// +kubebuilder:validation:Optional
+	// staged update run name <-> status (NotStarted, InProgress, Completed, Failed)
+	RolloutState map[string]string `json:"rolloutState,omitempty"`
 }
 
 // FailedResourcePlacement contains the failure details of a failed resource placement.
