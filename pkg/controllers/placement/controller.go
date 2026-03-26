@@ -219,6 +219,33 @@ func (r *Reconciler) handleUpdate(ctx context.Context, placementObj fleetv1beta1
 		return ctrl.Result{}, err
 	}
 
+	// Demo-only code.
+	demoOnlyLatestResourceSnapshot, demoOnlyLatestResourceSnapshotIdx, err := r.ResourceSnapshotResolver.LookupLatestResourceSnapshot(ctx, placementObj)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	demoOnlyResourceSnapshotSpec := &fleetv1beta1.ResourceSnapshotSpec{
+		SelectedResources: selectedResources,
+	}
+	demoOnlyResourceSnapshotSpecHash, err := resource.HashOf(demoOnlyResourceSnapshotSpec)
+	if err != nil {
+		klog.ErrorS(err, "Failed to generate resource hash for demo only resource snapshot spec", "placement", placementKObj)
+		return ctrl.Result{}, err
+	}
+	demoOnlyPlacementStatus := placementObj.GetPlacementStatus()
+	if demoOnlyLatestResourceSnapshot != nil {
+		demoOnlyLatestResourceSnapshotHash, err := annotations.ParseResourceGroupHashFromAnnotation(demoOnlyLatestResourceSnapshot)
+		if err != nil {
+			klog.ErrorS(err, "Failed to get the ResourceGroupHashAnnotation", "resourceSnapshot", klog.KObj(demoOnlyLatestResourceSnapshot))
+			return ctrl.Result{}, err
+		}
+		demoOnlyPlacementStatus.LatestResourceSnapshotIndex = strconv.Itoa(demoOnlyLatestResourceSnapshotIdx)
+		demoOnlyPlacementStatus.ResourceSnapshotSynchronized = (demoOnlyLatestResourceSnapshotHash == demoOnlyResourceSnapshotSpecHash)
+	} else {
+		demoOnlyPlacementStatus.LatestResourceSnapshotIndex = ""
+		demoOnlyPlacementStatus.ResourceSnapshotSynchronized = false
+	}
+
 	// isScheduleFullfilled is to indicate whether we need to requeue the placement request to track the rollout status.
 	isScheduleFullfilled, err := r.setPlacementStatus(ctx, placementObj, selectedResourceIDs, latestSchedulingPolicySnapshot, latestResourceSnapshot)
 	if err != nil {
@@ -675,6 +702,120 @@ func (r *Reconciler) setPlacementStatus(
 	}
 	setPlacementConditions(placementObj, perClusterStatus, perClusterCondTypeCounter, expectedCondTypes)
 	klog.V(2).InfoS("Updated placement status for the entire placement", "numResourcePlacementStatus", len(perClusterStatus), "placement", klog.KObj(placementObj))
+
+	// Demo-only code.
+
+	if placementObj.GetPlacementSpec().Strategy.Type == fleetv1beta1.ExternalRolloutStrategyType {
+		stateByRollout := map[string]string{}
+		perClusterStateByRollout := map[string]map[string]string{}
+
+		updateRunStatuses := make(map[string]*fleetv1beta1.UpdateRunStatus)
+
+		// List all staged update runs managing the rollout of this placement.
+		if placementObj.GetNamespace() == "" {
+			clusterStagedUpdateRunList := &fleetv1beta1.ClusterStagedUpdateRunList{}
+			if err := r.Client.List(ctx, clusterStagedUpdateRunList); err != nil {
+				klog.ErrorS(err, "Failed to list ClusterStagedUpdateRuns for placement with external rollout strategy", "placement", klog.KObj(placementObj))
+				return true, controller.NewAPIServerError(true, err)
+			}
+			for idx := range clusterStagedUpdateRunList.Items {
+				clusterStagedUpdateRun := &clusterStagedUpdateRunList.Items[idx]
+				if clusterStagedUpdateRun.Spec.PlacementName == placementObj.GetName() {
+					updateRunStatuses[clusterStagedUpdateRun.Name] = &clusterStagedUpdateRun.Status
+				}
+			}
+		} else {
+			stagedUpdateRunList := &fleetv1beta1.StagedUpdateRunList{}
+			if err := r.Client.List(ctx, stagedUpdateRunList, client.InNamespace(placementObj.GetNamespace())); err != nil {
+				klog.ErrorS(err, "Failed to list StagedUpdateRuns for placement with external rollout strategy", "placement", klog.KObj(placementObj))
+				return true, controller.NewAPIServerError(true, err)
+			}
+			for idx := range stagedUpdateRunList.Items {
+				stagedUpdateRun := &stagedUpdateRunList.Items[idx]
+				if stagedUpdateRun.Spec.PlacementName == placementObj.GetName() {
+					updateRunStatuses[stagedUpdateRun.Name] = &stagedUpdateRun.Status
+				}
+			}
+		}
+
+		// Scan the status list and track their respective state.
+		for updateRunName, updateRunStatus := range updateRunStatuses {
+			succeededCond := meta.FindStatusCondition(updateRunStatus.Conditions, string(fleetv1beta1.StagedUpdateRunConditionSucceeded))
+			switch {
+			case succeededCond == nil:
+			case succeededCond.Status == metav1.ConditionTrue:
+				stateByRollout[updateRunName] = "Succeeded"
+				continue
+			case succeededCond.Status == metav1.ConditionFalse:
+				stateByRollout[updateRunName] = "Failed"
+				continue
+			}
+
+			progressingCond := meta.FindStatusCondition(updateRunStatus.Conditions, string(fleetv1beta1.StagedUpdateRunConditionProgressing))
+			switch {
+			case progressingCond == nil:
+				continue
+			case progressingCond.Status == metav1.ConditionTrue:
+				stateByRollout[updateRunName] = "Progressing"
+			case progressingCond.Status == metav1.ConditionFalse && progressingCond.Reason == condition.UpdateRunStoppedReason:
+				stateByRollout[updateRunName] = "Stopped"
+			case progressingCond.Status == metav1.ConditionFalse && progressingCond.Reason == condition.UpdateRunStuckReason:
+				stateByRollout[updateRunName] = "Stuck"
+			case progressingCond.Status == metav1.ConditionFalse && progressingCond.Reason == condition.UpdateRunWaitingReason:
+				stateByRollout[updateRunName] = "Progressing"
+			case progressingCond.Status == metav1.ConditionUnknown:
+				stateByRollout[updateRunName] = "Stopping"
+			default:
+			}
+
+			if _, ok := stateByRollout[updateRunName]; ok {
+				for sIdx := range updateRunStatus.StagesStatus {
+					stageStatus := &updateRunStatus.StagesStatus[sIdx]
+					for cIdx := range stageStatus.Clusters {
+						cStatus := &stageStatus.Clusters[cIdx]
+						cName := cStatus.ClusterName
+
+						cStateByRollout := perClusterStateByRollout[cName]
+						if cStateByRollout == nil {
+							cStateByRollout = map[string]string{}
+						}
+
+						succeededCond := meta.FindStatusCondition(cStatus.Conditions, string(fleetv1beta1.ClusterUpdatingConditionSucceeded))
+						switch {
+						case succeededCond == nil:
+						case succeededCond.Status == metav1.ConditionTrue:
+							cStateByRollout[updateRunName] = "Completed"
+							continue
+						case succeededCond.Status == metav1.ConditionFalse:
+							cStateByRollout[updateRunName] = "Failed"
+							continue
+						}
+
+						startedCond := meta.FindStatusCondition(cStatus.Conditions, string(fleetv1beta1.ClusterUpdatingConditionStarted))
+						switch {
+						case startedCond == nil:
+							cStateByRollout[updateRunName] = "NotStarted"
+						case startedCond.Status == metav1.ConditionFalse:
+							cStateByRollout[updateRunName] = "NotStarted"
+						case startedCond.Status == metav1.ConditionTrue:
+							cStateByRollout[updateRunName] = "InProgress"
+						}
+
+					}
+				}
+			}
+		}
+
+		// Merge the states into the placement status.
+		placementStatus.RolloutManagedBy = stateByRollout
+
+		for idx := range placementStatus.PerClusterPlacementStatuses {
+			cStatus := &placementStatus.PerClusterPlacementStatuses[idx]
+
+			cStatus.RolloutState = perClusterStateByRollout[cStatus.ClusterName]
+		}
+	}
+
 	return true, nil
 }
 

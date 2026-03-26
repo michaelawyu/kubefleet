@@ -1118,6 +1118,8 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              latestResourceSnapshotIndex:
+                type: string
               observedResourceIndex:
                 description: |-
                   Resource index logically represents the generation of the selected resources.
@@ -1595,8 +1597,23 @@ spec:
                         ObservedResourceIndex is the index of the resource snapshot that is currently being rolled out to the given cluster.
                         This field is only meaningful if the `ClusterName` is not empty.
                       type: string
+                    rolloutState:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        Demo only fields.
+                        staged update run name <-> status (NotStarted, InProgress, Completed, Failed)
+                      type: object
                   type: object
                 type: array
+              resourceSnapshotSynchronized:
+                type: boolean
+              rolloutManagedBy:
+                additionalProperties:
+                  type: string
+                description: staged update run name <-> status (Completed, InProgress,
+                  Stopped, Stuck, Failed)
+                type: object
               selectedResources:
                 description: |-
                   SelectedResources contains a list of resources selected by ResourceSelectors.
