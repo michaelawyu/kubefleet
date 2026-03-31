@@ -13,7 +13,6 @@ sed_in_place() {
 
 # Check the required environment variables.
 RESOURCE_GROUP_NAME=${RESOURCE_GROUP_NAME:?Environment variable RESOURCE_GROUP_NAME is not set}
-LOCATION=${LOCATION:?Environment variable LOCATION is not set}
 KUBECONFIG_DIR=${KUBECONFIG_DIR:?Environment variable KUBECONFIG_DIR is not set}
 
 PER_HOST_VCLUSTER_COUNT=${PER_HOST_VCLUSTER_COUNT:-25}
@@ -21,7 +20,7 @@ PER_HOST_VCLUSTER_COUNT=${PER_HOST_VCLUSTER_COUNT:-25}
 while true; do
     # Retrieve a cluster name from the work queue.
     echo "Retrieving cluster name from the work queue..."
-    CLUSTER_IDX=$(python dequeue.py)
+    CLUSTER_IDX=$(python3 dequeue.py)
     if [ -z "$CLUSTER_IDX" ]; then
         echo "No more clusters to create. Exiting."
         break

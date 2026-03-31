@@ -1,2 +1,2 @@
-azure-storage-queue
-azure-identity
+azure-storage-queue==12.15.0
+azure-identity==1.25.3

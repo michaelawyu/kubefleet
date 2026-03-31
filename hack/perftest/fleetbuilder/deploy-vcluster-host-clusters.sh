@@ -4,7 +4,6 @@ set -e
 # Check the required environment variables.
 RESOURCE_GROUP_NAME=${RESOURCE_GROUP_NAME:?Environment variable RESOURCE_GROUP_NAME is not set}
 LOCATION=${LOCATION:?Environment variable LOCATION is not set}
-REGISTRY_NAME=${REGISTRY_NAME:?Environment variable REGISTRY_NAME is not set}
 REGISTRY_NAME_WO_SUFFIX=${REGISTRY_NAME_WO_SUFFIX:?Environment variable REGISTRY_NAME_WO_SUFFIX is not set}
 VCLUSTER_HOST_NODE_COUNT=${VCLUSTER_HOST_NODE_COUNT:-8}
 VCLUSTER_HOST_VM_SIZE=${VCLUSTER_HOST_VM_SIZE:-Standard_D16s_v3}
@@ -24,7 +23,7 @@ az network vnet create \
 while true; do
     # Retrieve a cluster name from the work queue.
     echo "Retrieving cluster name from the work queue..."
-    CLUSTER_IDX=$(python dequeue.py)
+    CLUSTER_IDX=$(python3 dequeue.py)
     if [ -z "$CLUSTER_IDX" ]; then
         echo "No more clusters to create. Exiting."
         break

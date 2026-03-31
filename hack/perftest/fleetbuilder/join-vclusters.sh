@@ -27,7 +27,7 @@ fi
 while true; do
     # Retrieve a cluster name from the work queue.
     echo "Retrieving cluster name from the work queue..."
-    CLUSTER_IDX=$(python dequeue.py)
+    CLUSTER_IDX=$(python3 dequeue.py)
     if [ -z "$CLUSTER_IDX" ]; then
         echo "No more clusters to create. Exiting."
         break

@@ -29,7 +29,7 @@ fi
 while true; do
     # Retrieve a cluster name from the work queue.
     echo "Retrieving cluster name from the work queue..."
-    CLUSTER_IDX=$(python dequeue.py)
+    CLUSTER_IDX=$(python3 dequeue.py)
     if [ -z "$CLUSTER_IDX" ]; then
         echo "No more clusters to join. Exiting."
         break
@@ -55,7 +55,8 @@ type: kubernetes.io/service-account-token
 EOF
 
     echo "Retrieving the service account token for member cluster $CLUSTER_NAME..."
-    TOKEN=$(kubectl --context "$HUB_CLUSTER_NAME" get secret "fleet-member-agent-$CLUSTER_NAME-sa" -n fleet-system -o jsonpath='{.data.token}' | base64 --decode)
+    kubectl wait secret "fleet-member-agent-$CLUSTER_NAME-sa" -n fleet-system --context "$HUB_CLUSTER_NAME" --for=jsonpath='{.data.token}' --timeout=300s
+    TOKEN=$(kubectl get secret "fleet-member-agent-$CLUSTER_NAME-sa" -n fleet-system --context "$HUB_CLUSTER_NAME" -o jsonpath='{.data.token}' | base64 --decode)
 
     echo "Installing the service account token secret in member cluster $CLUSTER_NAME..."
     kubectl delete secret hub-kubeconfig-secret --kubeconfig "$KUBECONFIG_PATH" --ignore-not-found
