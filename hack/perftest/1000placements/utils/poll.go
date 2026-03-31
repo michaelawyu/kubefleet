@@ -64,8 +64,8 @@ func (r *Runner) LongPollPlacements(ctx context.Context) {
 
 				// Read the CRP.
 				var crp placementv1beta1.ClusterResourcePlacement
-				if err := r.hubClient.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("crp-%d", resIdx)}, &crp); err != nil {
-					fmt.Printf("poller %d: failed to get CRP crp-%d: %v\n", pollerIdx, resIdx, err)
+				if err := r.hubClient.Get(ctx, types.NamespacedName{Name: fmt.Sprintf(placementNameFmt, resIdx)}, &crp); err != nil {
+					fmt.Printf("poller %d: failed to get CRP %s: %v\n", pollerIdx, fmt.Sprintf(placementNameFmt, resIdx), err)
 					// Requeue this CRP.
 					time.Sleep(r.longPollingCoolDownPeriod)
 					r.toLongPollPlacementsChan <- resIdx
@@ -75,13 +75,13 @@ func (r *Runner) LongPollPlacements(ctx context.Context) {
 				// Check the status of the CRP.
 				availableCond := meta.FindStatusCondition(crp.Status.Conditions, string(placementv1beta1.ClusterResourcePlacementAvailableConditionType))
 				if availableCond == nil || availableCond.Status != metav1.ConditionTrue || availableCond.ObservedGeneration != crp.Generation {
-					fmt.Printf("poller %d: CRP crp-%d is not available yet\n", pollerIdx, resIdx)
+					fmt.Printf("poller %d: CRP %s is not available yet\n", pollerIdx, fmt.Sprintf(placementNameFmt, resIdx))
 					// Requeue this CRP.
 					time.Sleep(r.longPollingCoolDownPeriod)
 					r.toLongPollPlacementsChan <- resIdx
 				} else {
 					// The CRP is available.
-					fmt.Printf("poller %d: CRP crp-%d is available\n", pollerIdx, resIdx)
+					fmt.Printf("poller %d: CRP %s is available\n", pollerIdx, fmt.Sprintf(placementNameFmt, resIdx))
 					createdTimestamp := crp.GetCreationTimestamp()
 					availablityLatency := availableCond.LastTransitionTime.Time.Sub(createdTimestamp.Time)
 					r.toTrackLatencyChan <- latencyTrackAttempt{

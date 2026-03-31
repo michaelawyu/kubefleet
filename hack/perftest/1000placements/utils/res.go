@@ -74,7 +74,12 @@ func (r *Runner) CreateResources(ctx context.Context) {
 
 				// Create a configMap in the namespace.
 				fooValBytes := make([]byte, r.configMapDataByteCount)
-				_, _ = rand.Read(fooValBytes)
+				_, err := rand.Read(fooValBytes)
+				if err != nil {
+					// This should never run; Go documents that rand.Read will never fail unless it is run on legacy
+					// Linux platforms.
+					panic(fmt.Sprintf("failed to generate random bytes for configMap data: %v", err))
+				}
 				fooValStr := base64.StdEncoding.EncodeToString(fooValBytes)
 				configMap := corev1.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{

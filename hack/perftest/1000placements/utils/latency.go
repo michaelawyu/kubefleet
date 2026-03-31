@@ -23,8 +23,8 @@ func (r *Runner) TrackLatency(ctx context.Context) {
 				if !readOK {
 					return
 				}
-				fmt.Printf("latency tracker: CRP crp-%d has latency %v\n", attempt.resIdx, attempt.latency)
-				r.placementCompletionLatencyByName[fmt.Sprintf("crp-%d", attempt.resIdx)] = attempt.latency
+				fmt.Printf("latency tracker: CRP %s has latency %v\n", fmt.Sprintf(placementNameFmt, attempt.resIdx), attempt.latency)
+				r.placementCompletionLatencyByName[fmt.Sprintf(placementNameFmt, attempt.resIdx)] = attempt.latency
 			case <-ctx.Done():
 				return
 			}

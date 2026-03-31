@@ -103,8 +103,8 @@ func main() {
 	fmt.Println("Tracking latency")
 	runner.TrackLatency(ctx)
 
-	fmt.Println("retrieving final pprof data")
 	if retrievePprofData {
+		fmt.Println("retrieving final pprof data")
 		runner.RetrievePProfProfile(maxCRPToCreateCount + 1)
 	}
 

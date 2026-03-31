@@ -58,7 +58,7 @@ func (r *Runner) CleanUp(ctx context.Context) {
 				// Delete the CRPs.
 				crp := placementv1beta1.ClusterResourcePlacement{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: fmt.Sprintf("crp-%d", resIdx),
+						Name: fmt.Sprintf(placementNameFmt, resIdx),
 					},
 				}
 				errAfterRetries := retry.OnError(r.retryOpsBackoff, func(err error) bool {
@@ -67,7 +67,7 @@ func (r *Runner) CleanUp(ctx context.Context) {
 					return r.hubClient.Delete(ctx, &crp)
 				})
 				if errAfterRetries != nil && !errors.IsNotFound(errAfterRetries) {
-					fmt.Printf("worker %d: failed to delete CRP crp-%d after retries: %v\n", workerIdx, resIdx, errAfterRetries)
+					fmt.Printf("worker %d: failed to delete CRP %s after retries: %v\n", workerIdx, fmt.Sprintf(placementNameFmt, resIdx), errAfterRetries)
 					continue
 				}
 
@@ -76,22 +76,22 @@ func (r *Runner) CleanUp(ctx context.Context) {
 					return err != nil && !errors.IsNotFound(err)
 				}, func() error {
 					crp := placementv1beta1.ClusterResourcePlacement{}
-					err := r.hubClient.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("crp-%d", resIdx)}, &crp)
+					err := r.hubClient.Get(ctx, types.NamespacedName{Name: fmt.Sprintf(placementNameFmt, resIdx)}, &crp)
 					if err == nil {
-						return fmt.Errorf("CRP crp-%d still exists", resIdx)
+						return fmt.Errorf("CRP %s still exists", fmt.Sprintf(placementNameFmt, resIdx))
 					}
 					return err
 				})
 				if !errors.IsNotFound(errAfterRetries) {
-					fmt.Printf("worker %d: failed to wait for CRP crp-%d to be deleted after retries: %v\n", workerIdx, resIdx, errAfterRetries)
+					fmt.Printf("worker %d: failed to wait for CRP %s to be deleted after retries: %v\n", workerIdx, fmt.Sprintf(placementNameFmt, resIdx), errAfterRetries)
 				} else {
-					fmt.Printf("worker %d: deleted CRP crp-%d\n", workerIdx, resIdx)
+					fmt.Printf("worker %d: deleted CRP %s\n", workerIdx, fmt.Sprintf(placementNameFmt, resIdx))
 				}
 
 				// Delete the namespace if it exists.
 				namespace := corev1.Namespace{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: fmt.Sprintf("work-%d", resIdx),
+						Name: fmt.Sprintf(nsNameFmt, resIdx),
 					},
 				}
 				errAfterRetries = retry.OnError(r.retryOpsBackoff, func(err error) bool {
@@ -100,7 +100,7 @@ func (r *Runner) CleanUp(ctx context.Context) {
 					return r.hubClient.Delete(ctx, &namespace)
 				})
 				if errAfterRetries != nil && !errors.IsNotFound(errAfterRetries) {
-					fmt.Printf("worker %d: failed to delete namespace work-%d after retries: %v\n", workerIdx, resIdx, errAfterRetries)
+					fmt.Printf("worker %d: failed to delete namespace %s after retries: %v\n", workerIdx, fmt.Sprintf(nsNameFmt, resIdx), errAfterRetries)
 					continue
 				}
 
@@ -109,16 +109,16 @@ func (r *Runner) CleanUp(ctx context.Context) {
 					return err != nil && !errors.IsNotFound(err)
 				}, func() error {
 					namespace := corev1.Namespace{}
-					err := r.hubClient.Get(ctx, types.NamespacedName{Name: fmt.Sprintf("work-%d", resIdx)}, &namespace)
+					err := r.hubClient.Get(ctx, types.NamespacedName{Name: fmt.Sprintf(nsNameFmt, resIdx)}, &namespace)
 					if err == nil {
-						return fmt.Errorf("namespace work-%d still exists", resIdx)
+						return fmt.Errorf("namespace %s still exists", fmt.Sprintf(nsNameFmt, resIdx))
 					}
 					return err
 				})
 				if errAfterRetries == nil || !errors.IsNotFound(errAfterRetries) {
-					fmt.Printf("worker %d: failed to wait for namespace work-%d to be deleted after retries: %v\n", workerIdx, resIdx, errAfterRetries)
+					fmt.Printf("worker %d: failed to wait for namespace %s to be deleted after retries: %v\n", workerIdx, fmt.Sprintf(nsNameFmt, resIdx), errAfterRetries)
 				} else {
-					fmt.Printf("worker %d: deleted namespace work-%d\n", workerIdx, resIdx)
+					fmt.Printf("worker %d: deleted namespace %s\n", workerIdx, fmt.Sprintf(nsNameFmt, resIdx))
 				}
 			}
 		}(i)
