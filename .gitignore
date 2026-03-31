@@ -38,3 +38,6 @@ ut-coverage.xml
 
 # Helm chart packaging
 .helm-packages/
+
+# Python virtual environment
+venv/
