@@ -3,7 +3,6 @@ set -e
 
 # Check the required environment variables.
 RESOURCE_GROUP_NAME=${RESOURCE_GROUP_NAME:?Environment variable RESOURCE_GROUP_NAME is not set}
-LOCATION=${LOCATION:?Environment variable LOCATION is not set}
 REGISTRY_NAME=${REGISTRY_NAME:?Environment variable REGISTRY_NAME is not set}
 KUBECONFIG_DIR=${KUBECONFIG_DIR:?Environment variable KUBECONFIG_DIR is not set}
 KUBEFLEET_SRC_REPO=${KUBEFLEET_SRC_REPO:?Environment variable KUBEFLEET_SRC_REPO is not set}
