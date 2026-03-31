@@ -49,6 +49,7 @@ type: kubernetes.io/service-account-token
 EOF
 
     echo "Retrieving the service account token for member cluster $VCLUSTER_NAME..."
+    kubectl wait secret "fleet-member-agent-$VCLUSTER_NAME-sa" -n fleet-system --context "$HUB_CLUSTER_NAME" --for=jsonpath='{.data.token}' --timeout=300s
     TOKEN=$(kubectl get secret "fleet-member-agent-$VCLUSTER_NAME-sa" -n fleet-system --context "$HUB_CLUSTER_NAME" -o jsonpath='{.data.token}' | base64 --decode)
 
     echo "Setting up MemberCluster CR in the hub cluster..."

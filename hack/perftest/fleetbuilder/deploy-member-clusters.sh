@@ -4,7 +4,6 @@ set -e
 # Check the required environment variables.
 RESOURCE_GROUP_NAME=${RESOURCE_GROUP_NAME:?Environment variable RESOURCE_GROUP_NAME is not set}
 LOCATION=${LOCATION:?Environment variable LOCATION is not set}
-REGISTRY_NAME=${REGISTRY_NAME:?Environment variable REGISTRY_NAME is not set}
 REGISTRY_NAME_WO_SUFFIX=${REGISTRY_NAME_WO_SUFFIX:?Environment variable REGISTRY_NAME_WO_SUFFIX is not set}
 MEMBER_CLUSTER_NODE_COUNT=${MEMBER_CLUSTER_NODE_COUNT:-2}
 MEMBER_CLUSTER_VM_SIZE=${MEMBER_CLUSTER_VM_SIZE:-Standard_D4s_v3}
@@ -13,7 +12,7 @@ CUSTOM_TAGS=${CUSTOM_TAGS:-perf_test=true}
 while true; do
     # Retrieve a cluster name from the work queue.
     echo "Retrieving cluster name from the work queue..."
-    CLUSTER_IDX=$(python dequeue.py)
+    CLUSTER_IDX=$(python3 dequeue.py)
     if [ -z "$CLUSTER_IDX" ]; then
         echo "No more clusters to create. Exiting."
         break
