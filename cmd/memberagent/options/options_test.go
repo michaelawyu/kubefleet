@@ -18,6 +18,7 @@ package options
 
 import (
 	"flag"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -216,14 +217,14 @@ func TestCtrlManagerOptions(t *testing.T) {
 			flagSetName:      "hubQPSOutOfRangeTooSmall",
 			args:             []string{"--hub-api-qps=9.9"},
 			wantErred:        true,
-			wantErrMsgSubStr: "QPS limit is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("QPS limit is set to an invalid value (%f), must be a value in the range [10.0, 1000.0]", 9.9),
 		},
 		{
 			name:             "hub client QPS out of range (too large)",
 			flagSetName:      "hubQPSOutOfRangeTooLarge",
 			args:             []string{"--hub-api-qps=1000.1"},
 			wantErred:        true,
-			wantErrMsgSubStr: "QPS limit is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("QPS limit is set to an invalid value (%f), must be a value in the range [10.0, 1000.0]", 1000.1),
 		},
 		{
 			name:             "hub client burst parse error",
@@ -237,14 +238,14 @@ func TestCtrlManagerOptions(t *testing.T) {
 			flagSetName:      "hubBurstOutOfRangeTooSmall",
 			args:             []string{"--hub-api-burst=9"},
 			wantErred:        true,
-			wantErrMsgSubStr: "burst limit is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("burst limit is set to an invalid value (%d), must be a value in the range [10, 2000]", 9),
 		},
 		{
 			name:             "hub client burst out of range (too large)",
 			flagSetName:      "hubBurstOutOfRangeTooLarge",
 			args:             []string{"--hub-api-burst=2001"},
 			wantErred:        true,
-			wantErrMsgSubStr: "burst limit is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("burst limit is set to an invalid value (%d), must be a value in the range [10, 2000]", 2001),
 		},
 		{
 			name:        "negative member client QPS value",
@@ -287,14 +288,14 @@ func TestCtrlManagerOptions(t *testing.T) {
 			flagSetName:      "memberQPSOutOfRangeTooSmall",
 			args:             []string{"--member-api-qps=9.9"},
 			wantErred:        true,
-			wantErrMsgSubStr: "QPS limit is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("QPS limit is set to an invalid value (%f), must be a value in the range [10.0, 10000.0]", 9.9),
 		},
 		{
 			name:             "member client QPS out of range (too large)",
 			flagSetName:      "memberQPSOutOfRangeTooLarge",
 			args:             []string{"--member-api-qps=10000.1"},
 			wantErred:        true,
-			wantErrMsgSubStr: "QPS limit is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("QPS limit is set to an invalid value (%f), must be a value in the range [10.0, 10000.0]", 10000.1),
 		},
 		{
 			name:             "member client burst parse error",
@@ -308,14 +309,14 @@ func TestCtrlManagerOptions(t *testing.T) {
 			flagSetName:      "memberBurstOutOfRangeTooSmall",
 			args:             []string{"--member-api-burst=9"},
 			wantErred:        true,
-			wantErrMsgSubStr: "burst limit is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("burst limit is set to an invalid value (%d), must be a value in the range [10, 20000]", 9),
 		},
 		{
 			name:             "member client burst out of range (too large)",
 			flagSetName:      "memberBurstOutOfRangeTooLarge",
 			args:             []string{"--member-api-burst=20001"},
 			wantErred:        true,
-			wantErrMsgSubStr: "burst limit is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("burst limit is set to an invalid value (%d), must be a value in the range [10, 20000]", 20001),
 		},
 	}
 
@@ -421,14 +422,14 @@ func TestApplierOptions(t *testing.T) {
 			flagSetName:      "deletionWaitTimeOutOfRangeTooSmall",
 			args:             []string{"--deletion-wait-time=0"},
 			wantErred:        true,
-			wantErrMsgSubStr: "resource force deletion wait time in minutes is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("resource force deletion wait time in minutes is set to an invalid value (%d), must be a value in the range [1, 60]", 0),
 		},
 		{
 			name:             "deletion wait time out of range (too large)",
 			flagSetName:      "deletionWaitTimeOutOfRangeTooLarge",
 			args:             []string{"--deletion-wait-time=61"},
 			wantErred:        true,
-			wantErrMsgSubStr: "resource force deletion wait time in minutes is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("resource force deletion wait time in minutes is set to an invalid value (%d), must be a value in the range [1, 60]", 61),
 		},
 		{
 			name:             "requeue attempts with fixed delay parse error",
@@ -442,14 +443,14 @@ func TestApplierOptions(t *testing.T) {
 			flagSetName:      "requeueAttemptsWithFixedDelayOutOfRangeTooSmall",
 			args:             []string{"--work-applier-requeue-rate-limiter-attempts-with-fixed-delay=0"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter attempts with fixed delay is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter attempts with fixed delay is set to an invalid value (%d), must be a value in the range [1, 40]", 0),
 		},
 		{
 			name:             "requeue attempts with fixed delay out of range (too large)",
 			flagSetName:      "requeueAttemptsWithFixedDelayOutOfRangeTooLarge",
 			args:             []string{"--work-applier-requeue-rate-limiter-attempts-with-fixed-delay=41"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter attempts with fixed delay is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter attempts with fixed delay is set to an invalid value (%d), must be a value in the range [1, 40]", 41),
 		},
 		{
 			name:             "requeue fixed delay seconds parse error",
@@ -463,14 +464,14 @@ func TestApplierOptions(t *testing.T) {
 			flagSetName:      "requeueFixedDelaySecondsOutOfRangeTooSmall",
 			args:             []string{"--work-applier-requeue-rate-limiter-fixed-delay-seconds=1"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter fixed delay seconds is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter fixed delay seconds is set to an invalid value (%d), must be a value in the range [2, 300]", 1),
 		},
 		{
 			name:             "requeue fixed delay seconds out of range (too large)",
 			flagSetName:      "requeueFixedDelaySecondsOutOfRangeTooLarge",
 			args:             []string{"--work-applier-requeue-rate-limiter-fixed-delay-seconds=301"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter fixed delay seconds is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter fixed delay seconds is set to an invalid value (%d), must be a value in the range [2, 300]", 301),
 		},
 		{
 			name:             "requeue exponential base for slow backoff parse error",
@@ -484,14 +485,14 @@ func TestApplierOptions(t *testing.T) {
 			flagSetName:      "requeueExpBaseForSlowBackoffOutOfRangeTooSmall",
 			args:             []string{"--work-applier-requeue-rate-limiter-exponential-base-for-slow-backoff=1.04"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter exponential base for slow backoff is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter exponential base for slow backoff is set to an invalid value (%g), must be a value in the range [1.05, 2]", 1.04),
 		},
 		{
 			name:             "requeue exponential base for slow backoff out of range (too large)",
 			flagSetName:      "requeueExpBaseForSlowBackoffOutOfRangeTooLarge",
 			args:             []string{"--work-applier-requeue-rate-limiter-exponential-base-for-slow-backoff=2.01"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter exponential base for slow backoff is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter exponential base for slow backoff is set to an invalid value (%g), must be a value in the range [1.05, 2]", 2.01),
 		},
 		{
 			name:             "requeue initial slow backoff delay seconds parse error",
@@ -505,7 +506,7 @@ func TestApplierOptions(t *testing.T) {
 			flagSetName:      "requeueInitSlowBackoffDelaySecondsOutOfRangeTooSmall",
 			args:             []string{"--work-applier-requeue-rate-limiter-initial-slow-backoff-delay-seconds=1"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter initial slow backoff delay seconds is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter initial slow backoff delay seconds is set to an invalid value (%d), must be a value no less than 2", 1),
 		},
 		{
 			name:             "requeue max slow backoff delay seconds parse error",
@@ -519,7 +520,7 @@ func TestApplierOptions(t *testing.T) {
 			flagSetName:      "requeueMaxSlowBackoffDelaySecondsOutOfRangeTooSmall",
 			args:             []string{"--work-applier-requeue-rate-limiter-max-slow-backoff-delay-seconds=1"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter max slow backoff delay seconds is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter max slow backoff delay seconds is set to an invalid value (%d), must be a value no less than 2", 1),
 		},
 		{
 			name:             "requeue exponential base for fast backoff parse error",
@@ -533,14 +534,14 @@ func TestApplierOptions(t *testing.T) {
 			flagSetName:      "requeueExpBaseForFastBackoffOutOfRangeAtLowerBoundary",
 			args:             []string{"--work-applier-requeue-rate-limiter-exponential-base-for-fast-backoff=1.0"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter exponential base for fast backoff is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter exponential base for fast backoff is set to an invalid value (%g), must be a value in the range (1, 2]", 1.0),
 		},
 		{
 			name:             "requeue exponential base for fast backoff out of range (too large)",
 			flagSetName:      "requeueExpBaseForFastBackoffOutOfRangeTooLarge",
 			args:             []string{"--work-applier-requeue-rate-limiter-exponential-base-for-fast-backoff=2.01"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter exponential base for fast backoff is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter exponential base for fast backoff is set to an invalid value (%g), must be a value in the range (1, 2]", 2.01),
 		},
 		{
 			name:             "requeue max fast backoff delay seconds parse error",
@@ -554,14 +555,14 @@ func TestApplierOptions(t *testing.T) {
 			flagSetName:      "requeueMaxFastBackoffDelaySecondsOutOfRangeAtLowerBoundary",
 			args:             []string{"--work-applier-requeue-rate-limiter-max-fast-backoff-delay-seconds=0"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter max fast backoff delay seconds is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter max fast backoff delay seconds is set to an invalid value (%d), must be a value in the range (0, 3600]", 0),
 		},
 		{
 			name:             "requeue max fast backoff delay seconds out of range (too large)",
 			flagSetName:      "requeueMaxFastBackoffDelaySecondsOutOfRangeTooLarge",
 			args:             []string{"--work-applier-requeue-rate-limiter-max-fast-backoff-delay-seconds=3601"},
 			wantErred:        true,
-			wantErrMsgSubStr: "requeue rate limiter max fast backoff delay seconds is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("requeue rate limiter max fast backoff delay seconds is set to an invalid value (%d), must be a value in the range (0, 3600]", 3601),
 		},
 		{
 			name:             "priority linear equation coefficient A parse error",
@@ -575,14 +576,14 @@ func TestApplierOptions(t *testing.T) {
 			flagSetName:      "priCoEffAOutOfRangeNonNegative",
 			args:             []string{"--work-applier-priority-linear-equation-coeff-a=0"},
 			wantErred:        true,
-			wantErrMsgSubStr: "priority linear equation coefficient A is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("priority linear equation coefficient A is set to an invalid value (%d), must be a negative integer no less than -100", 0),
 		},
 		{
 			name:             "priority linear equation coefficient A out of range (too small)",
 			flagSetName:      "priCoEffAOutOfRangeTooSmall",
 			args:             []string{"--work-applier-priority-linear-equation-coeff-a=-101"},
 			wantErred:        true,
-			wantErrMsgSubStr: "priority linear equation coefficient A is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("priority linear equation coefficient A is set to an invalid value (%d), must be a negative integer no less than -100", -101),
 		},
 		{
 			name:             "priority linear equation coefficient B parse error",
@@ -596,14 +597,14 @@ func TestApplierOptions(t *testing.T) {
 			flagSetName:      "priCoEffBOutOfRangeTooSmall",
 			args:             []string{"--work-applier-priority-linear-equation-coeff-b=0"},
 			wantErred:        true,
-			wantErrMsgSubStr: "priority linear equation coefficient B is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("priority linear equation coefficient B is set to an invalid value (%d), must be a positive integer no greater than 1000", 0),
 		},
 		{
 			name:             "priority linear equation coefficient B out of range (too large)",
 			flagSetName:      "priCoEffBOutOfRangeTooLarge",
 			args:             []string{"--work-applier-priority-linear-equation-coeff-b=1001"},
 			wantErred:        true,
-			wantErrMsgSubStr: "priority linear equation coefficient B is set to an invalid value",
+			wantErrMsgSubStr: fmt.Sprintf("priority linear equation coefficient B is set to an invalid value (%d), must be a positive integer no greater than 1000", 1001),
 		},
 	}
 
