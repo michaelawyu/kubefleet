@@ -10,7 +10,7 @@ The program is added for the purpose of testing the performance and scalability 
 * Set up a KubeFleet deployment.
 * Make sure that all member clusters are labelled with `placement-group=N`, where N ranges from 0 to 9.
 Placements created by this utility program will be each assigned an index X, ranging from 0 to 999,
-and a placement ofindex X will select all member clusters that are labelled with `placement-group=X%10`.
+and a placement of index X will select all member clusters that are labelled with `placement-group=X%10`.
 * The program requires the following tools (aside from the Go runtime) to be installed:
     * `curl` (for retrieving pprof data)
 

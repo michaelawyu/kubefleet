@@ -96,7 +96,7 @@ func (r *Runner) CreateResources(ctx context.Context) {
 					return r.hubClient.Create(ctx, &configMap)
 				})
 				if errAfterRetries != nil && !errors.IsAlreadyExists(errAfterRetries) {
-					fmt.Printf("worker %d: failed to create configMap data-%d in namespace work-%d after retries: %v\n", workerIdx, resIdx, resIdx, errAfterRetries)
+					fmt.Printf("worker %d: failed to create configMap %s in namespace %s after retries: %v\n", workerIdx, fmt.Sprintf(configMapNameFmt, resIdx), fmt.Sprintf(nsNameFmt, resIdx), errAfterRetries)
 					continue
 				}
 
@@ -137,11 +137,11 @@ func (r *Runner) CreateResources(ctx context.Context) {
 					return r.hubClient.Create(ctx, &deployment)
 				})
 				if errAfterRetries != nil && !errors.IsAlreadyExists(errAfterRetries) {
-					fmt.Printf("worker %d: failed to create deployment app-%d in namespace work-%d after retries: %v\n", workerIdx, resIdx, resIdx, errAfterRetries)
+					fmt.Printf("worker %d: failed to create deployment %s in namespace %s after retries: %v\n", workerIdx, fmt.Sprintf(deployNameFmt, resIdx), fmt.Sprintf(nsNameFmt, resIdx), errAfterRetries)
 					continue
 				}
 
-				fmt.Printf("worker %d: created namespace work-%d, configMap data-%d, and deployment app-%d\n", workerIdx, resIdx, resIdx, resIdx)
+				fmt.Printf("worker %d: created namespace %s, configMap %s, and deployment %s\n", workerIdx, fmt.Sprintf(nsNameFmt, resIdx), fmt.Sprintf(configMapNameFmt, resIdx), fmt.Sprintf(deployNameFmt, resIdx))
 				time.Sleep(r.resourceCreationCoolDownPeriod)
 			}
 		}(i)
