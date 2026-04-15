@@ -10,16 +10,6 @@ VCLUSTER_HOST_VM_SIZE=${VCLUSTER_HOST_VM_SIZE:-Standard_D16s_v3}
 VNET_NAME=${VNET_NAME:?Environment variable VNET_NAME is not set}
 CUSTOM_TAGS=${CUSTOM_TAGS:-perf_test=true}
 
-# Create an Azure VNet for the host clusters.
-echo "Creating VNet $VNET_NAME in resource group $RESOURCE_GROUP_NAME..."
-az network vnet create \
-    -g "$RESOURCE_GROUP_NAME" \
-    -n "$VNET_NAME" \
-    --location "$LOCATION" \
-    --address-prefixes "10.0.0.0/8" \
-    --subnet-name "default" \
-    --subnet-prefix "10.0.0.0/16"
-
 while true; do
     # Retrieve a cluster name from the work queue.
     echo "Retrieving cluster name from the work queue..."
@@ -53,7 +43,7 @@ while true; do
         --location "$LOCATION" \
         --node-count "$VCLUSTER_HOST_NODE_COUNT" \
         --node-vm-size "$VCLUSTER_HOST_VM_SIZE" \
-        --max-pods 75 \
+        --max-pods 100 \
         --enable-aad \
         --enable-azure-rbac \
         --tier standard \

@@ -18,11 +18,14 @@ COMMON_CORE_IMAGE_TAG=${COMMON_CORE_IMAGE_TAG:-experimental}
 KUBEFLEET_SRC_REPO=${KUBEFLEET_SRC_REPO:?Environment variable KUBEFLEET_SRC_REPO is not set}
 
 INSTALL_NETWORKING_AGENTS=${INSTALL_NETWORKING_AGENTS:-true}
+INSTALL_NETWORKING_AGENTS_HELM_FLAG_VALUE="false"
 if [ "$INSTALL_NETWORKING_AGENTS" = "true" ]; then
     FLEET_NETWORKING_SRC_REPO=${FLEET_NETWORKING_SRC_REPO:?Environment variable FLEET_NETWORKING_SRC_REPO is not set}
     HUB_NET_AGENT_IMAGE_NAME=${HUB_NET_AGENT_IMAGE_NAME:-hub-net-controller-manager}
     HUB_NET_AGENT_CRD_INSTALLER_IMAGE_NAME=${HUB_NET_AGENT_CRD_INSTALLER_IMAGE_NAME:-net-crd-installer}
     COMMON_NETWORKING_IMAGE_TAG=${COMMON_NETWORKING_IMAGE_TAG:-experimental}
+
+    INSTALL_NETWORKING_AGENTS_HELM_FLAG_VALUE="true"
 fi
 
 
@@ -40,14 +43,9 @@ az aks create \
     --attach-acr "$REGISTRY_NAME_WO_SUFFIX" \
     --tags "$CUSTOM_TAGS"
 
-echo "Cluster $HUB_CLUSTER_NAME created successfully; sleep for 1 minute..."
-sleep 1m
-
 # Retrieve the hub cluster credential.
 echo "Retrieving the credential for hub cluster $HUB_CLUSTER_NAME..."
 az aks get-credentials --resource-group "$RESOURCE_GROUP_NAME" --name "$HUB_CLUSTER_NAME"
-# Use Azure CLI for authentication, so that interactivity is not needed during the setup process.
-kubelogin convert-kubeconfig -l azurecli
 
 # Install the hub agent.
 kubectl config use-context "$HUB_CLUSTER_NAME"
@@ -72,15 +70,16 @@ helm upgrade hub-agent charts/hub-agent/ \
     --set webhookClientConnectionType=service \
     --set forceDeleteWaitTime="5m0s" \
     --set clusterUnhealthyThreshold="3m0s" \
-    --set networkingAgentsEnabled=true \
-    --set crdInstaller.enabled=true \
-    --set "crdInstaller.image.repository=$REGISTRY_NAME/$HUB_AGENT_CRD_INSTALLER_IMAGE_NAME" \
-    --set crdInstaller.image.pullPolicy=Always \
-    --set "crdInstaller.image.tag=$COMMON_CORE_IMAGE_TAG"
+    --set networkingAgentsEnabled="$INSTALL_NETWORKING_AGENTS_HELM_FLAG_VALUE"
 
 popd
 
 # Install the Kubernetes Prometheus monitoring stack.
+#
+# Note: if you see 401 Forbidden errors when trying to access the chart, add the Helm chart repository
+# with the command `helm repo add prometheus-community https://prometheus-community.github.io/helm-charts`
+# and install the chart with `helm upgrade kube-prometheus-stack prometheus-community/kube-prometheus-stack ...`
+# instead.
 echo "Installing the Kubernetes Prometheus monitoring stack in cluster $HUB_CLUSTER_NAME..."
 helm upgrade kube-prometheus-stack oci://ghcr.io/prometheus-community/charts/kube-prometheus-stack \
     --version 82.15.1 \
@@ -121,8 +120,10 @@ spec:
 EOF
 
 if [ "$INSTALL_NETWORKING_AGENTS" = "true" ]; then
-    echo "Installing fleet networking agents..."
+    echo "Installing the fleet hub networking agent..."
     pushd "$FLEET_NETWORKING_SRC_REPO"
+    echo "Installing the fleet networking CRDs..."
+    kubectl apply -f config/crd/*
     helm upgrade fleet-networking charts/hub-net-controller-manager \
         --install \
         --set "image.repository=$REGISTRY_NAME/$HUB_NET_AGENT_IMAGE_NAME" \
@@ -133,11 +134,7 @@ if [ "$INSTALL_NETWORKING_AGENTS" = "true" ]; then
         --set resources.limits.cpu=1 \
         --set resources.limits.memory=1Gi \
         --set logVerbosity=2 \
-        --set namespace=fleet-system \
-        --set crdInstaller.enabled=true \
-        --set "crdInstaller.image.repository=$REGISTRY_NAME/$HUB_NET_AGENT_CRD_INSTALLER_IMAGE_NAME" \
-        --set crdInstaller.image.pullPolicy=Always \
-        --set "crdInstaller.image.tag=$COMMON_NETWORKING_IMAGE_TAG"
+        --set namespace=fleet-system
 
     popd
 fi

@@ -28,7 +28,24 @@ az vm create \
 # Grant the jumpbox VM access to the whole resource group as a contributor, so that it can
 # access the vcluster host clusters and perform necessary operations.
 echo "Granting jumpbox VM $JUMPBOX_NAME contributor access to resource group $RESOURCE_GROUP_NAME..."
+JUMPBOX_PRINCIPAL_ID=$(az vm show -g "$RESOURCE_GROUP_NAME" -n "$JUMPBOX_NAME" --query "identity.principalId" -o tsv)
 az role assignment create \
-    --assignee "$(az vm show -g "$RESOURCE_GROUP_NAME" -n "$JUMPBOX_NAME" --query "identity.principalId" -o tsv)" \
+    --assignee "$JUMPBOX_PRINCIPAL_ID" \
     --role "Contributor" \
+    --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP_NAME"
+
+# Grant the jumpbox VM access to queues in the storage account, so that it can access the
+# work queue for processing work items.
+echo "Granting jumpbox VM $JUMPBOX_NAME Storage Queue Data Contributor access to resource group $RESOURCE_GROUP_NAME..."
+az role assignment create \
+    --assignee "$JUMPBOX_PRINCIPAL_ID" \
+    --role "Storage Queue Data Contributor" \
+    --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP_NAME"
+
+# Grant the jumpbox VM access to all Kubernetes clusters in the resource group, so that it
+# can access the vcluster host clusters and perform necessary operations.
+echo "Granting jumpbox VM $JUMPBOX_NAME Azure Kubernetes Service RBAC Cluster Admin access to resource group $RESOURCE_GROUP_NAME..."
+az role assignment create \
+    --assignee "$JUMPBOX_PRINCIPAL_ID" \
+    --role "Azure Kubernetes Service RBAC Cluster Admin" \
     --scope "/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RESOURCE_GROUP_NAME"

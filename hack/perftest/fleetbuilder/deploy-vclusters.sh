@@ -28,7 +28,7 @@ while true; do
     CLUSTER_NAME="host-cluster-$CLUSTER_IDX"
 
     # Retrieve the cluster credential.
-    az aks get-credentials --resource-group "$RESOURCE_GROUP_NAME" --name "$CLUSTER_NAME" --admin --file "$KUBECONFIG_DIR/$CLUSTER_NAME.kubeconfig"
+    az aks get-credentials --resource-group "$RESOURCE_GROUP_NAME" --name "$CLUSTER_NAME" --file "$KUBECONFIG_DIR/$CLUSTER_NAME.kubeconfig"
     export KUBECONFIG="$KUBECONFIG_DIR/$CLUSTER_NAME.kubeconfig"
 
     VCLUSTER_START_IDX=$(( (CLUSTER_IDX - 1) * PER_HOST_VCLUSTER_COUNT + 1 ))
@@ -37,12 +37,12 @@ while true; do
     for i in $(seq $VCLUSTER_START_IDX $VCLUSTER_END_IDX); do
         VCLUSTER_NAME="vcluster-$i"
         echo "Deploying vcluster $VCLUSTER_NAME in cluster $CLUSTER_NAME..."
-        vcluster create "$VCLUSTER_NAME" -n "$VCLUSTER_NAME" --values vcluster.yaml --add=false --connect=false
+        vcluster describe "$VCLUSTER_NAME" -n "$VCLUSTER_NAME" > /dev/null 2>&1 || vcluster create "$VCLUSTER_NAME" -n "$VCLUSTER_NAME" --values vcluster.yaml --add=false --connect=false
 
         echo "Patching the vcluster API server service to use the LoadBalancer type with an internal IP assigned..."
         # Each vcluster API service is exposed via an internal LB; this is to conserve public IPs and comply with best
         # security practices. The vcluster API server must be accessed via a jumpbox.
-        kubectl patch svc "$VCLUSTER_NAME" -n "$VCLUSTER_NAME" --patch '{"spec": {"type": "LoadBalancer"}, "metadata": {"annotations": {"service.beta.kubernetes.io/azure-load-balancer-internal": "true"}}}'
+        kubectl patch svc "$VCLUSTER_NAME" -n "$VCLUSTER_NAME" --type=merge --patch '{"spec": {"type": "LoadBalancer"}, "metadata": {"annotations": {"service.beta.kubernetes.io/azure-load-balancer-internal": "true"}}}'
 
         echo "Retrieving the internal IP address of the vcluster API server service..."
         kubectl wait svc "$VCLUSTER_NAME" -n "$VCLUSTER_NAME" --for=jsonpath='{.status.loadBalancer.ingress[0].ip}' --timeout=300s

@@ -36,7 +36,7 @@ while true; do
     CLUSTER_NAME="host-cluster-$CLUSTER_IDX"
 
     # Retrieve the member cluster credential.
-    az aks get-credentials --resource-group "$RESOURCE_GROUP_NAME" --name "$CLUSTER_NAME" --file "$KUBECONFIG_DIR/$CLUSTER_NAME.kubeconfig" --admin
+    az aks get-credentials --resource-group "$RESOURCE_GROUP_NAME" --name "$CLUSTER_NAME" --file "$KUBECONFIG_DIR/$CLUSTER_NAME.kubeconfig"
     KUBECONFIG_PATH="$KUBECONFIG_DIR/$CLUSTER_NAME.kubeconfig"
 
     # Set up a service account for the member cluster in the hub cluster.
@@ -97,17 +97,15 @@ EOF
         --set namespace=fleet-system \
         --set enableV1Beta1APIs=true \
         --set propertyProvider="$PROPERTY_PROVIDER" \
-        --set priorityQueue.enabled=true \
-        --set crdInstaller.enabled=true \
-        --set crdInstaller.image.repository=$REGISTRY_NAME/$CRD_INSTALLER_IMAGE_NAME \
-        --set crdInstaller.image.pullPolicy=Always \
-        --set crdInstaller.image.tag=$COMMON_CORE_IMAGE_TAG
+        --set priorityQueue.enabled=true
     
     popd
 
     if [ "$INSTALL_NETWORKING_AGENTS" = "true" ]; then
-        echo "Installing fleet networking agents..."
+        echo "Installing fleet member networking agents..."
         pushd "$FLEET_NETWORKING_SRC_REPO"
+        echo "Installing the fleet networking CRDs..."
+        kubectl apply -f config/crd/*
         helm upgrade fleet-networking charts/member-net-controller-manager \
             --install \
             --kubeconfig "$KUBECONFIG_PATH" \
@@ -125,11 +123,7 @@ EOF
             --set refreshtoken.repository="$REGISTRY_NAME/$REFRESH_TOKEN_IMAGE_NAME" \
             --set refreshtoken.tag="$COMMON_CORE_IMAGE_TAG" \
             --set refreshtoken.pullPolicy=Always \
-            --set enableNetworkingFeatures=false \
-            --set crdInstaller.enabled=true \
-            --set crdInstaller.image.repository="$REGISTRY_NAME/$MEMBER_NET_AGENT_CRD_INSTALLER_IMAGE_NAME" \
-            --set crdInstaller.image.pullPolicy=Always \
-            --set crdInstaller.image.tag="$COMMON_NETWORKING_IMAGE_TAG"
+            --set enableNetworkingFeatures=false
 
         helm upgrade fleet-networking-mcs charts/mcs-controller-manager \
             --install \
