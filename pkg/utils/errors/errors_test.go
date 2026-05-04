@@ -36,7 +36,7 @@ var (
 	// avoiding the need to recurse into unexported fields of standard-library error types.
 	wrappedErrComparer = cmp.FilterPath(
 		func(p cmp.Path) bool { return p.Last().String() == ".wrapped" },
-		cmp.Comparer(func(x, y error) bool { return x == y }),
+		cmp.Comparer(func(x, y error) bool { return x == y }), //nolint:errorlint
 	)
 )
 
@@ -306,7 +306,8 @@ func TestUnwrap(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			gotErr := tc.err.Unwrap()
-			if gotErr != tc.wantErr {
+			// Note: here we actually want to just compare the error values by pointer equality.
+			if gotErr != tc.wantErr { //nolint:errorlint
 				t.Errorf("Unwrap() = %v, want %v", gotErr, tc.wantErr)
 			}
 		})
