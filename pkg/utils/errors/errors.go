@@ -42,7 +42,7 @@ const (
 
 	// An error is considered of the API server error category when it arises during a call
 	// to the Kubernetes API server.
-	ErrCategoryAPIServer ErrCategory = "Kubernetes API server"
+	ErrCategoryAPIServer ErrCategory = "APIserver"
 
 	// An error is considered of the user error category when it arises due to some
 	// incorrect input or action from the user side and can resolve when the
@@ -68,8 +68,6 @@ type Error struct {
 
 	// attrs are the additional attributes associated with the wrapped error.
 	attrs []interface{}
-
-	isRootLevel bool
 }
 
 func (e *Error) categoryWithDefault() ErrCategory {
@@ -92,33 +90,19 @@ func (e *Error) Error() string {
 	if len(e.desc) > 0 {
 		bitmap |= 1 << 1
 	}
-	if e.isRootLevel {
-		bitmap |= 1 << 2
-	}
 
-	switch bitmap {
-	case 1:
-		// With wrapped error, no description, and not a root level error.
+	switch {
+	case e.wrapped != nil && len(e.desc) == 0:
+		// With wrapped error but no description.
 		return e.wrapped.Error()
-	case 2:
-		// No wrapped error, with description, and not a root level error.
-		return e.desc
-	case 3:
-		// With wrapped error, with description, and not a root level error.
+	case e.wrapped != nil:
+		// With wrapped error, with description.
 		return fmt.Sprintf("%s: %s", e.desc, e.wrapped.Error())
-	case 5:
-		// With wrapped error, no description, and is a root level error.
-		return fmt.Sprintf("a/an %s error occurred: %s", e.categoryWithDefault(), e.wrapped.Error())
-	case 6:
-		// No wrapped error, with description, and is a root level error.
-		return fmt.Sprintf("a/an %s error occurred: %s", e.categoryWithDefault(), e.desc)
-	case 7:
-		// With wrapped error, with description, and is a root level error.
-		return fmt.Sprintf("a/an %s error occurred: %s: %s", e.categoryWithDefault(), e.desc, e.wrapped.Error())
+	case e.wrapped == nil && len(e.desc) > 0:
+		// No wrapped error but with description.
+		return e.desc
 	default:
-		// The following cases would trigger this output:
-		// * bitmap 0: no wrapped error, no description, and not a root level error.
-		// * bitmap 4: no wrapped error, no description, and is a root level error.
+		// No wrapped error and no description.
 		return "an unknown error occurred"
 	}
 }
@@ -140,18 +124,16 @@ func Wraps(err error, desc string, kvs ...interface{}) *Error {
 	if errors.As(err, &childError) {
 		category = childError.category
 		kvs = append(childError.attrs, kvs...)
-		childError.isRootLevel = false
 	}
 	if len(category) == 0 {
 		category = ErrCategoryUncategorized
 	}
 
 	return &Error{
-		category:    category,
-		wrapped:     err,
-		desc:        desc,
-		attrs:       kvs,
-		isRootLevel: true,
+		category: category,
+		wrapped:  err,
+		desc:     desc,
+		attrs:    kvs,
 	}
 }
 
@@ -166,11 +148,15 @@ func Wraps(err error, desc string, kvs ...interface{}) *Error {
 //
 // klog.ErrorS(err, "additional top-level error description", append(Args(err), "k", "v")...).
 func Args(err error, kvs ...interface{}) []interface{} {
+	var compositeKVs []interface{}
 	var childError *Error
 	if errors.As(err, &childError) {
-		kvs = append(childError.attrs, kvs...)
+		// Make sure that the error category is always included as the first kv pair.
+		compositeKVs = append(compositeKVs, "errCategory", childError.categoryWithDefault())
+		compositeKVs = append(compositeKVs, childError.attrs...)
+		compositeKVs = append(compositeKVs, kvs...)
 	}
-	return kvs
+	return compositeKVs
 }
 
 // CallerFrameOverview is a simple struct that summarizes a single call frame.
