@@ -82,15 +82,6 @@ func (e *Error) categoryWithDefault() ErrCategory {
 // Note the output intentionally does not include the additional attributes, so as to keep the cardinality
 // low; to print them out, pass them explicitly to the klog functions.
 func (e *Error) Error() string {
-	// Build a bitmap to determine the error template to use.
-	var bitmap int
-	if e.wrapped != nil {
-		bitmap |= 1 << 0
-	}
-	if len(e.desc) > 0 {
-		bitmap |= 1 << 1
-	}
-
 	switch {
 	case e.wrapped != nil && len(e.desc) == 0:
 		// With wrapped error but no description.
@@ -120,11 +111,13 @@ func Wraps(err error, desc string, kvs ...interface{}) *Error {
 	// Find if any of error down in the chain is already an *Error; if so, use its category and surface its
 	// attributes to the current level.
 	var category ErrCategory
+	var mergedKVs []interface{}
 	var childError *Error
 	if errors.As(err, &childError) {
 		category = childError.category
-		kvs = append(childError.attrs, kvs...)
+		mergedKVs = append(mergedKVs, childError.attrs...)
 	}
+	mergedKVs = append(mergedKVs, kvs...)
 	if len(category) == 0 {
 		category = ErrCategoryUncategorized
 	}
@@ -133,7 +126,7 @@ func Wraps(err error, desc string, kvs ...interface{}) *Error {
 		category: category,
 		wrapped:  err,
 		desc:     desc,
-		attrs:    kvs,
+		attrs:    mergedKVs,
 	}
 }
 
@@ -196,7 +189,7 @@ func NewUnexpectedError(err error, desc string, kvs ...interface{}) *Error {
 	// For unexpected errors, collect the caller frames.
 	//
 	// Note (chenyu1): previously for unexpected errors, we use the debug.Stack() to print out a full stack
-	// trace in the logs. Effective as it is, the operation is expensive and it always captuires the full stack,
+	// trace in the logs. Effective as it is, the operation is expensive and it always captures the full stack,
 	// where the top of the stack is always the error handling utility function/method itself rather than
 	// the actual caller site where the error originates. Furthermore, as debug.Stack() returns a multi-line string,
 	// often the logging backend cannot render it properly, making it difficult to read/summarize. To address this,
