@@ -24,6 +24,7 @@ import (
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
+	"github.com/kubefleet-dev/kubefleet/pkg/scheduler/queue"
 )
 
 // StateKey is the key for a state value stored in a CycleState.
@@ -41,9 +42,11 @@ type CycleStatePluginReadWriter interface {
 	Write(key StateKey, val StateValue)
 	Delete(key StateKey)
 
+	GetPlacementKey() queue.PlacementKey
 	ListClusters() []clusterv1beta1.MemberCluster
 	HasScheduledOrBoundBindingFor(clusterName string) bool
 	HasObsoleteBindingFor(clusterName string) bool
+	HasRebalancingRequestFor(clusterName string) bool
 }
 
 // CycleState is, similar to its namesake in kube-scheduler, provides a way for plugins to
@@ -56,17 +59,19 @@ type CycleState struct {
 	// store is a concurrency-safe store (a map).
 	store sync.Map
 
+	// placementKey is the key of the placement being scheduled in the current scheduling cycle.
+	placementKey queue.PlacementKey
+
 	// clusters is the list of clusters that the scheduler will inspect and evaluate
 	// in the current scheduling cycle.
 	clusters []clusterv1beta1.MemberCluster
 
-	// scheduledOrBoundBindings is a map that helps check if there is a scheduler or bound
-	// binding in the current cycle associated with the cluster.
-	scheduledOrBoundBindings map[string]bool
+	// bundles is the collection of binding procesisng bundles that the scheduler needs to handle
+	// in the current scheduling cycle.
+	bundles AllBindingProcessingBundles
 
-	// obsoleteBindings is a map that helps check if there is an obsolete binding in the current
-	// cycle associated with the cluster.
-	obsoleteBindings map[string]bool
+	// rebalancingReq is the ClusterRebalancingRequest object associated with the placement being scheduled, if any.
+	rebalancingReq *placementv1beta1.ClusterRebalancingRequest
 
 	// skippedFilterPlugins is a set of Filter plugins that should be skipped in the current scheduling cycle.
 	skippedFilterPlugins sets.Set[string]
@@ -125,7 +130,11 @@ func (c *CycleState) ListClusters() []clusterv1beta1.MemberCluster {
 // scheduler and all plugins can have the same view of current spread of bindings. and any plugin
 // which requires the view no longer needs to list bindings on its own.
 func (c *CycleState) HasScheduledOrBoundBindingFor(clusterName string) bool {
-	return c.scheduledOrBoundBindings[clusterName]
+	bundle, ok := c.bundles[clusterName]
+	if !ok {
+		return false
+	}
+	return bundle.CurrentState == ObservedBindingStateBound || bundle.CurrentState == ObservedBindingStateScheduled || bundle.CurrentState == ObservedBindingStatePlaceholder
 }
 
 // HasObsoleteBindingFor returns whether a cluster already has an obsolete binding associated.
@@ -134,19 +143,38 @@ func (c *CycleState) HasScheduledOrBoundBindingFor(clusterName string) bool {
 // scheduler and all plugins can have the same view of current spread of bindings. and any plugin
 // which requires the view no longer needs to list bindings on its own.
 func (c *CycleState) HasObsoleteBindingFor(clusterName string) bool {
-	return c.obsoleteBindings[clusterName]
+	bundle, ok := c.bundles[clusterName]
+	if !ok {
+		return false
+	}
+	return bundle.CurrentState == ObservedBindingStateObsolete
 }
 
-// IsClusterObsolete
+func (c *CycleState) HasRebalancingRequestFor(clusterName string) bool {
+	if c.rebalancingReq == nil {
+		return false
+	}
+	return c.rebalancingReq.Spec.From == clusterName || c.rebalancingReq.Spec.To == clusterName
+}
+
+func (c *CycleState) GetPlacementKey() queue.PlacementKey {
+	return c.placementKey
+}
 
 // NewCycleState creates a CycleState.
-func NewCycleState(clusters []clusterv1beta1.MemberCluster, obsoleteBindings []placementv1beta1.BindingObj, scheduledOrBoundBindings ...[]placementv1beta1.BindingObj) *CycleState {
+func NewCycleState(
+	placementKey queue.PlacementKey,
+	clusters []clusterv1beta1.MemberCluster,
+	bundles AllBindingProcessingBundles,
+	rebalancingReq *placementv1beta1.ClusterRebalancingRequest,
+) *CycleState {
 	return &CycleState{
-		store:                    sync.Map{},
-		clusters:                 clusters,
-		scheduledOrBoundBindings: prepareScheduledOrBoundBindingsMap(scheduledOrBoundBindings...),
-		obsoleteBindings:         prepareObsoleteBindingsMap(obsoleteBindings),
-		skippedFilterPlugins:     sets.New[string](),
-		skippedScorePlugins:      sets.New[string](),
+		store:                sync.Map{},
+		placementKey:         placementKey,
+		clusters:             clusters,
+		bundles:              bundles,
+		rebalancingReq:       rebalancingReq,
+		skippedFilterPlugins: sets.New[string](),
+		skippedScorePlugins:  sets.New[string](),
 	}
 }

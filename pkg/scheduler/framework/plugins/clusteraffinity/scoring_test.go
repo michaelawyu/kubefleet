@@ -274,7 +274,7 @@ func TestPreScore(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			state := framework.NewCycleState(tc.clusters, nil, nil)
+			state := framework.NewCycleState("", tc.clusters, nil, nil)
 			status := p.PreScore(ctx, state, tc.policy)
 
 			if diff := cmp.Diff(
@@ -637,7 +637,7 @@ func TestPluginScore(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			state := framework.NewCycleState(nil, nil, nil)
+			state := framework.NewCycleState("", nil, nil, nil)
 			state.Write(framework.StateKey(p.Name()), tc.ps)
 
 			score, status := p.Score(ctx, state, tc.policy, tc.cluster)

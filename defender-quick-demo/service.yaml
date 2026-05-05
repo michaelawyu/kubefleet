@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cluster-info-server
+  namespace: default
+  annotations:
+    service.cilium.io/global: "true"
+    service.cilium.io/affinity: "remote"
+spec:
+  selector:
+    app: cluster-info-server
+  ports:
+    - port: 80
+      targetPort: 8080
+  type: LoadBalancer

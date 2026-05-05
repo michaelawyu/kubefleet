@@ -1058,8 +1058,20 @@ type PlacementStatus struct {
 	LatestResourceSnapshotIndex string `json:"latestResourceSnapshotIndex,omitempty"`
 
 	// +kubebuilder:validation:Optional
-	// staged update run name <-> status (Completed, InProgress, Stopping, Stopped, Stuck, Failed)
-	RolloutManagedBy map[string]string `json:"rolloutManagedBy,omitempty"`
+	RolloutManagedBy []RolloutManagerReference `json:"rolloutManagedBy,omitempty"`
+}
+
+type RolloutManagerMode string
+
+const (
+	RolloutManagerModeShared    RolloutManagerMode = "Shared"
+	RolloutManagerModeExclusive RolloutManagerMode = "Exclusive"
+)
+
+type RolloutManagerReference struct {
+	corev1.ObjectReference `json:",inline"`
+
+	Mode RolloutManagerMode `json:"mode,omitempty"`
 }
 
 // ResourceIdentifier identifies one Kubernetes resource.
