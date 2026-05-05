@@ -25,6 +25,13 @@ import (
 )
 
 const (
+	ReservedBindingAnnotationKey    = "kubernetes-fleet.io/is-reserved-binding"
+	ProvisionalBindingAnnotationKey = "kubernetes-fleet.io/is-provisional-binding"
+
+	WithdrawnBindingAnnotationKey = "kubernetes-fleet.io/is-withdrawn-binding"
+)
+
+const (
 	// SchedulerBindingCleanupFinalizer is a finalizer added to bindings to ensure we can look up the
 	// corresponding CRP name for deleting bindings to trigger a new scheduling cycle.
 	// TODO: migrate the finalizer to the new name "scheduler-binding-cleanup" in the future.

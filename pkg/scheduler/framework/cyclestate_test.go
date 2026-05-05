@@ -69,8 +69,30 @@ func TestCycleStateBasicOps(t *testing.T) {
 	}
 
 	// Convert concrete bindings to interface slices
+	bundles := make(AllBindingProcessingBundles)
+	for idx := range scheduledOrBoundBindings {
+		binding := scheduledOrBoundBindings[idx]
+		var bundleState ObservedBindingState
+		switch binding.Spec.State {
+		case placementv1beta1.BindingStateBound:
+			bundleState = ObservedBindingStateBound
+		case placementv1beta1.BindingStateScheduled:
+			bundleState = ObservedBindingStateScheduled
+		}
+		bundles[binding.Spec.TargetCluster] = &BindingProcessingBundle{
+			Binding:      binding,
+			CurrentState: bundleState,
+		}
+	}
+	for idx := range obsoleteBindings {
+		binding := obsoleteBindings[idx]
+		bundles[binding.Spec.TargetCluster] = &BindingProcessingBundle{
+			Binding:      binding,
+			CurrentState: ObservedBindingStateObsolete,
+		}
+	}
 
-	cs := NewCycleState(clusters, controller.ConvertCRBArrayToBindingObjs(obsoleteBindings), controller.ConvertCRBArrayToBindingObjs(scheduledOrBoundBindings))
+	cs := NewCycleState("", clusters, bundles, nil)
 
 	k, v := "key", "value"
 	cs.Write(StateKey(k), StateValue(v))

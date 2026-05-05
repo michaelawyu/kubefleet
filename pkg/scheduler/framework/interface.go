@@ -103,3 +103,31 @@ type ScorePlugin interface {
 	// * An InternalError status, if an expected error has occurred
 	Score(ctx context.Context, state CycleStatePluginReadWriter, policy placementv1beta1.PolicySnapshotObj, cluster *clusterv1beta1.MemberCluster) (score *ClusterScore, status *Status)
 }
+
+type PrePostProcessPlugin interface {
+	Plugin
+
+	// PrePostProcess runs after the scheduler has made scheduling decisions, but before
+	// the scheduler enters the PostProcess stage; a plugin may perform some setup at this
+	// extension point, such as caching the data that will be used in the following PostProcess
+	// calls, and/or run some checks to determine if it should be skipped in the PostProcess stage.
+	//
+	// A plugin which registers at this extension point must return one of the follows:
+	// * A Success status, if the plugin should run at the PostProcess stage; or
+	// * A Skip status, if the plugin should be skipped at the PostProcess stage; or
+	// * An InternalError status, if an expected error has occurred.
+	PrePostProcess(ctx context.Context, state CycleStatePluginReadWriter, policy placementv1beta1.PolicySnapshotObj) (status *Status)
+}
+
+type PostProcessPlugin interface {
+	Plugin
+
+	// PostProcess runs after the scheduler has made scheduling decisions, but before the
+	// scheduler applies those decisions in the form of binding writes, to manipulate the
+	// decisions as needed. A plugin which registers at this extension point must return
+	// one of the follows:
+	// * A Success status, if the plugin has made (or has decided not to make) any change
+	//   to a specific scheduling decision; or
+	// * An InternalError status, if an expected error has occurred.
+	PostProcess(ctx context.Context, state CycleStatePluginReadWriter, policy placementv1beta1.PolicySnapshotObj, bundle BindingProcessingBundleReaderWriter) (status *Status)
+}

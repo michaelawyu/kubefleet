@@ -21,6 +21,8 @@ package framework
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -49,16 +51,25 @@ import (
 )
 
 const (
+	schedulerFrameworkFieldOwnerName = "kubefleet-scheduler-framework"
+)
+
+const (
 	// eventRecorderNameTemplate is the template used to format event recorder name for a scheduler framework.
 	eventRecorderNameTemplate = "scheduler-framework-%s"
 
-	// FullyScheduledReason is the reason string of placement condition when the placement is scheduled.
+	// FullyScheduledReason is the reason string of scheduled condition when the scheduling policy is fulfilled.
 	FullyScheduledReason = "SchedulingPolicyFulfilled"
-	// NotFullyScheduledReason is the reason string of placement condition when the placement policy cannot be fully satisfied.
+	// NotFullyScheduledReason is the reason string of scheduled condition when the scheduling policy
+	// cannot be fully satisfied due to the fact that not enough clusters have been selected.
 	NotFullyScheduledReason = "SchedulingPolicyUnfulfilled"
+	// OverScheduledReason is the reason string of scheduled condition when the scheduling policy
+	// cannot be fully satisfied due to the fact that too many clusters have been selected.
+	OverScheduledReason = "SchedulingPolicyOversatisfied"
 
 	fullyScheduledMessage    = "found all cluster needed as specified by the scheduling policy, found %d cluster(s)"
 	notFullyScheduledMessage = "could not find all clusters needed as specified by the scheduling policy, found %d cluster(s) instead"
+	overScheduledMessage     = "found more clusters than needed as specified by the scheduling policy, found %d cluster(s)"
 
 	// The reasons to use for scheduling decisions.
 	pickFixedInvalidClusterReasonTemplate  = "Cluster \"%s\" is not eligible for resource placement yet: %s"
@@ -99,7 +110,12 @@ type Framework interface {
 
 	// RunSchedulingCycleFor performs scheduling for a resource placement, specifically
 	// its associated latest scheduling policy snapshot.
-	RunSchedulingCycleFor(ctx context.Context, placementKey queue.PlacementKey, policy placementv1beta1.PolicySnapshotObj) (result ctrl.Result, err error)
+	RunSchedulingCycleFor(
+		ctx context.Context,
+		placementKey queue.PlacementKey,
+		placement placementv1beta1.PlacementObj,
+		policy placementv1beta1.PolicySnapshotObj,
+	) (result ctrl.Result, err error)
 }
 
 // framework implements the Framework interface.
@@ -248,7 +264,12 @@ func (f *framework) ClusterEligibilityChecker() *clustereligibilitychecker.Clust
 
 // RunSchedulingCycleFor performs scheduling for a resource placement
 // (more specifically, its associated scheduling policy snapshot).
-func (f *framework) RunSchedulingCycleFor(ctx context.Context, placementKey queue.PlacementKey, policy placementv1beta1.PolicySnapshotObj) (result ctrl.Result, err error) {
+func (f *framework) RunSchedulingCycleFor(
+	ctx context.Context,
+	placementKey queue.PlacementKey,
+	placement placementv1beta1.PlacementObj,
+	policy placementv1beta1.PolicySnapshotObj,
+) (result ctrl.Result, err error) {
 	startTime := time.Now()
 	policyRef := klog.KObj(policy)
 	klog.V(2).InfoS("Scheduling cycle starts", "policySnapshot", policyRef)
@@ -257,13 +278,7 @@ func (f *framework) RunSchedulingCycleFor(ctx context.Context, placementKey queu
 		klog.V(2).InfoS("Scheduling cycle ends", "policySnapshot", policyRef, "latency", latency)
 	}()
 
-	// TO-DO (chenyu1): add metrics.
-	// Convert placement key to NamespacedName for the updated ListBindingsFromKey function
-	namespace, name, err := controller.ExtractNamespaceNameFromKey(placementKey)
-	if err != nil {
-		klog.ErrorS(err, "Failed to extract namespace and name from placement key", "policySnapshot", policyRef)
-		return ctrl.Result{}, err
-	}
+	namespace, name := placement.GetNamespace(), placement.GetName()
 
 	// Collect all clusters.
 	//
@@ -296,6 +311,13 @@ func (f *framework) RunSchedulingCycleFor(ctx context.Context, placementKey queu
 	}
 	klog.V(2).InfoS("listed all the existing bindings belong to one placement", "policySnapshot", policyRef, "latency", time.Since(startTime).Milliseconds())
 
+	// Retrieve the cluster rebalancing request associated with the placement, if any.
+	rebalancingReq, err := f.lookupRebalancingRequest(ctx, placement)
+	if err != nil {
+		klog.ErrorS(err, "Failed to lookup rebalancing request", "policySnapshot", policyRef)
+		return ctrl.Result{}, err
+	}
+
 	// Parse the bindings, find out
 	//
 	// * bound bindings, i.e., bindings that are associated with a normally operating cluster and
@@ -315,16 +337,58 @@ func (f *framework) RunSchedulingCycleFor(ctx context.Context, placementKey queu
 	// Note that bindings marked as unscheduled are ignored by the scheduler, as they
 	// are irrelevant to the scheduling cycle. However, we will reconcile them with the latest scheduling
 	// result so that we won't have a ever increasing chain of flip flop bindings.
-	bound, scheduled, obsolete, unscheduled, dangling, deleting := classifyBindings(policy, bindings, clusters)
+	all, bound, scheduled, obsolete, unscheduled, dangling, deleting := prepareBindingProcessingBundles(policy, bindings, clusters)
 
 	// Remove scheduler binding cleanup finalizer on all deleting bindings.
-	if err := f.updateBindings(ctx, deleting, removeFinalizerAndUpdate); err != nil {
+	if err := f.applyChanges(ctx, slices.Values(deleting)); err != nil {
 		klog.ErrorS(err, "Failed to remove finalizers from deleting bindings", "policySnapshot", policyRef)
 		return ctrl.Result{}, err
 	}
 
+	// If a cluster rebalancing request has been associated, manipulate bindings directly; no need
+	// to schedule based on the given policy.
+	switch {
+	case rebalancingReq == nil:
+		// No rebalancing request is associated.
+
+		// Check if the scheduler has acknowledged any rebalancing request for the placement;
+		// if so, withdraw the acknowledgement.
+		if err := f.withdrawRebalancingRequestAcknowledgement(ctx, placement); err != nil {
+			klog.ErrorS(err, "Failed to withdraw rebalancing request acknowledgement from placement",
+				"placement", klog.KObj(placement))
+			return ctrl.Result{}, err
+		}
+
+		// Run the scheduling cycle as normal.
+	case !rebalancingReq.DeletionTimestamp.IsZero():
+		// The rebalancing request is marked for deletion; wait for the removal to complete.
+		return ctrl.Result{RequeueAfter: time.Second * 5}, nil
+	case len(placement.GetAnnotations()[placementv1beta1.PlacementRebalancingManagedByAnnotationKey]) > 0:
+		// The rebalancing request is active, and the scheduler has acknowledged it; no further action is
+		// needed.
+	default:
+		// A rebalancing request is active and targets at the current placement; manipulate bindings directly
+		// and skip the rest of the scheduling cycle.
+		if err := f.manipulateBindingsForRebalancingRequest(ctx, placement, policy, bindings, rebalancingReq); err != nil {
+			klog.ErrorS(err, "Failed to manipulate bindings for placement",
+				"policySnapshot", policyRef,
+				"placement", klog.KObj(placement),
+				"rebalancingRequest", klog.KObj(rebalancingReq))
+			return ctrl.Result{}, err
+		}
+
+		// Acknowledge the rebalancing request.
+		if err := f.acknowledgeRebalancingRequest(ctx, placement, rebalancingReq); err != nil {
+			klog.ErrorS(err, "Failed to acknowledge rebalancing request for placement",
+				"placement", klog.KObj(placement),
+				"rebalancingRequest", klog.KObj(rebalancingReq))
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
 	// Mark all dangling bindings as unscheduled.
-	if err := f.updateBindings(ctx, dangling, markUnscheduledForAndUpdate); err != nil {
+	if err := f.applyChanges(ctx, slices.Values(dangling)); err != nil {
 		klog.ErrorS(err, "Failed to mark dangling bindings as unscheduled", "policySnapshot", policyRef)
 		return ctrl.Result{}, err
 	}
@@ -334,23 +398,23 @@ func (f *framework) RunSchedulingCycleFor(ctx context.Context, placementKey queu
 	// Note that this state is shared between all plugins and the scheduler framework itself (though some fields are reserved by
 	// the framework). These reserved fields are never accessed concurrently, as each scheduling run has its own cycle and a run
 	// is always executed in one single goroutine; plugin access to the state is guarded by sync.Map.
-	state := NewCycleState(clusters, obsolete, bound, scheduled)
+	state := NewCycleState(placementKey, clusters, all, rebalancingReq)
 
 	switch {
 	case policy.GetPolicySnapshotSpec().Policy == nil:
 		// The placement policy is not set; in such cases the policy is considered to be of
 		// the PickAll placement type.
-		return f.runSchedulingCycleForPickAllPlacementType(ctx, state, placementKey, policy, clusters, bound, scheduled, unscheduled, obsolete)
+		return f.runSchedulingCycleForPickAllPlacementType(ctx, state, placementKey, policy, clusters, all, bound, scheduled, unscheduled, obsolete)
 	case policy.GetPolicySnapshotSpec().Policy.PlacementType == placementv1beta1.PickFixedPlacementType:
 		// The placement policy features a fixed set of clusters to select; in such cases, the
 		// scheduler will bind to these clusters directly.
-		return f.runSchedulingCycleForPickFixedPlacementType(ctx, placementKey, policy, clusters, bound, scheduled, unscheduled, obsolete)
+		return f.runSchedulingCycleForPickFixedPlacementType(ctx, placementKey, policy, clusters, all, bound, scheduled, unscheduled, obsolete)
 	case policy.GetPolicySnapshotSpec().Policy.PlacementType == placementv1beta1.PickAllPlacementType:
 		// Run the scheduling cycle for policy of the PickAll placement type.
-		return f.runSchedulingCycleForPickAllPlacementType(ctx, state, placementKey, policy, clusters, bound, scheduled, unscheduled, obsolete)
+		return f.runSchedulingCycleForPickAllPlacementType(ctx, state, placementKey, policy, clusters, all, bound, scheduled, unscheduled, obsolete)
 	case policy.GetPolicySnapshotSpec().Policy.PlacementType == placementv1beta1.PickNPlacementType:
 		// Run the scheduling cycle for policy of the PickN placement type.
-		return f.runSchedulingCycleForPickNPlacementType(ctx, state, placementKey, policy, clusters, bound, scheduled, unscheduled, obsolete)
+		return f.runSchedulingCycleForPickNPlacementType(ctx, state, placementKey, policy, clusters, all, bound, scheduled, unscheduled, obsolete)
 	default:
 		// This normally should never occur.
 		klog.ErrorS(err, fmt.Sprintf("The placement type %s is unknown", policy.GetPolicySnapshotSpec().Policy.PlacementType), "policySnapshot", policyRef)
@@ -428,7 +492,8 @@ func (f *framework) runSchedulingCycleForPickAllPlacementType(
 	placementKey queue.PlacementKey,
 	policy placementv1beta1.PolicySnapshotObj,
 	clusters []clusterv1beta1.MemberCluster,
-	bound, scheduled, unscheduled, obsolete []placementv1beta1.BindingObj,
+	all AllBindingProcessingBundles,
+	bound, scheduled, unscheduled, obsolete []*BindingProcessingBundle,
 ) (result ctrl.Result, err error) {
 	policyRef := klog.KObj(policy)
 
@@ -466,23 +531,16 @@ func (f *framework) runSchedulingCycleForPickAllPlacementType(
 	//
 	// Fields in the returned bindings are fulfilled and/or refreshed as applicable.
 	klog.V(2).InfoS("Cross-referencing bindings with picked clusters", "policySnapshot", policyRef, "scoredClusters", scored, "filteredClusters", filtered)
-	toCreate, toDelete, toPatch, err := crossReferencePickedClustersAndDeDupBindings(placementKey, policy, scored, unscheduled, obsolete)
+	toCreate, toPatch, _, err := crossReferencePickedClustersAndDeDupBindings(placementKey, policy, scored, all)
 	if err != nil {
 		klog.ErrorS(err, "Failed to cross-reference bindings with picked clusters", "policySnapshot", policyRef)
 		return ctrl.Result{}, err
 	}
 
-	// Manipulate bindings accordingly.
-	klog.V(2).InfoS("Manipulating bindings", "policySnapshot", policyRef)
-	if err := f.manipulateBindings(ctx, policy, toCreate, toDelete, toPatch); err != nil {
-		klog.ErrorS(err, "Failed to manipulate bindings", "policySnapshot", policyRef)
+	// Apply binding changes.
+	if err := f.applyChanges(ctx, maps.Values(all)); err != nil {
+		klog.ErrorS(err, "Failed to apply binding changes", "policySnapshot", policyRef)
 		return ctrl.Result{}, err
-	}
-
-	// Extract the patched bindings.
-	patched := make([]placementv1beta1.BindingObj, 0, len(toPatch))
-	for _, p := range toPatch {
-		patched = append(patched, p.updated)
 	}
 
 	// Update policy snapshot status with the latest scheduling decisions and condition.
@@ -490,8 +548,8 @@ func (f *framework) runSchedulingCycleForPickAllPlacementType(
 
 	// With the PickAll placement type, the desired number of clusters to select always matches
 	// with the count of scheduled + bound bindings.
-	numOfClusters := len(toCreate) + len(patched) + len(scheduled) + len(bound)
-	if err := f.updatePolicySnapshotStatusFromBindings(ctx, policy, numOfClusters, nil, filtered, toCreate, patched, scheduled, bound); err != nil {
+	numOfClusters := len(toCreate) + len(toPatch) + len(scheduled) + len(bound)
+	if err := f.updatePolicySnapshotStatusFromBindings(ctx, policy, numOfClusters, nil, filtered, toCreate, toPatch, scheduled, bound); err != nil {
 		klog.ErrorS(err, "Failed to update latest scheduling decisions and condition", "policySnapshot", policyRef)
 		return ctrl.Result{}, err
 	}
@@ -785,7 +843,7 @@ func (f *framework) updatePolicySnapshotStatusFromBindings(
 	numOfClusters int,
 	notPicked ScoredClusters,
 	filtered []*filteredClusterWithStatus,
-	existing ...[]placementv1beta1.BindingObj,
+	existing ...[]*BindingProcessingBundle,
 ) error {
 	policyRef := klog.KObj(policy)
 
@@ -842,7 +900,8 @@ func (f *framework) runSchedulingCycleForPickNPlacementType(
 	placementKey queue.PlacementKey,
 	policy placementv1beta1.PolicySnapshotObj,
 	clusters []clusterv1beta1.MemberCluster,
-	bound, scheduled, unscheduled, obsolete []placementv1beta1.BindingObj,
+	all AllBindingProcessingBundles,
+	bound, scheduled, unscheduled, obsolete []*BindingProcessingBundle,
 ) (result ctrl.Result, err error) {
 	policyRef := klog.KObj(policy)
 
@@ -879,7 +938,15 @@ func (f *framework) runSchedulingCycleForPickNPlacementType(
 		klog.V(2).InfoS("Downscaling is needed", "policySnapshot", policyRef, "downscaleCount", downscaleCount)
 
 		// Mark all obsolete bindings as unscheduled first.
-		if err := f.updateBindings(ctx, obsolete, markUnscheduledForAndUpdate); err != nil {
+		for idx := range obsolete {
+			bundle := obsolete[idx]
+			bundle.Action = BindingActionTypeUnschedule
+
+			patchedBinding := bundle.Binding.DeepCopyObject().(placementv1beta1.BindingObj)
+			markAsUnscheduled(patchedBinding)
+			bundle.PatchedBinding = patchedBinding
+		}
+		if err := f.applyChanges(ctx, slices.Values(obsolete)); err != nil {
 			klog.ErrorS(err, "Failed to mark obsolete bindings as unscheduled", "policySnapshot", policyRef)
 			return ctrl.Result{}, err
 		}
@@ -972,16 +1039,15 @@ func (f *framework) runSchedulingCycleForPickNPlacementType(
 	//
 	// Fields in the returned bindings are fulfilled and/or refreshed as applicable.
 	klog.V(2).InfoS("Cross-referencing bindings with picked clusters", "policySnapshot", policyRef, "numOfClustersToPick", numOfClustersToPick, "picked", picked, "notPicked", notPicked)
-	toCreate, toDelete, toPatch, err := crossReferencePickedClustersAndDeDupBindings(placementKey, policy, picked, unscheduled, obsolete)
+	toCreate, toPatch, _, err := crossReferencePickedClustersAndDeDupBindings(placementKey, policy, picked, all)
 	if err != nil {
 		klog.ErrorS(err, "Failed to cross-reference bindings with picked clusters", "policySnapshot", policyRef)
 		return ctrl.Result{}, err
 	}
 
-	// Manipulate bindings accordingly.
-	klog.V(2).InfoS("Manipulating bindings", "policySnapshot", policyRef)
-	if err := f.manipulateBindings(ctx, policy, toCreate, toDelete, toPatch); err != nil {
-		klog.ErrorS(err, "Failed to manipulate bindings", "policySnapshot", policyRef)
+	// Apply binding changes.
+	if err := f.applyChanges(ctx, maps.Values(all)); err != nil {
+		klog.ErrorS(err, "Failed to apply binding changes", "policySnapshot", policyRef)
 		return ctrl.Result{}, err
 	}
 
@@ -1001,15 +1067,9 @@ func (f *framework) runSchedulingCycleForPickNPlacementType(
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// Extract the patched bindings.
-	patched := make([]placementv1beta1.BindingObj, 0, len(toPatch))
-	for _, p := range toPatch {
-		patched = append(patched, p.updated)
-	}
-
 	// Update policy snapshot status with the latest scheduling decisions and condition.
 	klog.V(2).InfoS("Updating policy snapshot status", "policySnapshot", policyRef)
-	if err := f.updatePolicySnapshotStatusFromBindings(ctx, policy, numOfClusters, notPicked, filtered, toCreate, patched, scheduled, bound); err != nil {
+	if err := f.updatePolicySnapshotStatusFromBindings(ctx, policy, numOfClusters, notPicked, filtered, toCreate, toPatch, scheduled, bound); err != nil {
 		klog.ErrorS(err, "Failed to update latest scheduling decisions and condition", "policySnapshot", policyRef)
 		return ctrl.Result{}, err
 	}
@@ -1023,9 +1083,17 @@ func (f *framework) runSchedulingCycleForPickNPlacementType(
 // To minimize interruptions, the scheduler picks scheduled bindings first (in any order); if there
 // are still more bindings to trim, the scheduler will move onto bound bindings, and it prefers
 // ones with a lower cluster score and a smaller name (in alphabetical order) .
-func (f *framework) downscale(ctx context.Context, scheduled, bound []placementv1beta1.BindingObj, count int) (updatedScheduled, updatedBound []placementv1beta1.BindingObj, err error) {
+func (f *framework) downscale(
+	ctx context.Context,
+	scheduled, bound []*BindingProcessingBundle,
+	count int,
+) (toPatchScheduled, toPatchBound []*BindingProcessingBundle, err error) {
 	if count == 0 {
 		// Skip if the downscale count is zero.
+		return scheduled, bound, nil
+	}
+	if len(scheduled)+len(bound) == 0 {
+		// Skip if there is no binding to downscale.
 		return scheduled, bound, nil
 	}
 
@@ -1036,6 +1104,7 @@ func (f *framework) downscale(ctx context.Context, scheduled, bound []placementv
 		return scheduled, bound, controller.NewUnexpectedBehaviorError(err)
 	}
 
+	var bundlesToUnschedule []*BindingProcessingBundle
 	switch {
 	case count < len(scheduled):
 		// Trim part of scheduled bindings should suffice.
@@ -1050,19 +1119,21 @@ func (f *framework) downscale(ctx context.Context, scheduled, bound []placementv
 		// no longer apply, due to the ever-changing state in the fleet.
 		sortedScheduled := sortByClusterScoreAndName(scheduled)
 
-		// Trim scheduled bindings.
-		bindingsToDelete := sortedScheduled[:count]
-
-		return sortedScheduled[count:], bound, f.updateBindings(ctx, bindingsToDelete, markUnscheduledForAndUpdate)
+		// Trim scheduled bindings. Mark them as unscheduled.
+		bundlesToUnschedule = sortedScheduled[:count]
+		toPatchScheduled = sortedScheduled[count:]
+		toPatchBound = bound
 	case count == len(scheduled):
 		// Trim all scheduled bindings.
-		return nil, bound, f.updateBindings(ctx, scheduled, markUnscheduledForAndUpdate)
+		bundlesToUnschedule = scheduled
+		toPatchScheduled = nil
+		toPatchBound = bound
 	case count < len(scheduled)+len(bound):
 		// Trim all scheduled bindings and part of bound bindings.
-		bindingsToDelete := make([]placementv1beta1.BindingObj, 0, count)
-		bindingsToDelete = append(bindingsToDelete, scheduled...)
+		bundlesToUnschedule = make([]*BindingProcessingBundle, 0, count)
+		bundlesToUnschedule = append(bundlesToUnschedule, scheduled...)
 
-		left := count - len(bindingsToDelete)
+		left := count - len(bundlesToUnschedule)
 
 		// Sort the scheduled bindings by their cluster scores (and secondly, their names).
 		//
@@ -1073,20 +1144,33 @@ func (f *framework) downscale(ctx context.Context, scheduled, bound []placementv
 		// Note that this is at best an approximation, as the cluster score assigned earlier might
 		// no longer apply, due to the ever-changing state in the fleet.
 		sortedBound := sortByClusterScoreAndName(bound)
-		bindingsToDelete = append(bindingsToDelete, sortedBound[:left]...)
-
-		return nil, sortedBound[left:], f.updateBindings(ctx, bindingsToDelete, markUnscheduledForAndUpdate)
+		bundlesToUnschedule = append(bundlesToUnschedule, sortedBound[:left]...)
+		toPatchScheduled = nil
+		toPatchBound = sortedBound[left:]
 	case count == len(scheduled)+len(bound):
 		// Trim all scheduled and bound bindings.
-		bindingsToDelete := make([]placementv1beta1.BindingObj, 0, count)
-		bindingsToDelete = append(bindingsToDelete, scheduled...)
-		bindingsToDelete = append(bindingsToDelete, bound...)
-		return nil, nil, f.updateBindings(ctx, bindingsToDelete, markUnscheduledForAndUpdate)
+		bundlesToUnschedule = make([]*BindingProcessingBundle, 0, count)
+		bundlesToUnschedule = append(bundlesToUnschedule, scheduled...)
+		bundlesToUnschedule = append(bundlesToUnschedule, bound...)
+		toPatchScheduled = nil
+		toPatchBound = nil
 	default:
 		// Normally this branch will never run, as an earlier check has guaranteed that
 		// count <= len(scheduled) + len(bound).
 		return nil, nil, controller.NewUnexpectedBehaviorError(fmt.Errorf("received an invalid downscale count %d (scheduled count: %d, bound count: %d)", count, len(scheduled), len(bound)))
 	}
+
+	// Mark the bindings as unscheduled.
+	for idx := range bundlesToUnschedule {
+		bundle := bundlesToUnschedule[idx]
+		bundle.Action = BindingActionTypeUnschedule
+
+		patchedBinding := bundle.Binding.DeepCopyObject().(placementv1beta1.BindingObj)
+		markAsUnscheduled(patchedBinding)
+		bundle.PatchedBinding = patchedBinding
+	}
+
+	return toPatchScheduled, toPatchBound, f.applyChanges(ctx, slices.Values(bundlesToUnschedule))
 }
 
 // runAllPluginsForPickNPlacementType runs all plugins for a scheduling policy of the PickN placement type.
@@ -1317,7 +1401,14 @@ type invalidClusterWithReason struct {
 
 // crossReferenceClustersWithTargetNames cross-references the current list of clusters in the fleet
 // and the list of target clusters user specifies in the placement policy.
-func (f *framework) crossReferenceClustersWithTargetNames(current []clusterv1beta1.MemberCluster, target []string) (valid []*clusterv1beta1.MemberCluster, invalid []*invalidClusterWithReason, notFound []string) {
+func (f *framework) crossReferenceClustersWithTargetNames(
+	current []clusterv1beta1.MemberCluster,
+	target []string,
+) (
+	valid []*clusterv1beta1.MemberCluster,
+	invalid []*invalidClusterWithReason,
+	notFound []string,
+) {
 	// Pre-allocate with a reasonable capacity.
 	valid = make([]*clusterv1beta1.MemberCluster, 0, len(target))
 	invalid = make([]*invalidClusterWithReason, 0, len(target))
@@ -1430,7 +1521,8 @@ func (f *framework) runSchedulingCycleForPickFixedPlacementType(
 	placementKey queue.PlacementKey,
 	policy placementv1beta1.PolicySnapshotObj,
 	clusters []clusterv1beta1.MemberCluster,
-	bound, scheduled, unscheduled, obsolete []placementv1beta1.BindingObj,
+	all AllBindingProcessingBundles,
+	bound, scheduled, unscheduled, obsolete []*BindingProcessingBundle,
 ) (ctrl.Result, error) {
 	policyRef := klog.KObj(policy)
 
@@ -1463,16 +1555,15 @@ func (f *framework) runSchedulingCycleForPickFixedPlacementType(
 	//
 	// Fields in the returned bindings are fulfilled and/or refreshed as applicable.
 	klog.V(2).InfoS("Cross-referencing bindings with valid target clusters", "policySnapshot", policyRef)
-	toCreate, toDelete, toPatch, err := crossReferenceValidTargetsWithBindings(placementKey, policy, valid, bound, scheduled, unscheduled, obsolete)
+	_, _, _, err := crossReferenceValidTargetsWithBindings(placementKey, policy, valid, all)
 	if err != nil {
 		klog.ErrorS(err, "Failed to cross-reference bindings with valid targets", "policySnapshot", policyRef)
 		return ctrl.Result{}, err
 	}
 
-	// Manipulate bindings accordingly.
-	klog.V(2).InfoS("Manipulating bindings", "policySnapshot", policyRef)
-	if err := f.manipulateBindings(ctx, policy, toCreate, toDelete, toPatch); err != nil {
-		klog.ErrorS(err, "Failed to manipulate bindings", "policySnapshot", policyRef)
+	// Apply binding changes.
+	if err := f.applyChanges(ctx, maps.Values(all)); err != nil {
+		klog.ErrorS(err, "Failed to apply binding changes", "policySnapshot", policyRef)
 		return ctrl.Result{}, err
 	}
 

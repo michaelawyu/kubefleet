@@ -25,11 +25,13 @@ package framework
 type Profile struct {
 	name string
 
-	postBatchPlugins []PostBatchPlugin
-	preFilterPlugins []PreFilterPlugin
-	filterPlugins    []FilterPlugin
-	preScorePlugins  []PreScorePlugin
-	scorePlugins     []ScorePlugin
+	postBatchPlugins      []PostBatchPlugin
+	preFilterPlugins      []PreFilterPlugin
+	filterPlugins         []FilterPlugin
+	preScorePlugins       []PreScorePlugin
+	scorePlugins          []ScorePlugin
+	prePostProcessPlugins []PrePostProcessPlugin
+	postProcessPlugins    []PostProcessPlugin
 
 	// RegisteredPlugins is a map of all plugins registered to the profile, keyed by their names.
 	// This helps to avoid setting up same plugin multiple times with the framework if the plugin
@@ -68,6 +70,20 @@ func (profile *Profile) WithPreScorePlugin(plugin PreScorePlugin) *Profile {
 // WithScorePlugin registers a ScorePlugin to the profile.
 func (profile *Profile) WithScorePlugin(plugin ScorePlugin) *Profile {
 	profile.scorePlugins = append(profile.scorePlugins, plugin)
+	profile.registeredPlugins[plugin.Name()] = plugin
+	return profile
+}
+
+// WithPrePostProcessPlugin registers a PrePostProcessPlugin to the profile.
+func (profile *Profile) WithPrePostProcessPlugin(plugin PrePostProcessPlugin) *Profile {
+	profile.prePostProcessPlugins = append(profile.prePostProcessPlugins, plugin)
+	profile.registeredPlugins[plugin.Name()] = plugin
+	return profile
+}
+
+// WithPostProcessPlugin registers a PostProcessPlugin to the profile.
+func (profile *Profile) WithPostProcessPlugin(plugin PostProcessPlugin) *Profile {
+	profile.postProcessPlugins = append(profile.postProcessPlugins, plugin)
 	profile.registeredPlugins[plugin.Name()] = plugin
 	return profile
 }

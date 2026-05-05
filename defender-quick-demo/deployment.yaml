@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-info-server
+  namespace: default
+  labels:
+    app: cluster-info-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cluster-info-server
+  template:
+    metadata:
+      labels:
+        app: cluster-info-server
+    spec:
+      containers:
+        - name: server
+          image: bravelion.azurecr.io/app:experimental
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+          volumeMounts:
+            - name: cluster-info
+              mountPath: /etc/config
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: cluster-info
+          configMap:
+            name: cluster-info

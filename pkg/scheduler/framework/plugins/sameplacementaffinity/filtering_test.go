@@ -27,7 +27,6 @@ import (
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/scheduler/framework"
-	"github.com/kubefleet-dev/kubefleet/pkg/utils/controller"
 )
 
 const (
@@ -111,7 +110,22 @@ func TestFilter(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			p := New()
-			state := framework.NewCycleState(nil, nil, controller.ConvertCRBArrayToBindingObjs(tc.scheduledOrBoundBindings))
+			bundles := make(framework.AllBindingProcessingBundles)
+			for idx := range tc.scheduledOrBoundBindings {
+				binding := tc.scheduledOrBoundBindings[idx]
+				var bundleState framework.ObservedBindingState
+				if binding.Spec.State == placementv1beta1.BindingStateBound {
+					bundleState = framework.ObservedBindingStateBound
+				} else if binding.Spec.State == placementv1beta1.BindingStateScheduled {
+					bundleState = framework.ObservedBindingStateScheduled
+				}
+				bundles[binding.Spec.TargetCluster] = &framework.BindingProcessingBundle{
+					Binding:      binding,
+					CurrentState: bundleState,
+				}
+			}
+
+			state := framework.NewCycleState("", nil, bundles, nil)
 			cluster := clusterv1beta1.MemberCluster{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: clusterName,

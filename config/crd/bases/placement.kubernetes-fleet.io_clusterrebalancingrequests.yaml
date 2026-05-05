@@ -1,0 +1,421 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.0
+  name: clusterrebalancingrequests.placement.kubernetes-fleet.io
+spec:
+  group: placement.kubernetes-fleet.io
+  names:
+    categories:
+    - fleet
+    - fleet-placement
+    kind: ClusterRebalancingRequest
+    listKind: ClusterRebalancingRequestList
+    plural: clusterrebalancingrequests
+    singular: clusterrebalancingrequest
+  scope: Cluster
+  versions:
+  - name: v1beta1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: The desired state of the ClusterRebalancingRequest.
+            properties:
+              failurePolicy:
+                description: |-
+                  The failure policy of this rebalancing request. If not set, the rebalancing might continue despite that some of the affected
+                  placements fail to be migrated.
+
+                  This field is immutable after the request is created.
+                properties:
+                  maximumWaitDurationPerMigrationAttemptSeconds:
+                    default: 300
+                    description: |-
+                      Consider a placement migration attempt as failed if it does not complete within this duration.
+
+                      The default value is 300. This field is immutable after the request is created.
+                    format: int32
+                    type: integer
+                    x-kubernetes-validations:
+                    - message: maximumWaitDurationPerMigrationAttemptSeconds cannot
+                        be changed once set
+                      rule: self == oldSelf
+                  onMigrationFailures:
+                    default: "1"
+                    description: |-
+                      Trigger the action if the number of placements that fail to be migrated reaches this threshold.
+
+                      The default value is 1. This field is immutable after the request is created.
+                    format: int32
+                    maximum: 10
+                    minimum: 1
+                    type: integer
+                    x-kubernetes-validations:
+                    - message: onFailureCount cannot be changed once set
+                      rule: self == oldSelf
+                type: object
+                x-kubernetes-validations:
+                - message: failurePolicy cannot be changed once set
+                  rule: self == oldSelf
+              from:
+                description: |-
+                  The name of the cluster from which placements would be migrated.
+
+                  This field is immutable after the request is created.
+                type: string
+                x-kubernetes-validations:
+                - message: from field cannot be changed once set
+                  rule: self == oldSelf
+              maxConcurrency:
+                default: 1
+                description: |-
+                  The maximum number of placements that can be migrated at the same time.
+
+                  The default value is 1. This field is immutable after the request is created.
+                format: int32
+                maximum: 10
+                minimum: 1
+                type: integer
+                x-kubernetes-validations:
+                - message: maxConcurrency cannot be changed once set
+                  rule: self == oldSelf
+              mode:
+                default: DrainFirst
+                description: |-
+                  How KubeFleet should handle this rebalancing request.
+
+                  The available options are:
+                  * SurgeFirst: for each placement to migrate, KubeFleet will first place
+                    its resources on the `to` cluster, wait until they become available, then
+                    remove the resources on the `from` cluster.
+                  * DrainFirst: for each placement to migrate,KubeFleet will first remove
+                    resources on the `from` cluster, wait until all the resources are gone,
+                    then place resources on the `to` cluster.
+
+                  The default value is DrainFirst. This field is immutable after the request is created.
+                enum:
+                - SurgeFirst
+                - DrainFirst
+                type: string
+                x-kubernetes-validations:
+                - message: mode cannot be changed once set
+                  rule: self == oldSelf
+              rollback:
+                default: false
+                description: |-
+                  Whether to roll back this rebalancing request. If set to true, KubeFleet
+                  will migrate placements back to the `from` cluster. Once the rollback starts, it cannot be stopped..
+
+                  When rolling back a rebalancing request, KubeFleet will use the same mode (SurgeFirst or DrainFirst) as specified in the request to
+                  migrate placements back to the `from` cluster. The max concurrency setting will be respected as well. However, the failure
+                  policy will cease to apply: KubeFleet will try to put placements back as much as possible within the limit of max concurrency,
+                  even if some of the placements fail to function properly when they are put back to the `from` cluster. The rollback process might
+                  get stuck and require manual intervention under adverse conditions.
+
+                  The default value is false.
+                type: boolean
+                x-kubernetes-validations:
+                - message: rollback field cannot be reset to false once set to true
+                  rule: '!oldSelf || self'
+              to:
+                description: |-
+                  The name of the cluster to which placements would be migrated.
+
+                  This field is immutable after the request is created.
+                type: string
+                x-kubernetes-validations:
+                - message: to field cannot be changed once set
+                  rule: self == oldSelf
+            required:
+            - from
+            - to
+            type: object
+          status:
+            description: The observed status of the ClusterRebalancingRequest.
+            properties:
+              conditions:
+                description: An array of currently observed conditions of the ClusterRebalancingRequest.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              migrations:
+                items:
+                  description: ClusterRebalancingRequestPerMigrationStatus defines
+                    the observed state of a single placement migration attempt of
+                    a ClusterRebalancingRequest.
+                  properties:
+                    conditions:
+                      description: An array of currently observed conditions of this
+                        placement migration attempt.
+                      items:
+                        description: Condition contains details for one aspect of
+                          the current state of this API Resource.
+                        properties:
+                          lastTransitionTime:
+                            description: |-
+                              lastTransitionTime is the last time the condition transitioned from one status to another.
+                              This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                            format: date-time
+                            type: string
+                          message:
+                            description: |-
+                              message is a human readable message indicating details about the transition.
+                              This may be an empty string.
+                            maxLength: 32768
+                            type: string
+                          observedGeneration:
+                            description: |-
+                              observedGeneration represents the .metadata.generation that the condition was set based upon.
+                              For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                              with respect to the current state of the instance.
+                            format: int64
+                            minimum: 0
+                            type: integer
+                          reason:
+                            description: |-
+                              reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                              Producers of specific condition types may define expected values and meanings for this field,
+                              and whether the values are considered a guaranteed API.
+                              The value should be a CamelCase string.
+                              This field may not be empty.
+                            maxLength: 1024
+                            minLength: 1
+                            pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                            type: string
+                          status:
+                            description: status of the condition, one of True, False,
+                              Unknown.
+                            enum:
+                            - "True"
+                            - "False"
+                            - Unknown
+                            type: string
+                          type:
+                            description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                            maxLength: 316
+                            pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                            type: string
+                        required:
+                        - lastTransitionTime
+                        - message
+                        - reason
+                        - status
+                        - type
+                        type: object
+                      type: array
+                    fromClusterBinding:
+                      description: The object references of the resource bindings
+                        for the `from` and `to` clusters respectively.
+                      properties:
+                        apiVersion:
+                          description: API version of the referent.
+                          type: string
+                        fieldPath:
+                          description: |-
+                            If referring to a piece of an object instead of an entire object, this string
+                            should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                            For example, if the object reference is to a container within a pod, this would take on a value like:
+                            "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                            the event) or if no container name is specified "spec.containers[2]" (container with
+                            index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                            referencing a part of an object.
+                          type: string
+                        kind:
+                          description: |-
+                            Kind of the referent.
+                            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                          type: string
+                        name:
+                          description: |-
+                            Name of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                          type: string
+                        resourceVersion:
+                          description: |-
+                            Specific resourceVersion to which this reference is made, if any.
+                            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                          type: string
+                        uid:
+                          description: |-
+                            UID of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    placementName:
+                      description: The object reference of the placement being migrated.
+                      properties:
+                        apiVersion:
+                          description: API version of the referent.
+                          type: string
+                        fieldPath:
+                          description: |-
+                            If referring to a piece of an object instead of an entire object, this string
+                            should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                            For example, if the object reference is to a container within a pod, this would take on a value like:
+                            "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                            the event) or if no container name is specified "spec.containers[2]" (container with
+                            index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                            referencing a part of an object.
+                          type: string
+                        kind:
+                          description: |-
+                            Kind of the referent.
+                            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                          type: string
+                        name:
+                          description: |-
+                            Name of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                          type: string
+                        resourceVersion:
+                          description: |-
+                            Specific resourceVersion to which this reference is made, if any.
+                            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                          type: string
+                        uid:
+                          description: |-
+                            UID of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    stage:
+                      description: The current stage of the migration attempt.
+                      type: string
+                    toClusterBinding:
+                      description: ObjectReference contains enough information to
+                        let you inspect or modify the referred object.
+                      properties:
+                        apiVersion:
+                          description: API version of the referent.
+                          type: string
+                        fieldPath:
+                          description: |-
+                            If referring to a piece of an object instead of an entire object, this string
+                            should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                            For example, if the object reference is to a container within a pod, this would take on a value like:
+                            "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                            the event) or if no container name is specified "spec.containers[2]" (container with
+                            index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                            referencing a part of an object.
+                          type: string
+                        kind:
+                          description: |-
+                            Kind of the referent.
+                            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                          type: string
+                        name:
+                          description: |-
+                            Name of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                        namespace:
+                          description: |-
+                            Namespace of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                          type: string
+                        resourceVersion:
+                          description: |-
+                            Specific resourceVersion to which this reference is made, if any.
+                            More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                          type: string
+                        uid:
+                          description: |-
+                            UID of the referent.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                  type: object
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

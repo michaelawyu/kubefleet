@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -71,7 +72,7 @@ var (
 	ignoredStatusFields                       = cmpopts.IgnoreFields(Status{}, "reasons", "err")
 	ignoredBindingWithPatchFields             = cmpopts.IgnoreFields(bindingWithPatch{}, "patch")
 	ignoredCondFields                         = cmpopts.IgnoreFields(metav1.Condition{}, "LastTransitionTime")
-	ignoreCycleStateFields                    = cmpopts.IgnoreFields(CycleState{}, "store", "clusters", "scheduledOrBoundBindings", "obsoleteBindings")
+	ignoreCycleStateFields                    = cmpopts.IgnoreFields(CycleState{}, "store", "clusters", "bundles")
 	ignoreClusterDecisionScoreAndReasonFields = cmpopts.IgnoreFields(placementv1beta1.ClusterDecision{}, "ClusterScore", "Reason")
 
 	lessFuncCluster = func(cluster1, cluster2 *clusterv1beta1.MemberCluster) bool {
@@ -202,8 +203,8 @@ func TestCollectClusters(t *testing.T) {
 	}
 }
 
-// TestClassifyBindings tests the classifyBindings function.
-func TestClassifyBindings(t *testing.T) {
+// TestPrepareBindingProcessingBundles tests the prepareBindingProcessingBundles function.
+func TestPrepareBindingProcessingBundles(t *testing.T) {
 	policy := &placementv1beta1.ClusterSchedulingPolicySnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: policyName,
@@ -319,29 +320,37 @@ func TestClassifyBindings(t *testing.T) {
 	wantDangling := controller.ConvertCRBArrayToBindingObjs([]*placementv1beta1.ClusterResourceBinding{&associatedWithLeavingClusterBinding, &assocaitedWithDisappearedClusterBinding})
 	wantDeleting := controller.ConvertCRBArrayToBindingObjs([]*placementv1beta1.ClusterResourceBinding{&deletingBinding})
 
-	bound, scheduled, obsolete, unscheduled, dangling, deleting := classifyBindings(policy, controller.ConvertCRBObjsToBindingObjs(bindings), clusters)
-	if diff := cmp.Diff(bound, wantBound); diff != "" {
-		t.Errorf("classifyBindings() bound diff (-got, +want): %s", diff)
+	bundleBindings := func(bundles []*BindingProcessingBundle) []placementv1beta1.BindingObj {
+		result := make([]placementv1beta1.BindingObj, len(bundles))
+		for i, b := range bundles {
+			result[i] = b.Binding
+		}
+		return result
 	}
 
-	if diff := cmp.Diff(scheduled, wantScheduled); diff != "" {
-		t.Errorf("classifyBindings() scheduled diff (-got, +want) = %s", diff)
+	_, bound, scheduled, obsolete, unscheduled, dangling, deleting := prepareBindingProcessingBundles(policy, controller.ConvertCRBObjsToBindingObjs(bindings), clusters)
+	if diff := cmp.Diff(bundleBindings(bound), wantBound); diff != "" {
+		t.Errorf("prepareBindingProcessingBundles() bound diff (-got, +want): %s", diff)
 	}
 
-	if diff := cmp.Diff(obsolete, wantObsolete); diff != "" {
-		t.Errorf("classifyBindings() obsolete diff (-got, +want) = %s", diff)
+	if diff := cmp.Diff(bundleBindings(scheduled), wantScheduled); diff != "" {
+		t.Errorf("prepareBindingProcessingBundles() scheduled diff (-got, +want) = %s", diff)
 	}
 
-	if diff := cmp.Diff(unscheduled, wantUnscheduled); diff != "" {
-		t.Errorf("classifyBindings() unscheduled diff (-got, +want) = %s", diff)
+	if diff := cmp.Diff(bundleBindings(obsolete), wantObsolete); diff != "" {
+		t.Errorf("prepareBindingProcessingBundles() obsolete diff (-got, +want) = %s", diff)
 	}
 
-	if diff := cmp.Diff(dangling, wantDangling); diff != "" {
-		t.Errorf("classifyBindings() dangling diff (-got, +want) = %s", diff)
+	if diff := cmp.Diff(bundleBindings(unscheduled), wantUnscheduled); diff != "" {
+		t.Errorf("prepareBindingProcessingBundles() unscheduled diff (-got, +want) = %s", diff)
 	}
 
-	if diff := cmp.Diff(deleting, wantDeleting); diff != "" {
-		t.Errorf("classifyBIndings() deleting diff (-got, +want) = %s", diff)
+	if diff := cmp.Diff(bundleBindings(dangling), wantDangling); diff != "" {
+		t.Errorf("prepareBindingProcessingBundles() dangling diff (-got, +want) = %s", diff)
+	}
+
+	if diff := cmp.Diff(bundleBindings(deleting), wantDeleting); diff != "" {
+		t.Errorf("prepareBindingProcessingBundles() deleting diff (-got, +want) = %s", diff)
 	}
 }
 
@@ -694,7 +703,7 @@ func TestRunPreFilterPlugins(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			state := NewCycleState([]clusterv1beta1.MemberCluster{}, []placementv1beta1.BindingObj{})
+			state := NewCycleState("", []clusterv1beta1.MemberCluster{}, nil, nil)
 			policy := &placementv1beta1.ClusterSchedulingPolicySnapshot{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: policyName,
@@ -823,7 +832,7 @@ func TestRunFilterPluginsFor(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			state := NewCycleState([]clusterv1beta1.MemberCluster{}, []placementv1beta1.BindingObj{})
+			state := NewCycleState("", []clusterv1beta1.MemberCluster{}, nil, nil)
 			for _, name := range tc.skippedPluginNames {
 				state.skippedFilterPlugins.Insert(name)
 			}
@@ -1025,7 +1034,7 @@ func TestRunFilterPlugins(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			state := NewCycleState([]clusterv1beta1.MemberCluster{}, []placementv1beta1.BindingObj{})
+			state := NewCycleState("", []clusterv1beta1.MemberCluster{}, nil, nil)
 			policy := &placementv1beta1.ClusterSchedulingPolicySnapshot{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: policyName,
@@ -1328,7 +1337,7 @@ func TestRunAllPluginsForPickAllPlacementType(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			state := NewCycleState([]clusterv1beta1.MemberCluster{}, []placementv1beta1.BindingObj{})
+			state := NewCycleState("", []clusterv1beta1.MemberCluster{}, nil, nil)
 			scored, filtered, err := f.runAllPluginsForPickAllPlacementType(ctx, state, policy, clusters)
 			if tc.expectedToFail {
 				if err == nil {
@@ -2077,39 +2086,72 @@ func TestCrossReferencePickedClustersAndDeDupBindings(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			toCreate, toDelete, toPatch, err := crossReferencePickedClustersAndDeDupBindings(queue.PlacementKey(crpName), policy, tc.picked, controller.ConvertCRBArrayToBindingObjs(tc.unscheduled), controller.ConvertCRBArrayToBindingObjs(tc.obsolete))
+			all := make(AllBindingProcessingBundles)
+			for _, b := range tc.unscheduled {
+				bCopy := b
+				all[bCopy.Spec.TargetCluster] = &BindingProcessingBundle{
+					ClusterName:  bCopy.Spec.TargetCluster,
+					Binding:      bCopy,
+					CurrentState: ObservedBindingStateUnscheduled,
+				}
+			}
+			for _, b := range tc.obsolete {
+				bCopy := b
+				all[bCopy.Spec.TargetCluster] = &BindingProcessingBundle{
+					ClusterName:  bCopy.Spec.TargetCluster,
+					Binding:      bCopy,
+					CurrentState: ObservedBindingStateObsolete,
+				}
+			}
+
+			toCreate, toPatch, toDelete, err := crossReferencePickedClustersAndDeDupBindings(queue.PlacementKey(crpName), policy, tc.picked, all)
 			if err != nil {
 				t.Errorf("crossReferencePickedClustersAndDeDupBindings test `%s`, err = %v, want no error", tc.name, err)
 				return
 			}
 
+			gotToCreate := make([]placementv1beta1.BindingObj, len(toCreate))
+			for i, b := range toCreate {
+				gotToCreate[i] = b.Binding
+			}
 			wantToCreate := controller.ConvertCRBObjsToBindingObjs(tc.wantToCreate)
 			if len(tc.wantToCreate) == 0 {
 				wantToCreate = []placementv1beta1.BindingObj{}
 			}
-			if diff := cmp.Diff(toCreate, wantToCreate, ignoreObjectMetaNameField); diff != "" {
+			if diff := cmp.Diff(gotToCreate, wantToCreate, ignoreObjectMetaNameField); diff != "" {
 				t.Errorf("crossReferencePickedClustersAndDeDupBindings test `%s` toCreate diff (-got, +want) = %s", tc.name, diff)
 			}
 
 			// Verify names separately.
-			for _, binding := range toCreate {
-				spec := binding.GetBindingSpec()
+			for _, bundle := range toCreate {
+				spec := bundle.Binding.GetBindingSpec()
 				prefix := fmt.Sprintf("%s-%s-", crpName, spec.TargetCluster)
-				if !strings.HasPrefix(binding.GetName(), prefix) {
-					t.Errorf("toCreate binding name, got %s, want prefix %s", binding.GetName(), prefix)
+				if !strings.HasPrefix(bundle.Binding.GetName(), prefix) {
+					t.Errorf("toCreate binding name, got %s, want prefix %s", bundle.Binding.GetName(), prefix)
 				}
 			}
 
+			gotToPatch := make([]*bindingWithPatch, len(toPatch))
+			for i, b := range toPatch {
+				gotToPatch[i] = &bindingWithPatch{updated: b.PatchedBinding}
+			}
+			sort.Slice(gotToPatch, func(i, j int) bool {
+				return gotToPatch[i].updated.GetBindingSpec().TargetCluster < gotToPatch[j].updated.GetBindingSpec().TargetCluster
+			})
 			// Ignore the patch field (not exported in local package).
-			if diff := cmp.Diff(toPatch, tc.wantToPatch, cmp.AllowUnexported(bindingWithPatch{}), ignoredBindingWithPatchFields); diff != "" {
+			if diff := cmp.Diff(gotToPatch, tc.wantToPatch, cmp.AllowUnexported(bindingWithPatch{}), ignoredBindingWithPatchFields); diff != "" {
 				t.Errorf("crossReferencePickedClustersAndDeDupBindings test `%s` toPatch diff (-got, +want): %s", tc.name, diff)
 			}
 
+			gotToDelete := make([]placementv1beta1.BindingObj, len(toDelete))
+			for i, b := range toDelete {
+				gotToDelete[i] = b.Binding
+			}
 			wantToDelete := controller.ConvertCRBObjsToBindingObjs(tc.wantToDelete)
 			if len(tc.wantToDelete) == 0 {
 				wantToDelete = []placementv1beta1.BindingObj{}
 			}
-			if diff := cmp.Diff(toDelete, wantToDelete); diff != "" {
+			if diff := cmp.Diff(gotToDelete, wantToDelete); diff != "" {
 				t.Errorf("crossReferencePickedClustersAndDeDupBindings test `%s` toDelete diff (-got, +want): %s", tc.name, diff)
 			}
 		})
@@ -2923,7 +2965,18 @@ func TestUpdatePolicySnapshotStatusFromBindings(t *testing.T) {
 			for _, bindingSet := range tc.existing {
 				numOfClusters += len(bindingSet)
 			}
-			if err := f.updatePolicySnapshotStatusFromBindings(ctx, tc.policy, numOfClusters, tc.notPicked, tc.filtered, controller.ConvertCRB2DArrayToBindingObjs(tc.existing)...); err != nil {
+			existingBundles := make([][]*BindingProcessingBundle, len(tc.existing))
+			for i, bindingSet := range tc.existing {
+				bundles := make([]*BindingProcessingBundle, len(bindingSet))
+				for j, b := range bindingSet {
+					bundles[j] = &BindingProcessingBundle{
+						ClusterName: b.Spec.TargetCluster,
+						Binding:     b,
+					}
+				}
+				existingBundles[i] = bundles
+			}
+			if err := f.updatePolicySnapshotStatusFromBindings(ctx, tc.policy, numOfClusters, tc.notPicked, tc.filtered, existingBundles...); err != nil {
 				t.Fatalf("updatePolicySnapshotStatusFromBindings() = %v, want no error", err)
 			}
 
@@ -3045,12 +3098,12 @@ func TestSortByClusterScoreAndName(t *testing.T) {
 
 	testCases := []struct {
 		name     string
-		bindings []placementv1beta1.BindingObj
-		want     []placementv1beta1.BindingObj
+		bindings []*placementv1beta1.ClusterResourceBinding
+		want     []*placementv1beta1.ClusterResourceBinding
 	}{
 		{
 			name: "no scores assigned to any cluster",
-			bindings: controller.ConvertCRBArrayToBindingObjs([]*placementv1beta1.ClusterResourceBinding{
+			bindings: []*placementv1beta1.ClusterResourceBinding{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: bindingName,
@@ -3067,8 +3120,8 @@ func TestSortByClusterScoreAndName(t *testing.T) {
 						TargetCluster: altClusterName,
 					},
 				},
-			}),
-			want: controller.ConvertCRBArrayToBindingObjs([]*placementv1beta1.ClusterResourceBinding{
+			},
+			want: []*placementv1beta1.ClusterResourceBinding{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: bindingName,
@@ -3085,11 +3138,11 @@ func TestSortByClusterScoreAndName(t *testing.T) {
 						TargetCluster: altClusterName,
 					},
 				},
-			}),
+			},
 		},
 		{
 			name: "no scores assigned to one cluster",
-			bindings: controller.ConvertCRBArrayToBindingObjs([]*placementv1beta1.ClusterResourceBinding{
+			bindings: []*placementv1beta1.ClusterResourceBinding{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: bindingName,
@@ -3112,8 +3165,8 @@ func TestSortByClusterScoreAndName(t *testing.T) {
 						TargetCluster: altClusterName,
 					},
 				},
-			}),
-			want: controller.ConvertCRBArrayToBindingObjs([]*placementv1beta1.ClusterResourceBinding{
+			},
+			want: []*placementv1beta1.ClusterResourceBinding{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: altBindingName,
@@ -3136,11 +3189,11 @@ func TestSortByClusterScoreAndName(t *testing.T) {
 						},
 					},
 				},
-			}),
+			},
 		},
 		{
 			name: "different scores",
-			bindings: controller.ConvertCRBArrayToBindingObjs([]*placementv1beta1.ClusterResourceBinding{
+			bindings: []*placementv1beta1.ClusterResourceBinding{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: bindingName,
@@ -3183,8 +3236,8 @@ func TestSortByClusterScoreAndName(t *testing.T) {
 						},
 					},
 				},
-			}),
-			want: controller.ConvertCRBArrayToBindingObjs([]*placementv1beta1.ClusterResourceBinding{
+			},
+			want: []*placementv1beta1.ClusterResourceBinding{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: anotherBindingName,
@@ -3227,11 +3280,11 @@ func TestSortByClusterScoreAndName(t *testing.T) {
 						},
 					},
 				},
-			}),
+			},
 		},
 		{
 			name: "same score, different names",
-			bindings: controller.ConvertCRBArrayToBindingObjs([]*placementv1beta1.ClusterResourceBinding{
+			bindings: []*placementv1beta1.ClusterResourceBinding{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: bindingName,
@@ -3274,8 +3327,8 @@ func TestSortByClusterScoreAndName(t *testing.T) {
 						},
 					},
 				},
-			}),
-			want: controller.ConvertCRBArrayToBindingObjs([]*placementv1beta1.ClusterResourceBinding{
+			},
+			want: []*placementv1beta1.ClusterResourceBinding{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: bindingName,
@@ -3318,13 +3371,21 @@ func TestSortByClusterScoreAndName(t *testing.T) {
 						},
 					},
 				},
-			}),
+			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			sorted := sortByClusterScoreAndName(tc.bindings)
+			inputBundles := make([]*BindingProcessingBundle, len(tc.bindings))
+			for i, b := range tc.bindings {
+				inputBundles[i] = &BindingProcessingBundle{ClusterName: b.Spec.TargetCluster, Binding: b}
+			}
+			sortedBundles := sortByClusterScoreAndName(inputBundles)
+			sorted := make([]*placementv1beta1.ClusterResourceBinding, len(sortedBundles))
+			for i, bundle := range sortedBundles {
+				sorted[i] = bundle.Binding.(*placementv1beta1.ClusterResourceBinding)
+			}
 			if diff := cmp.Diff(sorted, tc.want); diff != "" {
 				t.Errorf("sortByClusterScoreAndName() diff (-got, +want): %s", diff)
 			}
@@ -3870,7 +3931,15 @@ func TestNewSchedulingDecisionsFromBindings(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			decisions := newSchedulingDecisionsFromBindings(tc.maxUnselectedClusterDecisionCount, tc.notPicked, tc.filtered, controller.ConvertCRB2DArrayToBindingObjs(tc.existing)...)
+			existingBundles := make([][]*BindingProcessingBundle, len(tc.existing))
+			for i, bindingSet := range tc.existing {
+				bundles := make([]*BindingProcessingBundle, len(bindingSet))
+				for j, b := range bindingSet {
+					bundles[j] = &BindingProcessingBundle{ClusterName: b.Spec.TargetCluster, Binding: b}
+				}
+				existingBundles[i] = bundles
+			}
+			decisions := newSchedulingDecisionsFromBindings(tc.maxUnselectedClusterDecisionCount, tc.notPicked, tc.filtered, existingBundles...)
 			if diff := cmp.Diff(tc.want, decisions); diff != "" {
 				t.Errorf("newSchedulingDecisionsFrom() decisions diff (-got, +want): %s", diff)
 			}
@@ -3950,7 +4019,15 @@ func TestNewSchedulingDecisionsFromOversized(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			decisions := newSchedulingDecisionsFromBindings(tc.maxUnselectedClusterDecisionCount, tc.notPicked, tc.filtered, controller.ConvertCRB2DArrayToBindingObjs(tc.bindingSets)...)
+			bindingSetBundles := make([][]*BindingProcessingBundle, len(tc.bindingSets))
+			for i, bindingSet := range tc.bindingSets {
+				bundles := make([]*BindingProcessingBundle, len(bindingSet))
+				for j, b := range bindingSet {
+					bundles[j] = &BindingProcessingBundle{ClusterName: b.Spec.TargetCluster, Binding: b}
+				}
+				bindingSetBundles[i] = bundles
+			}
+			decisions := newSchedulingDecisionsFromBindings(tc.maxUnselectedClusterDecisionCount, tc.notPicked, tc.filtered, bindingSetBundles...)
 			if diff := cmp.Diff(decisions, tc.wantDecisions, ignoreClusterDecisionScoreAndReasonFields); diff != "" {
 				t.Errorf("newSchedulingDecisionsFrom() decisions diff (-got, +want): %s", diff)
 			}
@@ -4165,7 +4242,7 @@ func TestRunPostBatchPlugins(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			state := NewCycleState([]clusterv1beta1.MemberCluster{}, []placementv1beta1.BindingObj{})
+			state := NewCycleState("", []clusterv1beta1.MemberCluster{}, nil, nil)
 			state.desiredBatchSize = tc.desiredBatchSize
 			policy := &placementv1beta1.ClusterSchedulingPolicySnapshot{
 				ObjectMeta: metav1.ObjectMeta{
@@ -4260,7 +4337,7 @@ func TestRunPreScorePlugins(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			state := NewCycleState([]clusterv1beta1.MemberCluster{}, []placementv1beta1.BindingObj{})
+			state := NewCycleState("", []clusterv1beta1.MemberCluster{}, nil, nil)
 			policy := &placementv1beta1.ClusterSchedulingPolicySnapshot{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: policyName,
@@ -5019,7 +5096,15 @@ func TestDownscale(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			scheduled, bound, err := f.downscale(ctx, controller.ConvertCRBArrayToBindingObjs(tc.scheduled), controller.ConvertCRBArrayToBindingObjs(tc.bound), tc.count)
+			scheduledInput := make([]*BindingProcessingBundle, len(tc.scheduled))
+			for i, b := range tc.scheduled {
+				scheduledInput[i] = &BindingProcessingBundle{ClusterName: b.Spec.TargetCluster, Binding: b}
+			}
+			boundInput := make([]*BindingProcessingBundle, len(tc.bound))
+			for i, b := range tc.bound {
+				boundInput[i] = &BindingProcessingBundle{ClusterName: b.Spec.TargetCluster, Binding: b}
+			}
+			scheduledBundles, boundBundles, err := f.downscale(ctx, scheduledInput, boundInput, tc.count)
 			if tc.expectedToFail {
 				if err == nil {
 					t.Fatalf("downscaled() = nil, want error")
@@ -5028,11 +5113,20 @@ func TestDownscale(t *testing.T) {
 				return
 			}
 
-			if diff := cmp.Diff(scheduled, controller.ConvertCRBArrayToBindingObjs(tc.wantUpdatedScheduled), ignoreObjectMetaResourceVersionField, ignoreTypeMetaAPIVersionKindFields); diff != "" {
+			var scheduledCRBs []*placementv1beta1.ClusterResourceBinding
+			for _, bundle := range scheduledBundles {
+				scheduledCRBs = append(scheduledCRBs, bundle.Binding.(*placementv1beta1.ClusterResourceBinding))
+			}
+			var boundCRBs []*placementv1beta1.ClusterResourceBinding
+			for _, bundle := range boundBundles {
+				boundCRBs = append(boundCRBs, bundle.Binding.(*placementv1beta1.ClusterResourceBinding))
+			}
+
+			if diff := cmp.Diff(scheduledCRBs, tc.wantUpdatedScheduled, ignoreObjectMetaResourceVersionField, ignoreTypeMetaAPIVersionKindFields); diff != "" {
 				t.Errorf("downscale() updated scheduled diff (-got, +want) = %s", diff)
 			}
 
-			if diff := cmp.Diff(bound, controller.ConvertCRBArrayToBindingObjs(tc.wantUpdatedBound), ignoreObjectMetaResourceVersionField, ignoreTypeMetaAPIVersionKindFields); diff != "" {
+			if diff := cmp.Diff(boundCRBs, tc.wantUpdatedBound, ignoreObjectMetaResourceVersionField, ignoreTypeMetaAPIVersionKindFields); diff != "" {
 				t.Errorf("downscale() updated bound diff (-got, +want) = %s", diff)
 			}
 
@@ -5195,7 +5289,7 @@ func TestRunScorePluginsFor(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			state := NewCycleState([]clusterv1beta1.MemberCluster{}, []placementv1beta1.BindingObj{})
+			state := NewCycleState("", []clusterv1beta1.MemberCluster{}, nil, nil)
 			for _, name := range tc.skippedPluginNames {
 				state.skippedScorePlugins.Insert(name)
 			}
@@ -5407,7 +5501,7 @@ func TestRunScorePlugins(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			state := NewCycleState([]clusterv1beta1.MemberCluster{}, []placementv1beta1.BindingObj{})
+			state := NewCycleState("", []clusterv1beta1.MemberCluster{}, nil, nil)
 			policy := &placementv1beta1.ClusterSchedulingPolicySnapshot{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: policyName,
@@ -6258,7 +6352,7 @@ func TestRunAllPluginsForPickNPlacementType(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			state := NewCycleState(clusters, nil)
+			state := NewCycleState("", clusters, nil, nil)
 			scored, filtered, err := f.runAllPluginsForPickNPlacementType(ctx, state, policy, tc.numOfClusters, tc.numOfBoundOrScheduledBindings, clusters)
 			if tc.expectedToFail {
 				if err == nil {
@@ -6640,7 +6734,7 @@ func TestRunSchedulingCycleForPickAllPlacementType_StableStatusOutputInLargeFlee
 			},
 		},
 	}
-	state := NewCycleState(clusters, nil, nil)
+	state := NewCycleState("", clusters, nil, nil)
 	placementKey := queue.PlacementKey(crpName)
 	wantClusterUnschedulableReason := "ClusterUnschedulable"
 	policy := &placementv1beta1.ClusterSchedulingPolicySnapshot{
@@ -6699,7 +6793,7 @@ func TestRunSchedulingCycleForPickAllPlacementType_StableStatusOutputInLargeFlee
 
 	// Simulate 100 consecutive scheduling cycles.
 	for i := 0; i < 100; i++ {
-		_, err := f.runSchedulingCycleForPickAllPlacementType(ctx, state, placementKey, policy, clusters, nil, nil, nil, nil)
+		_, err := f.runSchedulingCycleForPickAllPlacementType(ctx, state, placementKey, policy, clusters, nil, nil, nil, nil, nil)
 		if err != nil {
 			t.Fatalf("runSchedulingCycleForPickAllPlacementType() = %v, want no error", err)
 		}

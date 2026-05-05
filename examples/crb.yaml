@@ -1,0 +1,21 @@
+apiVersion: placement.kubernetes-fleet.io/v1
+kind: ClusterResourceBinding
+metadata:
+  finalizers:
+  - kubernetes-fleet.io/scheduler-crb-cleanup
+  - kubernetes-fleet.io/work-cleanup
+  labels:
+    kubernetes-fleet.io/parent-CRP: crp-0
+  name: crp-0-kind-cluster-3-abc
+spec:
+  clusterDecision:
+    clusterName: kind-cluster-3
+    clusterScore:
+      affinityScore: 0
+      priorityScore: 0
+    reason: 'Picked manually'
+    selected: true
+  resourceSnapshotName: ""
+  schedulingPolicySnapshotName: crp-0-0
+  state: Scheduled
+  targetCluster: kind-cluster-3

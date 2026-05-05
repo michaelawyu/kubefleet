@@ -704,7 +704,7 @@ func (r *Reconciler) setPlacementStatus(
 	klog.V(2).InfoS("Updated placement status for the entire placement", "numResourcePlacementStatus", len(perClusterStatus), "placement", klog.KObj(placementObj))
 
 	// Demo-only code.
-
+	/**
 	if placementObj.GetPlacementSpec().Strategy.Type == fleetv1beta1.ExternalRolloutStrategyType {
 		stateByRollout := map[string]string{}
 		perClusterStateByRollout := map[string]map[string]string{}
@@ -816,9 +816,9 @@ func (r *Reconciler) setPlacementStatus(
 			cStatus := &placementStatus.PerClusterPlacementStatuses[idx]
 
 			cStatus.RolloutState = perClusterStateByRollout[cStatus.ClusterName]
-			klog.Infof("Watch me again: %+v", cStatus.RolloutState)
 		}
 	}
+	*/
 
 	return true, nil
 }

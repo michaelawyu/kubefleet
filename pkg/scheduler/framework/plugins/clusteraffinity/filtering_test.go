@@ -168,7 +168,7 @@ func TestPreFilter(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			state := framework.NewCycleState(nil, nil, nil)
+			state := framework.NewCycleState("", nil, nil, nil)
 			status := p.PreFilter(ctx, state, tc.ps)
 
 			if diff := cmp.Diff(
@@ -755,7 +755,7 @@ func TestFilter(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			state := framework.NewCycleState(nil, nil, nil)
+			state := framework.NewCycleState("", nil, nil, nil)
 			status := p.Filter(ctx, state, tc.ps, tc.cluster)
 
 			if diff := cmp.Diff(
