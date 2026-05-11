@@ -50,6 +50,13 @@ type Reconciler struct {
 	initMutx sync.Mutex
 }
 
+func NewReconciler(client client.Client) *Reconciler {
+	return &Reconciler{
+		Client:   client,
+		initMutx: sync.Mutex{},
+	}
+}
+
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	startTime := time.Now()
 	klog.V(2).InfoS("Rebalancer reconciliation starts", "clusterRebalancingRequest", req.NamespacedName)
@@ -76,7 +83,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Process the removal of the rebalancing request.
 	if !rebalancingReq.DeletionTimestamp.IsZero() {
 		klog.V(2).InfoS("The rebalancing request has been marked for deletion; processing its removal", "clusterRebalancingRequest", rebalancingReqRef)
-		// Not yet implemented.
 		return r.commitChanges(ctx, rebalancingReq)
 	}
 
@@ -96,7 +102,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	failurePolicy := rebalancingReq.Spec.FailurePolicy
 	if failurePolicy == nil {
 		failurePolicy = &placementv1beta1.ClusterRebalancingRequestFailurePolicy{
-			OnFailureCount: ptr.To(int32(1)),
+			MaxFailureCount: ptr.To(int32(1)),
 			MaximumWaitDurationPerMigrationAttemptSeconds: ptr.To(int32(300)),
 		}
 		rebalancingReq.Spec.FailurePolicy = failurePolicy
@@ -104,6 +110,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if rebalancingReq.Spec.MaxConcurrency == nil {
 		rebalancingReq.Spec.MaxConcurrency = ptr.To[int32](1)
 	}
+
+	// TO-DO: validate the request spec (is the cluster present and well?).
 
 	// Initialize the ClusterRebalancingRequest (if applicable).
 
@@ -117,7 +125,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	if !initialized {
 		klog.V(2).InfoS("ClusterRebalancingRequest is not initialized yet; requeuing for another attempt at initialization", "clusterRebalancingRequest", rebalancingReqRef)
-		return ctrl.Result{RequeueAfter: time.Second * 15}, nil
+		return ctrl.Result{RequeueAfter: time.Second * 3}, nil
 	}
 
 	// Wait until the scheduler acknowledges the presence of the ClusterRebalancingRequest.
@@ -128,7 +136,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	if !started {
 		klog.V(2).InfoS("Scheduler has not acknowledged the ClusterRebalancingRequest yet; requeuing for another attempt at waiting for acknowledgement", "clusterRebalancingRequest", rebalancingReqRef)
-		return ctrl.Result{RequeueAfter: time.Second * 15}, nil
+		return ctrl.Result{RequeueAfter: time.Second * 3}, nil
 	}
 
 	// Start the rebalancing process.
@@ -143,7 +151,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	case RebalancingAttemptResultInProgress:
 		klog.V(2).InfoS("The rebalancing request is still in progress; requeuing for another attempt at checking the progress", "clusterRebalancingRequest", rebalancingReqRef)
-		return ctrl.Result{RequeueAfter: time.Second * 30}, nil
+		return ctrl.Result{RequeueAfter: time.Second * 3}, nil
 	case RebalancingAttemptResultFailed:
 		klog.V(2).InfoS("The rebalancing request has failed; delete the rebalancing request to accept the current state, or roll back the request to revert to the original state", "clusterRebalancingRequest", rebalancingReqRef)
 		return ctrl.Result{}, nil
@@ -151,6 +159,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		klog.ErrorS(fmt.Errorf("unexpected rebalancing attempt result: %s", res), "Unexpected rebalancing attempt result", "rebalancingAttemptResult", res, "clusterRebalancingRequest", rebalancingReqRef)
 		return ctrl.Result{}, fmt.Errorf("unexpected rebalancing attempt result: %s", res)
 	}
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		Named("rebalancer-controller").
+		For(&placementv1beta1.ClusterRebalancingRequest{}).
+		Complete(r)
 }
 
 func (r *Reconciler) addFinalizerTo(ctx context.Context, rebalancingReq *placementv1beta1.ClusterRebalancingRequest) error {

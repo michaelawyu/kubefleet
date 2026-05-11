@@ -1,0 +1,27 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ResourcePlacement
+metadata:
+  name: rp-a2
+  namespace: app
+spec:
+  resourceSelectors:
+    - group: ""
+      kind: ConfigMap
+      name: data-a2
+      version: v1
+    - group: "apps"
+      kind: Deployment
+      name: busybox
+      version: v1
+  policy:
+    placementType: PickAll
+    affinity:
+      clusterAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          clusterSelectorTerms:
+            - labelSelector:
+                matchLabels:
+                  env: red
+  strategy:
+    type: RollingUpdate
+  

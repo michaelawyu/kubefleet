@@ -19,12 +19,14 @@ package rebalancer
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/condition"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils/rolloutmanagerclaim"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -48,7 +50,7 @@ func (r *Reconciler) initialize(
 	for k := range placements {
 		placement := placements[k]
 
-		claimed, err := r.claimRolloutManagement(ctx, placement, rebalancingReq)
+		claimed, err := r.addRolloutManagerClaim(ctx, placement, rebalancingReq)
 		if err != nil {
 			return false, err
 		}
@@ -225,6 +227,29 @@ func (r *Reconciler) identifyPlacementsFor(
 			},
 		})
 	}
+	sort.Slice(migrations, func(i, j int) bool {
+		// Sort the migrations by the placement names.
+		//
+		// a) CRPs always come before RPs;
+		// b) within CRPs, sort by their names;
+		// c) within RPs, sort by their namespaces and then names.
+		placementI := migrations[i].PlacementReference
+		placementJ := migrations[j].PlacementReference
+
+		switch {
+		case placementI.Namespace == "" && placementJ.Namespace != "":
+			return true
+		case placementI.Namespace != "" && placementJ.Namespace == "":
+			return false
+		case placementI.Namespace == "" && placementJ.Namespace == "":
+			return placementI.Name < placementJ.Name
+		default:
+			if placementI.Namespace == placementJ.Namespace {
+				return placementI.Name < placementJ.Name
+			}
+			return placementI.Namespace < placementJ.Namespace
+		}
+	})
 	rebalancingReq.Status.Migrations = migrations
 
 	// Refresh the status.
@@ -235,41 +260,32 @@ func (r *Reconciler) identifyPlacementsFor(
 	return placements, nil
 }
 
-func (r *Reconciler) claimRolloutManagement(
+func (r *Reconciler) addRolloutManagerClaim(
 	ctx context.Context,
 	placement placementv1beta1.PlacementObj,
 	rebalancingReq *placementv1beta1.ClusterRebalancingRequest,
 ) (bool, error) {
 	// Check if a claim has been made.
-	rolloutManagers := placement.GetPlacementStatus().RolloutManagedBy
-	switch {
-	case len(rolloutManagers) == 0:
-		// No claim has been made. Add the rebalancing request as the exclusive rollout manager.
-		rolloutManagers = append(rolloutManagers, placementv1beta1.RolloutManagerReference{
-			ObjectReference: corev1.ObjectReference{
-				Kind: "ClusterRebalancingRequest",
-				Name: rebalancingReq.Name,
-				UID:  rebalancingReq.UID,
-			},
-			Mode: placementv1beta1.RolloutManagerModeExclusive,
-		})
-	case len(rolloutManagers) == 1 && rolloutManagers[0].Name == rebalancingReq.Name && rolloutManagers[0].UID == rebalancingReq.UID:
-		// A claim has been made under this rebalancing request's name. No further action needed.
-		return true, nil
-	default:
-		// A claim has been made under a different object, or there are multiple claims.
-		//
-		// Wait and retry later.
+	wantRolloutManagerRef := placementv1beta1.RolloutManagerReference{
+		ObjectReference: corev1.ObjectReference{
+			Kind: "ClusterRebalancingRequest",
+			Name: rebalancingReq.Name,
+			UID:  rebalancingReq.UID,
+		},
+		Mode: placementv1beta1.RolloutManagerModeExclusive,
+	}
+	isClaimed, isRefreshNeeded := rolloutmanagerclaim.ClaimAsRolloutManager(placement, &wantRolloutManagerRef)
+	if !isClaimed {
 		return false, nil
 	}
 
-	// Update the placement with the new claim.
-	placement.GetPlacementStatus().RolloutManagedBy = rolloutManagers
-	if err := r.Client.Status().Update(ctx, placement); err != nil {
-		klog.ErrorS(err, "Failed to add claim to the placement",
-			"placement", klog.KObj(placement), "clusterRebalancingRequest", klog.KObj(rebalancingReq))
-		return false, fmt.Errorf("Failed to add claim to the placement")
+	// Update the placement with the new claim if needed.
+	if isRefreshNeeded {
+		if err := r.Client.Status().Update(ctx, placement); err != nil {
+			klog.ErrorS(err, "Failed to add claim to the placement",
+				"placement", klog.KObj(placement), "clusterRebalancingRequest", klog.KObj(rebalancingReq))
+			return false, fmt.Errorf("Failed to add claim to the placement")
+		}
 	}
-
 	return true, nil
 }

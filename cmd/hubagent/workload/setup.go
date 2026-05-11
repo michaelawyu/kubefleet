@@ -40,6 +40,7 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/overrider"
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/placement"
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/placementwatcher"
+	"github.com/kubefleet-dev/kubefleet/pkg/controllers/rebalancer"
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/resourcechange"
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/rollout"
 	"github.com/kubefleet-dev/kubefleet/pkg/controllers/schedulingpolicysnapshot"
@@ -52,6 +53,7 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/scheduler/profile"
 	"github.com/kubefleet-dev/kubefleet/pkg/scheduler/queue"
 	schedulerbindingwatcher "github.com/kubefleet-dev/kubefleet/pkg/scheduler/watchers/binding"
+	"github.com/kubefleet-dev/kubefleet/pkg/scheduler/watchers/clusterrebalancingrequest"
 	"github.com/kubefleet-dev/kubefleet/pkg/scheduler/watchers/membercluster"
 	schedulerplacementwatcher "github.com/kubefleet-dev/kubefleet/pkg/scheduler/watchers/placement"
 	schedulerspswatcher "github.com/kubefleet-dev/kubefleet/pkg/scheduler/watchers/schedulingpolicysnapshot"
@@ -86,6 +88,7 @@ var (
 		placementv1beta1.GroupVersion.WithKind(placementv1beta1.ResourceOverrideKind),
 		placementv1beta1.GroupVersion.WithKind(placementv1beta1.ResourceOverrideSnapshotKind),
 		placementv1beta1.GroupVersion.WithKind(placementv1beta1.ClusterResourcePlacementStatusKind),
+		placementv1beta1.GroupVersion.WithKind(placementv1beta1.ClusterRebalancingRequestKind),
 	}
 
 	// There's a prerequisite that v1Beta1RequiredGVKs must be installed too.
@@ -413,6 +416,16 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 			return err
 		}
 
+		klog.Info("Setting up the clusterRebalancingRequest watcher for scheduler")
+		rebalancingReqWatcherReconciler := clusterrebalancingrequest.Reconciler{
+			Client:             mgr.GetClient(),
+			SchedulerWorkQueue: defaultSchedulingQueue,
+		}
+		if err := rebalancingReqWatcherReconciler.SetupWithManager(mgr); err != nil {
+			klog.ErrorS(err, "Unable to set up clusterRebalancingRequest watcher for scheduler")
+			return err
+		}
+
 		if opts.FeatureFlags.EnableResourcePlacementAPIs {
 			klog.Info("Setting up the resourcePlacement watcher for scheduler")
 			if err := (&schedulerplacementwatcher.Reconciler{
@@ -491,6 +504,14 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 				klog.ErrorS(err, "unable to set up ClusterProfile controller")
 				return err
 			}
+		}
+
+		// Set up the rebalancer.
+		klog.Info("Setting up the rebalancer controller")
+		rebalancerReconciler := rebalancer.NewReconciler(mgr.GetClient())
+		if err = rebalancerReconciler.SetupWithManager(mgr); err != nil {
+			klog.ErrorS(err, "unable to set up the rebalancer controller")
+			return err
 		}
 	}
 

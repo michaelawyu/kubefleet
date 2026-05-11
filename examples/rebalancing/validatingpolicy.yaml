@@ -1,0 +1,26 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: block-busybox-image
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      operations: ["CREATE"]
+      resources: ["pods"]
+  validations:
+  - expression: >
+      !object.spec.containers.exists(c, c.image.contains('busybox')) &&
+      !object.spec.initContainers.orValue([]).exists(c, c.image.contains('busybox')) &&
+      !object.spec.ephemeralContainers.orValue([]).exists(c, c.image.contains('busybox'))
+    message: "Pods using an image containing 'busybox' are not allowed."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: block-busybox-image-binding
+spec:
+  policyName: block-busybox-image
+  validationActions: [Deny]

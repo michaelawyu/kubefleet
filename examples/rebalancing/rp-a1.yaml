@@ -1,0 +1,22 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ResourcePlacement
+metadata:
+  name: rp-a1
+  namespace: app
+spec:
+  resourceSelectors:
+    - group: ""
+      kind: ConfigMap
+      name: data-a1
+      version: v1
+  policy:
+    placementType: PickAll
+    affinity:
+      clusterAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          clusterSelectorTerms:
+            - labelSelector:
+                matchLabels:
+                  env: red
+  strategy:
+    type: RollingUpdate

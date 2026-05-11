@@ -1,0 +1,7 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ClusterRebalancingRequest
+metadata:
+  name: example-1
+spec:
+  from: kind-cluster-1
+  to: kind-cluster-2

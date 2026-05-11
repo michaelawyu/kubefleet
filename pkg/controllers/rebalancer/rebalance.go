@@ -19,6 +19,7 @@ package rebalancer
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +33,7 @@ import (
 
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/condition"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils/parallelizer"
 )
 
 type workerResult string
@@ -54,8 +56,9 @@ func surge(
 	ctx context.Context,
 	client client.Client,
 	bindingRef *corev1.ObjectReference,
+	isRollingBack bool,
 ) (err error, isRetriable bool) {
-	// Retrieve the to binding.
+	// Retrieve the binding.
 	if bindingRef == nil {
 		// Normally this should never happen.
 		return fmt.Errorf("the reference of the binding to surge is nil"), false
@@ -63,49 +66,60 @@ func surge(
 
 	var binding placementv1beta1.BindingObj
 	if len(bindingRef.Namespace) == 0 {
-		// The to binding is cluster-scoped (ClusterResourceBinding).
+		// The binding is cluster-scoped (ClusterResourceBinding).
 		binding = &placementv1beta1.ClusterResourceBinding{}
 		if err := client.Get(ctx, types.NamespacedName{Name: bindingRef.Name}, binding); err != nil {
 			if apierrors.IsNotFound(err) {
-				// The to binding cannot be found; fail the attempt now.
+				// The binding cannot be found; fail the attempt now.
 				klog.V(2).InfoS(
-					"The to binding cannot be found; the reference might be incorrect, or the binding has been deleted unexpectedly",
-					"binding", klog.KObj(binding),
-					"toCluster", bindingRef.Name)
+					"The binding to surge cannot be found; the reference might be incorrect, or the binding has been deleted unexpectedly",
+					"bindingRef", bindingRef)
 				return nil, false
 			}
-			return fmt.Errorf("failed to retrieve the to binding: %w", err), false
+			return fmt.Errorf("failed to retrieve the binding to surge: %w", err), false
 		}
 	} else {
-		// The to binding is namespace-scoped (ResourceBinding).
+		// The binding is namespace-scoped (ResourceBinding).
 		binding = &placementv1beta1.ResourceBinding{}
 		if err := client.Get(ctx, types.NamespacedName{Namespace: bindingRef.Namespace, Name: bindingRef.Name}, binding); err != nil {
 			if apierrors.IsNotFound(err) {
-				// The to binding cannot be found; fail the attempt now.
+				// The binding cannot be found; fail the attempt now.
 				klog.V(2).InfoS(
-					"The to binding cannot be found; the reference might be incorrect, or the binding has been deleted unexpectedly",
-					"binding", klog.KObj(binding),
-					"toCluster", fmt.Sprintf("%s/%s", bindingRef.Namespace, bindingRef.Name))
+					"The binding to surge cannot be found; the reference might be incorrect, or the binding has been deleted unexpectedly",
+					"bindingRef", bindingRef)
 				return nil, false
 			}
-			return fmt.Errorf("failed to retrieve the to binding: %w", err), false
+			return fmt.Errorf("failed to retrieve the binding to surge: %w", err), false
 		}
 	}
 
+	targetCluster := binding.GetBindingSpec().TargetCluster
 	if len(binding.GetBindingSpec().ResourceSnapshotName) == 0 {
-		// The to binding has no resource snapshot. No action needed as it cannot be surged; consider
+		// The binding has no resource snapshot. No action needed as it cannot be surged; consider
 		// the attempt as successful.
 		//
-		// This can happen when:
-		// a) the to binding exists before the rebalancing request is created/initialized, but it is of the scheduled state;
-		//    KubeFleet should wait for a rollout attempt to assign the binding a resource snapshot, which is separate from
-		//    the rebalancing process.
-		// b) the to binding does not exist when the rebalancing request is created/initialized, but the from binding
-		//    has no resource snapshot associated (it is of the scheduled state), as a result there is no resource to migrate
-		//    at all.
-		klog.V(2).InfoS("The to binding has no resource snapshot associated; no surge needed",
+		// This can happen when the to binding exists before the rebalancing request is
+		// created/initialized, but it is of the scheduled state; KubeFleet should wait for a
+		// rollout attempt to assign the binding a resource snapshot, which is separate from
+		// the rebalancing process.
+		klog.V(2).InfoS("The binding to surge has no resource snapshot associated; no surge needed",
 			"binding", klog.KObj(binding),
-			"toCluster", bindingRef.Name)
+			"toSurgeCluster", targetCluster)
+		return nil, true
+	}
+
+	_, isProvisional := binding.GetAnnotations()[placementv1beta1.ProvisionalBindingAnnotationKey]
+	if !isRollingBack && !isProvisional {
+		// The binding is not a provisional one. When migrating resources to a new cluster,
+		// the surge op only applies to its provisional binding, which is created by the scheduler
+		// specifically for the migration purpose. If a binding for the to cluster already
+		// exists before the rebalancing request is sent, KubeFleet will leave it to the rollout
+		// controller to decide when resources will be placed on the to cluster.
+		klog.V(2).InfoS(
+			"The binding to surge is not a provisional one and the rebalancing request is not in rollback mode; no surge needed",
+			"binding", klog.KObj(binding),
+			"toSurgeCluster", targetCluster,
+		)
 		return nil, true
 	}
 
@@ -116,11 +130,11 @@ func surge(
 		delete(annotations, placementv1beta1.WithdrawnBindingAnnotationKey)
 		binding.SetAnnotations(annotations)
 		if err := client.Update(ctx, binding); err != nil {
-			return fmt.Errorf("failed to update the to binding: %w", err), true
+			return fmt.Errorf("failed to update the binding to surge: %w", err), true
 		}
 	}
 
-	rolloutStartedCond := meta.FindStatusCondition(binding.GetBindingStatus().Conditions, string(placementv1beta1.ClusterResourcePlacementRolloutStartedConditionType))
+	rolloutStartedCond := meta.FindStatusCondition(binding.GetBindingStatus().Conditions, string(placementv1beta1.ResourceBindingRolloutStarted))
 	if !condition.IsConditionStatusTrue(rolloutStartedCond, binding.GetGeneration()) {
 		meta.SetStatusCondition(&binding.GetBindingStatus().Conditions, metav1.Condition{
 			Type:               string(placementv1beta1.ResourceBindingRolloutStarted),
@@ -130,15 +144,15 @@ func surge(
 			ObservedGeneration: binding.GetGeneration(),
 		})
 		if err := client.Status().Update(ctx, binding); err != nil {
-			return fmt.Errorf("failed to update the to binding status: %w", err), true
+			return fmt.Errorf("failed to update the status of the binding to surge: %w", err), true
 		}
 	}
 
-	// Wait until the to binding becomes available.
+	// Wait until the binding to surge becomes available.
 	availableCond := meta.FindStatusCondition(binding.GetBindingStatus().Conditions, string(placementv1beta1.ResourceBindingAvailable))
 	if !condition.IsConditionStatusTrue(availableCond, binding.GetGeneration()) {
-		// The to binding is not available yet; consider this attempt as still in progress.
-		return fmt.Errorf("the binding is not yet available"), true
+		// The binding to surge is not available yet; consider this attempt as still in progress.
+		return fmt.Errorf("the binding to surge is not yet available"), true
 	}
 
 	return nil, true
@@ -148,6 +162,7 @@ func drain(
 	ctx context.Context,
 	client client.Client,
 	bindingRef *corev1.ObjectReference,
+	isRollingBack bool,
 ) (err error, isRetriable bool) {
 	// Retrieve the from binding.
 	if bindingRef == nil {
@@ -161,37 +176,52 @@ func drain(
 		binding = &placementv1beta1.ClusterResourceBinding{}
 		if err := client.Get(ctx, types.NamespacedName{Name: bindingRef.Name}, binding); err != nil {
 			if apierrors.IsNotFound(err) {
-				// The from binding is already gone. No further action needed; consider the
-				// attempt as successful.
-				klog.V(2).InfoS("The from binding cannot be found; no further action needed",
-					"binding", klog.KObj(binding),
-					"fromCluster", bindingRef.Name)
-				return nil, false
+				// The from binding is missing. Normally this should not happen.
+				wrappedErr := fmt.Errorf("the binding to drain cannot be found")
+				klog.ErrorS(wrappedErr,
+					"Cannot complete the drain attempt",
+					"bindingRef", bindingRef)
+				return wrappedErr, false
 			}
-			return fmt.Errorf("failed to retrieve the from binding: %w", err), true
+			return fmt.Errorf("failed to retrieve the binding to drain: %w", err), true
 		}
 	} else {
 		// The from binding is namespace-scoped (ResourceBinding).
 		binding = &placementv1beta1.ResourceBinding{}
 		if err := client.Get(ctx, types.NamespacedName{Namespace: bindingRef.Namespace, Name: bindingRef.Name}, binding); err != nil {
 			if apierrors.IsNotFound(err) {
-				// The from binding is already gone. No further action needed; consider the
-				// attempt as successful.
-				klog.V(2).InfoS("The from binding cannot be found; no further action needed",
-					"binding", klog.KObj(binding),
-					"fromCluster", bindingRef.Name)
-				return nil, false
+				// The from binding is missing. Normally this should not happen.
+				wrappedErr := fmt.Errorf("the binding to drain cannot be found")
+				klog.ErrorS(wrappedErr,
+					"Cannot complete the drain attempt",
+					"bindingRef", bindingRef)
+				return wrappedErr, false
 			}
-			return fmt.Errorf("failed to retrieve the from binding: %w", err), true
+			return fmt.Errorf("failed to retrieve the binding to drain: %w", err), true
 		}
 	}
 
+	targetCluster := binding.GetBindingSpec().TargetCluster
 	if len(binding.GetBindingSpec().ResourceSnapshotName) == 0 {
 		// The from binding has no resource snapshot. No action needed as there is no resource
 		// to move; consider the attempt as successful.
-		klog.V(2).InfoS("The from binding has no resource snapshot associated; no drain needed",
+		klog.V(2).InfoS("The binding to drain has no resource snapshot associated; no drain needed",
 			"binding", klog.KObj(binding),
-			"fromCluster", bindingRef.Name)
+			"toDrainCluster", targetCluster)
+		return nil, true
+	}
+
+	_, isProvisional := binding.GetAnnotations()[placementv1beta1.ProvisionalBindingAnnotationKey]
+	if isRollingBack && !isProvisional {
+		// The binding is not a provisional one. When rolling back a migration, the drain op only
+		// applies to the provisional binding that is created by the scheduler for the migration purpose.
+		// If the binding to drain exists before the rebalancing request is created, no action
+		// is needed for the drain op.
+		klog.V(2).InfoS(
+			"The binding to drain is not a provisional one and the rebalancing request is in rollback mode; no drain needed",
+			"binding", klog.KObj(binding),
+			"toDrainCluster", targetCluster,
+		)
 		return nil, true
 	}
 
@@ -204,41 +234,38 @@ func drain(
 		annotations[placementv1beta1.WithdrawnBindingAnnotationKey] = "true"
 		binding.SetAnnotations(annotations)
 		if err := client.Update(ctx, binding); err != nil {
-			return fmt.Errorf("failed to update the from binding: %w", err), true
+			return fmt.Errorf("failed to update the binding to drain: %w", err), true
 		}
-		return nil, true
 	}
 
 	// Wait until the from binding has the resources withdrawn (i.e., the work generator finalizer
 	// has been removed).
 	if controllerutil.ContainsFinalizer(binding, placementv1beta1.WorkFinalizer) {
 		// The withdrawal is still being processed by the work generator; consider this attempt as still in progress.
-		return fmt.Errorf("the from binding is still withdrawing resources"), true
+		return fmt.Errorf("the binding to drain is still withdrawing resources"), true
 	}
 
 	return nil, true
 }
 
 // TO-DO: persist the timing information.
-func migrate(
+func migrateUntil(
 	ctx context.Context,
 	client client.Client,
 	rebalancingReq *placementv1beta1.ClusterRebalancingRequest,
 	bundle *rebalancingProcessingBundle,
 	isRollingBack bool,
-	resCh chan<- *rebalancingProcessingBundle,
 ) {
 	// Skip the bundle if there is no binding references populated. As mentioned in the starting phase, this
 	// can happen when the rebalancer observes an inconsistent state.
 	if bundle.migration.FromClusterBindingReference == nil || bundle.migration.ToClusterBindingReference == nil {
 		bundle.res = WorkerResultSkipped
-		wrappedErr := fmt.Errorf("the migration has incomplete binding references; this might be a sign of cache inconsistency; skip this migration attempt for now")
-		klog.ErrorS(wrappedErr,
-			"Skipping the migration attempt as it has incomplete binding references",
+		wrappedErr := fmt.Errorf("the migration has incomplete binding references; no migration is needed")
+		klog.InfoS(
+			"The migration has incomplete binding references; no migration is needed",
 			"workerIdx", bundle.assignedWorkerIdx,
 			"rebalancingRequest", klog.KObj(rebalancingReq))
 		bundle.lastKnownErr = wrappedErr
-		resCh <- bundle
 		return
 	}
 
@@ -263,21 +290,20 @@ func migrate(
 				"workerIdx", bundle.assignedWorkerIdx,
 				"rebalancingRequest", klog.KObj(rebalancingReq))
 			bundle.lastKnownErr = wrappedErr
-			resCh <- bundle
 			return
 		default:
 			// Perform the actual migration.
 			switch {
 			case rebalancingReq.Spec.Mode == "SurgeFirst":
 				// First surge, then drain.
-				if err, isRetriable := surge(ctx, client, toBindingRef); err != nil {
+				if err, isRetriable := surge(childCtx, client, toBindingRef, isRollingBack); err != nil {
 					if isRetriable {
 						// The error is retriable; retry after a short wait.
 						klog.V(2).ErrorS(err,
 							"Surge attempt failed with retriable error; retrying after a short wait",
 							"workerIdx", bundle.assignedWorkerIdx,
 							"toBindingRef", toBindingRef)
-						time.Sleep(time.Second * 10)
+						time.Sleep(time.Second * 2)
 						continue
 					}
 					// The error is not retriable; consider the attempt as failed.
@@ -287,18 +313,17 @@ func migrate(
 						"toBindingRef", toBindingRef)
 					bundle.res = WorkerResultFailed
 					bundle.lastKnownErr = fmt.Errorf("surge attempted failed with non-retriable error: %s", err)
-					resCh <- bundle
 					return
 				}
 
-				if err, isRetriable := drain(ctx, client, fromBindingRef); err != nil {
+				if err, isRetriable := drain(childCtx, client, fromBindingRef, isRollingBack); err != nil {
 					if isRetriable {
 						// The error is retriable; retry after a short wait.
 						klog.ErrorS(err,
 							"Drain attempt failed with retriable error; retrying after a short wait",
 							"workerIdx", bundle.assignedWorkerIdx,
 							"fromBindingRef", fromBindingRef)
-						time.Sleep(time.Second * 10)
+						time.Sleep(time.Second * 2)
 						continue
 					}
 					// The error is not retriable; consider the attempt as failed.
@@ -308,24 +333,22 @@ func migrate(
 						"fromBindingRef", fromBindingRef)
 					bundle.res = WorkerResultFailed
 					bundle.lastKnownErr = fmt.Errorf("drain attempted failed with non-retriable error: %s", err)
-					resCh <- bundle
 					return
 				}
 
 				// The surge and drain attempts have both succeeded. Mark the migration attempt as completed.
 				bundle.res = WorkerResultCompleted
-				resCh <- bundle
 				return
 			case rebalancingReq.Spec.Mode == "DrainFirst":
 				// First drain, then surge.
-				if err, isRetriable := drain(ctx, client, fromBindingRef); err != nil {
+				if err, isRetriable := drain(childCtx, client, fromBindingRef, isRollingBack); err != nil {
 					if isRetriable {
 						// The error is retriable; retry after a short wait.
 						klog.ErrorS(err,
 							"Drain attempt failed with retriable error; retrying after a short wait",
 							"workerIdx", bundle.assignedWorkerIdx,
 							"fromBindingRef", fromBindingRef)
-						time.Sleep(time.Second * 10)
+						time.Sleep(time.Second * 2)
 						continue
 					}
 					// The error is not retriable; consider the attempt as failed.
@@ -335,18 +358,17 @@ func migrate(
 						"fromBindingRef", fromBindingRef)
 					bundle.res = WorkerResultFailed
 					bundle.lastKnownErr = fmt.Errorf("drain attempted failed with non-retriable error: %s", err)
-					resCh <- bundle
 					return
 				}
 
-				if err, isRetriable := surge(ctx, client, toBindingRef); err != nil {
+				if err, isRetriable := surge(childCtx, client, toBindingRef, isRollingBack); err != nil {
 					if isRetriable {
 						// The error is retriable; retry after a short wait.
 						klog.ErrorS(err,
 							"Surge attempt failed with retriable error; retrying after a short wait",
 							"workerIdx", bundle.assignedWorkerIdx,
 							"toBindingRef", toBindingRef)
-						time.Sleep(time.Second * 10)
+						time.Sleep(time.Second * 2)
 						continue
 					}
 					// The error is not retriable; consider the attempt as failed.
@@ -356,13 +378,11 @@ func migrate(
 						"toBindingRef", toBindingRef)
 					bundle.res = WorkerResultFailed
 					bundle.lastKnownErr = fmt.Errorf("surge attempted failed with non-retriable error: %s", err)
-					resCh <- bundle
 					return
 				}
 
 				// The drain and surge attempts have both succeeded. Mark the migration attempt as completed.
 				bundle.res = WorkerResultCompleted
-				resCh <- bundle
 				return
 			default:
 				// An unsupported mode has been specified; consider this as a failure.
@@ -376,7 +396,6 @@ func migrate(
 					"rebalancingMode", rebalancingReq.Spec.Mode,
 					"rebalancingRequest", klog.KObj(rebalancingReq))
 				bundle.lastKnownErr = wrappedErr
-				resCh <- bundle
 				return
 			}
 		}
@@ -407,122 +426,69 @@ func (r *Reconciler) rebalancePlacements(
 
 	// Set up the work coordinator.
 	workerCnt := int(*rebalancingReq.Spec.MaxConcurrency)
-	tokens := make(chan int, workerCnt)
-	// Pre-populate tokens so that workers can start immediately.
-	for i := 0; i < workerCnt; i++ {
-		tokens <- i
-	}
-	resCh := make(chan *rebalancingProcessingBundle, workerCnt)
+	parallelizer := parallelizer.NewParallelizer(workerCnt)
 
-	bundleIdx := 0
 	childCtx, childCancel := context.WithCancel(ctx)
-	failureCnt := 0
-	failurePolicyTriggered := false
-	completedWorkerCnt := 0
+	failureCnt := &atomic.Int32{}
+	maxFailureCnt := int32(*rebalancingReq.Spec.FailurePolicy.MaxFailureCount)
+	failurePolicyTriggered := &atomic.Bool{}
 	defer childCancel()
 
-	doWork := func(
-		ctx context.Context,
-		client client.Client,
-		rebalancingReq *placementv1beta1.ClusterRebalancingRequest,
-		bundle *rebalancingProcessingBundle,
-		resCh chan<- *rebalancingProcessingBundle,
-	) {
+	// This variable is set here so that the doWork function can capture it and call the client.
+	innerClient := r.Client
+	doWork := func(idx int) {
+		bundle := &bundles[idx]
+		bundle.assignedWorkerIdx = idx
+
 		// Return the last known result if the bundle has already been processed.
 		completedCond := meta.FindStatusCondition(bundle.migration.Conditions, placementv1beta1.RebalancingMigrationAttemptConditionTypeCompleted)
 		if condition.IsConditionStatusTrue(completedCond, rebalancingReq.Generation) {
 			if completedCond.Reason == placementv1beta1.RebalancingMigrationAttemptCompletedCondReasonSkipped {
 				bundle.res = WorkerResultSkipped
+				klog.V(2).InfoS(
+					"A bundle has been processed with a skipped result",
+					"workerIdx", bundle.assignedWorkerIdx,
+					"rebalancingRequest", klog.KObj(rebalancingReq))
 			} else {
 				bundle.res = WorkerResultCompleted
+				klog.V(2).InfoS(
+					"A bundle has been processed with a completed result",
+					"workerIdx", bundle.assignedWorkerIdx,
+					"rebalancingRequest", klog.KObj(rebalancingReq))
 			}
-			resCh <- bundle
 			return
 		}
 		if condition.IsConditionStatusFalse(completedCond, rebalancingReq.Generation) {
 			bundle.res = WorkerResultFailed
-			resCh <- bundle
 			return
 		}
 
-		migrate(ctx, client, rebalancingReq, bundle, false, resCh)
-	}
+		migrateUntil(childCtx, innerClient, rebalancingReq, bundle, false)
 
-WorkCoordinatorLoop:
-	for {
-		select {
-		case <-childCtx.Done():
-			// The main context or the child context has been cancelled; exit the loop immediately.
-			break WorkCoordinatorLoop
-		case token := <-tokens:
-			// A worker is available; assign a bundle to it for processing.
-			if bundleIdx >= len(bundles) {
-				// A worker has become available, but there is no more bundle to process. Mark the
-				// worker as completed.
-				completedWorkerCnt++
-			}
-			if completedWorkerCnt >= workerCnt {
-				// All workers have completed processing; exit the loop.
-				break WorkCoordinatorLoop
-			}
-			if failureCnt >= int(*rebalancingReq.Spec.FailurePolicy.OnFailureCount) {
-				// Too many failures have been observed; cancel the child context to stop all ongoing work, and exit the loop.
+		if bundle.res == WorkerResultFailed {
+			// A failure has been observed when processing the bundle.
+			//
+			// Check if the failure is tolerable based on the failure policy; if not, cancel the whole process.
+			updatedFailureCnt := failureCnt.Add(1)
+			if updatedFailureCnt >= maxFailureCnt {
 				childCancel()
-				failurePolicyTriggered = true
-				break WorkCoordinatorLoop
-			}
-
-			// Assign a worker to process the bundle.
-			bundle := &bundles[bundleIdx]
-			bundle.assignedWorkerIdx = token
-			bundleIdx++
-
-			go doWork(childCtx, r.Client, rebalancingReq, bundle, resCh)
-		case bundle := <-resCh:
-			// A worker has completed processing a bundle; inspect the result and decide whether to continue or not.
-			switch bundle.res {
-			case WorkerResultCompleted:
-				// Return the token so that the worker can start processing another bundle.
-				tokens <- bundle.assignedWorkerIdx
-
+				failurePolicyTriggered.Store(true)
 				klog.V(2).InfoS(
-					"A bundle has been processed successfully",
-					"workerIdx", bundle.assignedWorkerIdx,
+					"Too many failures have been observed when processing bundles; cancelling the whole process based on the failure policy",
+					"observedFailureCount", updatedFailureCnt,
+					"failureThreshold", maxFailureCnt,
 					"rebalancingRequest", klog.KObj(rebalancingReq))
-			case WorkerResultFailed:
-				// A failure has been reported when processing the bundle.
-				failureCnt++
-
-				klog.V(2).InfoS(
-					"A failure has been observed when processing a bundle; the failure is tolerable, but if too many failures are observed the whole process will be cancelled",
-					"observedFailureCount", failureCnt,
-					"failureThreshold", *rebalancingReq.Spec.FailurePolicy.OnFailureCount,
-					"error", bundle.lastKnownErr)
-				// Return the token so that the worker can start processing another bundle.
-				tokens <- bundle.assignedWorkerIdx
-			case WorkerResultSkipped:
-				// The bundle has been skipped. This is considered as a successful attempt.
-				// Return the token so that the worker can start processing another bundle.
-				tokens <- bundle.assignedWorkerIdx
-
-				klog.V(2).InfoS(
-					"A bundle has been skipped",
-					"workerIdx", bundle.assignedWorkerIdx,
-					"rebalancingRequest", klog.KObj(rebalancingReq),
-					"error", bundle.lastKnownErr)
-			default:
-				// An unexpected result has been observed; this should never happen. Consider this as a failure.
-				failureCnt++
-
-				klog.V(2).ErrorS(fmt.Errorf("an unexpected worker result has been observed: %s", bundle.res),
-					"observedFailureCount", failureCnt,
-					"failureThreshold", *rebalancingReq.Spec.FailurePolicy.OnFailureCount,
-					"unexpectedWorkerResult", bundle.res)
-				// Return the token so that the worker can start processing another bundle.
-				tokens <- bundle.assignedWorkerIdx
+				return
 			}
 		}
+		klog.V(2).Info(
+			"A bundle has been processed",
+			"result", bundle.res,
+			"workerIdx", bundle.assignedWorkerIdx,
+			"rebalancingRequest", klog.KObj(rebalancingReq))
 	}
+
+	parallelizer.ParallelizeUntil(childCtx, len(bundles), doWork, "Migrating")
 
 	// Based on the processing results, refresh the rebalancing request status.
 	completionCnt := 0
@@ -571,13 +537,13 @@ WorkCoordinatorLoop:
 	rebalancingReq.Status.Migrations = migrations
 
 	switch {
-	case failurePolicyTriggered:
+	case failurePolicyTriggered.Load():
 		// The failure policy has been triggered; handle the request per the policy action.
 		completedCond = &metav1.Condition{
 			Type:               placementv1beta1.ClusterRebalancingRequestConditionTypeCompleted,
 			Status:             metav1.ConditionFalse,
 			Reason:             placementv1beta1.ClusterRebalancingReqCompletedCondReasonFailed,
-			Message:            fmt.Sprintf("The rebalancing process has been cancelled as the number of failed migration attempts has reached the failure threshold (%d)", *rebalancingReq.Spec.FailurePolicy.OnFailureCount),
+			Message:            fmt.Sprintf("The rebalancing process has been cancelled as the number of failed migration attempts has reached the failure threshold (%d)", *rebalancingReq.Spec.FailurePolicy.MaxFailureCount),
 			ObservedGeneration: rebalancingReq.Generation,
 		}
 		meta.SetStatusCondition(&rebalancingReq.Status.Conditions, *completedCond)

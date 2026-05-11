@@ -65,8 +65,7 @@ const (
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
 type ClusterRebalancingRequest struct {
-	metav1.TypeMeta `json:",inline"`
-	// Assumption: the name of a ClusterRebalancingRequest is the same as its target ClusterResourcePlacement.
+	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// The desired state of the ClusterRebalancingRequest.
@@ -146,23 +145,26 @@ type ClusterRebalancingRequestSpec struct {
 }
 
 type ClusterRebalancingRequestFailurePolicy struct {
-	// Trigger the action if the number of placements that fail to be migrated reaches this threshold.
+	// The maximum number of failed migration attempts allowed before the rebalancing process is cancelled.
+	//
+	// If this threshold is reached, KubeFleet will suspend the rebalancing process. Delete the request to accept the current
+	// state, or roll back the request to revert to the original state.
 	//
 	// The default value is 1. This field is immutable after the request is created.
 	// +optional
-	// +kubebuilder:default="1"
+	// +kubebuilder:default=1
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=10
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="onFailureCount cannot be changed once set"
-	OnFailureCount *int32 `json:"onMigrationFailures,omitempty"`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="maxFailureCount cannot be changed once set"
+	MaxFailureCount *int32 `json:"maxFailureCount,omitempty"`
 
 	// Consider a placement migration attempt as failed if it does not complete within this duration.
 	//
 	// The default value is 300. This field is immutable after the request is created.
 	// +optional
 	// +kubebuilder:default=300
-	// +kubebuilder:minimum=5
-	// +kubebuilder:maximum=3600
+	// +kubebuilder:validation:Minimum=5
+	// +kubebuilder:validation:Maximum=3600
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="maximumWaitDurationPerMigrationAttemptSeconds cannot be changed once set"
 	MaximumWaitDurationPerMigrationAttemptSeconds *int32 `json:"maximumWaitDurationPerMigrationAttemptSeconds,omitempty"`
 }

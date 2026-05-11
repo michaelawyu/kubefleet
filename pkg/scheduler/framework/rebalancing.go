@@ -130,7 +130,7 @@ func (f *framework) manipulateBindingsForRebalancingRequest(
 	case toBindingCnt > 1:
 		// Retry with backoff.
 		return fmt.Errorf("multiple bindings are found for the rebalancing request to cluster %s: %d", rebalancingReq.Spec.To, toBindingCnt)
-	case fromBinding == nil || !fromBinding.GetDeletionTimestamp().IsZero():
+	case fromBinding == nil || !fromBinding.GetDeletionTimestamp().IsZero() || fromBinding.GetBindingSpec().ResourceSnapshotName == "":
 		// There exists a corner case where a binding might exist when the rebalancing request is being
 		// initialized, but disappears (or has been marked for deletion) before the scheduler
 		// acknowledges the request. In this case, the scheduler would still acknowledge the request,
@@ -156,21 +156,8 @@ func (f *framework) manipulateBindingsForRebalancingRequest(
 		return fmt.Errorf("the to binding exists and has been marked for deletion")
 	}
 
-	// Process the from binding.
-	fromBindingAnnotations := fromBinding.GetAnnotations()
-	if fromBindingAnnotations == nil {
-		fromBindingAnnotations = map[string]string{}
-	}
-	fromBindingAnnotations[placementv1beta1.ReservedBindingAnnotationKey] = strconv.FormatBool(true)
-	fromBinding.SetAnnotations(fromBindingAnnotations)
-	if err := f.client.Update(ctx, fromBinding); err != nil {
-		return fmt.Errorf("failed to mark the from binding as bound: %w", err)
-	}
-
 	if toBinding != nil {
 		// Process the to binding if it exists.
-
-		// Mark the binding as bound.
 		toBindingAnnotations := toBinding.GetAnnotations()
 		if toBindingAnnotations == nil {
 			toBindingAnnotations = map[string]string{}
@@ -209,7 +196,9 @@ func (f *framework) manipulateBindingsForRebalancingRequest(
 		toBinding.GetBindingSpec().State = placementv1beta1.BindingStateBound
 		toBinding.GetBindingSpec().ApplyStrategy = fromBinding.GetBindingSpec().ApplyStrategy.DeepCopy()
 		toBinding.GetBindingSpec().SchedulingPolicySnapshotName = fromBinding.GetBindingSpec().SchedulingPolicySnapshotName
-		// Note that the resource snapshot might be an empty value on both bindings.
+		// Note that for the provisional binding, the resource snapshot is consistent with that of the
+		// from binding, and at this checkpoint it is guaranteed that the resource snapshot will not
+		// be empty.
 		toBinding.GetBindingSpec().ResourceSnapshotName = fromBinding.GetBindingSpec().ResourceSnapshotName
 		// TO-DO (chenyu1): support overrides.
 		toBinding.GetBindingSpec().ClusterDecision = placementv1beta1.ClusterDecision{
@@ -221,6 +210,17 @@ func (f *framework) manipulateBindingsForRebalancingRequest(
 		if err := f.client.Create(ctx, toBinding); err != nil {
 			return fmt.Errorf("failed to create the to binding: %w", err)
 		}
+	}
+
+	// Process the from binding. Note the processing order.
+	fromBindingAnnotations := fromBinding.GetAnnotations()
+	if fromBindingAnnotations == nil {
+		fromBindingAnnotations = map[string]string{}
+	}
+	fromBindingAnnotations[placementv1beta1.ReservedBindingAnnotationKey] = strconv.FormatBool(true)
+	fromBinding.SetAnnotations(fromBindingAnnotations)
+	if err := f.client.Update(ctx, fromBinding); err != nil {
+		return fmt.Errorf("failed to mark the from binding as bound: %w", err)
 	}
 
 	return nil

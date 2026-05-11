@@ -87,7 +87,10 @@ func (r *Reconciler) waitForSchedulerAcknowledgement(
 		if placementRef.Namespace == "" {
 			// The placement is cluster-scoped (CRP). List ClusterResourceBindings.
 			clusterResBindings := &placementv1beta1.ClusterResourceBindingList{}
-			if err := r.Client.List(ctx, clusterResBindings); err != nil {
+			labelSelector := client.MatchingLabels{
+				placementv1beta1.PlacementTrackingLabel: placementRef.Name,
+			}
+			if err := r.Client.List(ctx, clusterResBindings, labelSelector); err != nil {
 				return false, fmt.Errorf("failed to list ClusterResourceBindings: %w", err)
 			}
 			for idx := range clusterResBindings.Items {
@@ -104,7 +107,10 @@ func (r *Reconciler) waitForSchedulerAcknowledgement(
 		} else {
 			// The placement is namespace-scoped (RP). List ResourceBindings in the placement namespace.
 			resBindings := &placementv1beta1.ResourceBindingList{}
-			if err := r.Client.List(ctx, resBindings, client.InNamespace(placementRef.Namespace)); err != nil {
+			labelSelector := client.MatchingLabels{
+				placementv1beta1.PlacementTrackingLabel: placementRef.Name,
+			}
+			if err := r.Client.List(ctx, resBindings, client.InNamespace(placementRef.Namespace), labelSelector); err != nil {
 				return false, fmt.Errorf("failed to list ResourceBindings: %w", err)
 			}
 			for idx := range resBindings.Items {
@@ -162,6 +168,8 @@ func (r *Reconciler) waitForSchedulerAcknowledgement(
 				"fromCluster", fromCluster,
 				"toCluster", toCluster,
 				"rebalancingRequest", klog.KObj(rebalancingReq))
+			// It might happen that only the from binding exists. This implies that the scheduler has found that
+			// there is no need for a migration.
 			return false, nil
 		}
 

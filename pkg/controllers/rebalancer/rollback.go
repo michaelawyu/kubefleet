@@ -25,10 +25,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/condition"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils/parallelizer"
 )
 
 func (r *Reconciler) rollbackChanges(
@@ -45,11 +45,10 @@ func (r *Reconciler) rollbackChanges(
 			"clusterRebalancingRequest", klog.KObj(rebalancingReq))
 		return ctrl.Result{}, nil
 	case condition.IsConditionStatusFalse(rolledBackCond, rebalancingReq.Generation) &&
-		(rolledBackCond.Reason == placementv1beta1.ClusterRebalancingReqRolledBackCondReasonFailed ||
-			rolledBackCond.Reason == placementv1beta1.ClusterRebalancingReqRolledBackCondReasonSkipped):
-		// The request has been rolled back, but the roll back has failed or skipped. No action to take.
+		rolledBackCond.Reason == placementv1beta1.ClusterRebalancingReqRolledBackCondReasonFailed:
+		// The request has been rolled back, but the roll back has failed. No action to take.
 		klog.V(2).InfoS(
-			"The rebalancing request has already been rolled back but the roll back has failed or skipped; no need to roll back again",
+			"The rebalancing request has already been rolled back but the roll back has failed; no need to roll back again",
 			"clusterRebalancingRequest", klog.KObj(rebalancingReq))
 		return ctrl.Result{}, nil
 	}
@@ -142,108 +141,55 @@ func (r *Reconciler) rollbackChanges(
 
 	// Set up the work coordinator.
 	workerCnt := int(*rebalancingReq.Spec.MaxConcurrency)
-	tokens := make(chan int, workerCnt)
-	// Pre-populate tokens so that workers can start immediately.
-	for i := 0; i < workerCnt; i++ {
-		tokens <- i
-	}
-	resCh := make(chan *rebalancingProcessingBundle, workerCnt)
+	parallelizer := parallelizer.NewParallelizer(workerCnt)
 
-	bundleIdx := 0
 	childCtx, childCancel := context.WithCancel(ctx)
 	// For the rollback process, the controller does not keep track of failures, and the process
 	// will not be cancelled upon failures, regardless of their number.
 	defer childCancel()
-	completedWorkerCnt := 0
 
-	doWork := func(
-		ctx context.Context,
-		client client.Client,
-		rebalancingReq *placementv1beta1.ClusterRebalancingRequest,
-		bundle *rebalancingProcessingBundle,
-		resCh chan<- *rebalancingProcessingBundle,
-	) {
+	// This variable is set here so that the doWork function can capture it and call the client.
+	innerClient := r.Client
+	doWork := func(idx int) {
+		bundle := &bundles[idx]
+		bundle.assignedWorkerIdx = idx
+
 		// Return the last known result if the bundle has already been processed.
 		rolledBackCond := meta.FindStatusCondition(bundle.migration.Conditions, placementv1beta1.RebalancingMigrationAttemptConditionTypeRolledBack)
 		if condition.IsConditionStatusTrue(rolledBackCond, rebalancingReq.Generation) {
 			if rolledBackCond.Reason == placementv1beta1.RebalancingMigrationAttemptCompletedCondReasonSkipped {
 				bundle.res = WorkerResultSkipped
+				klog.V(2).InfoS(
+					"A migration attempt has been skipped",
+					"workerIdx", bundle.assignedWorkerIdx,
+					"clusterRebalancingRequest", klog.KObj(rebalancingReq))
 			} else {
 				bundle.res = WorkerResultCompleted
+				klog.V(2).InfoS(
+					"A migration attempt has been rolled back successfully",
+					"workerIdx", bundle.assignedWorkerIdx,
+					"clusterRebalancingRequest", klog.KObj(rebalancingReq))
 			}
-			resCh <- bundle
 			return
 		}
 		if condition.IsConditionStatusFalse(rolledBackCond, rebalancingReq.Generation) {
 			bundle.res = WorkerResultFailed
-			resCh <- bundle
+			klog.V(2).InfoS(
+				"A migration attempt has been rolled back but the rollback has failed",
+				"workerIdx", bundle.assignedWorkerIdx,
+				"clusterRebalancingRequest", klog.KObj(rebalancingReq))
 			return
 		}
 
-		migrate(ctx, client, rebalancingReq, bundle, true, resCh)
+		migrateUntil(childCtx, innerClient, rebalancingReq, bundle, true)
+		klog.V(2).InfoS(
+			"A migration attempt has been rolled back",
+			"result", bundle.res,
+			"workerIdx", bundle.assignedWorkerIdx,
+			"rebalancingRequest", klog.KObj(rebalancingReq))
 	}
 
-WorkCoordinatorLoop:
-	for {
-		select {
-		case <-childCtx.Done():
-			// The main context or the child context has been cancelled; exit the loop immediately.
-			break WorkCoordinatorLoop
-		case token := <-tokens:
-			// A worker is available; assign a bundle to it for processing.
-			if bundleIdx >= len(bundles) {
-				// A worker has become available, but there is no more bundle to process. Mark the
-				// worker as completed.
-				completedWorkerCnt++
-			}
-			if completedWorkerCnt >= workerCnt {
-				// All workers have completed processing; exit the loop.
-				break WorkCoordinatorLoop
-			}
-
-			// Assign a worker to process the bundle.
-			bundle := &bundles[bundleIdx]
-			bundle.assignedWorkerIdx = token
-			bundleIdx++
-
-			go doWork(childCtx, r.Client, rebalancingReq, bundle, resCh)
-		case bundle := <-resCh:
-			// A worker has completed processing a bundle; inspect the result and decide whether to continue or not.
-			switch bundle.res {
-			case WorkerResultCompleted:
-				// Return the token so that the worker can start processing another bundle.
-				tokens <- bundle.assignedWorkerIdx
-
-				klog.V(2).InfoS(
-					"A bundle has been processed successfully",
-					"workerIdx", bundle.assignedWorkerIdx,
-					"rebalancingRequest", klog.KObj(rebalancingReq))
-			case WorkerResultFailed:
-				klog.V(2).InfoS(
-					"A failure has been observed when processing a bundle; the failure is tolerable, but if too many failures are observed the whole process will be cancelled",
-					"failureThreshold", *rebalancingReq.Spec.FailurePolicy.OnFailureCount,
-					"error", bundle.lastKnownErr)
-				// Return the token so that the worker can start processing another bundle.
-				tokens <- bundle.assignedWorkerIdx
-			case WorkerResultSkipped:
-				// The bundle has been skipped. This is considered as a successful attempt.
-				// Return the token so that the worker can start processing another bundle.
-				tokens <- bundle.assignedWorkerIdx
-
-				klog.V(2).InfoS(
-					"A bundle has been skipped",
-					"workerIdx", bundle.assignedWorkerIdx,
-					"rebalancingRequest", klog.KObj(rebalancingReq),
-					"error", bundle.lastKnownErr)
-			default:
-				klog.V(2).ErrorS(fmt.Errorf("an unexpected worker result has been observed: %s", bundle.res),
-					"failureThreshold", *rebalancingReq.Spec.FailurePolicy.OnFailureCount,
-					"unexpectedWorkerResult", bundle.res)
-				// Return the token so that the worker can start processing another bundle.
-				tokens <- bundle.assignedWorkerIdx
-			}
-		}
-	}
+	parallelizer.ParallelizeUntil(childCtx, len(bundles), doWork, "RollingBack")
 
 	// Based on the processing results, refresh the rebalacing request status.
 	completionCnt := 0
@@ -341,7 +287,7 @@ WorkCoordinatorLoop:
 			"clusterRebalancingRequest", klog.KObj(rebalancingReq),
 			"currentRollBackCompletionCount", completionCnt,
 			"currentRollBackFailureCount", failureCnt)
-		return ctrl.Result{RequeueAfter: time.Second * 15}, nil
+		return ctrl.Result{RequeueAfter: time.Second * 3}, nil
 	}
 	return ctrl.Result{}, nil
 }

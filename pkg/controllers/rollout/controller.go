@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,6 +47,7 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/defaulter"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/informer"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/overrider"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils/rolloutmanagerclaim"
 )
 
 // Reconciler recomputes the cluster resource binding.
@@ -141,7 +143,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req runtime.Request) (runtim
 	if wait {
 		// wait for the deletion to finish
 		klog.V(2).InfoS("Found multiple bindings pointing to the same cluster, wait for the deletion to finish", "placement", placementObjRef)
-		return runtime.Result{RequeueAfter: 5 * time.Second}, nil
+		return runtime.Result{RequeueAfter: 3 * time.Second}, nil
 	}
 
 	// find the master resourceSnapshot.
@@ -178,13 +180,50 @@ func (r *Reconciler) Reconcile(ctx context.Context, req runtime.Request) (runtim
 		return runtime.Result{}, err
 	}
 
+	wantRolloutManagerRef := &placementv1beta1.RolloutManagerReference{
+		ObjectReference: corev1.ObjectReference{
+			Kind:      "Placement",
+			Name:      placementObj.GetName(),
+			Namespace: placementObj.GetNamespace(),
+			UID:       placementObj.GetUID(),
+		},
+		Mode: placementv1beta1.RolloutManagerModeExclusive,
+	}
 	if !needRoll {
 		klog.V(2).InfoS("No bindings are out of date, stop rolling", "placement", placementObjRef)
 		// There is a corner case that rollout controller succeeds to update the binding spec to the latest one,
 		// but fails to update the binding conditions when it reconciled it last time.
 		// Here it will correct the binding status just in case this happens last time.
-		return runtime.Result{}, r.checkAndUpdateStaleBindingsStatus(ctx, allBindings)
+		if err := r.checkAndUpdateStaleBindingsStatus(ctx, allBindings); err != nil {
+			klog.ErrorS(err, "Failed to check and update the stale binding status", "placement", placementObjRef)
+			return runtime.Result{}, err
+		}
+
+		// Relinquish the rollout manager role.
+		isRefreshNeeded := rolloutmanagerclaim.RelinquishRolloutManagerRole(placementObj, wantRolloutManagerRef)
+		if isRefreshNeeded {
+			if err := r.Client.Status().Update(ctx, placementObj); err != nil {
+				klog.ErrorS(err, "Failed to relinquish the rollout manager role for the placement", "placement", placementObjRef)
+				return runtime.Result{}, err
+			}
+		}
+		klog.V(2).InfoS("No bindings need to be rolled; relinquished the rollout manager role if claimed", "placement", placementObjRef)
+		return runtime.Result{}, nil
 	}
+
+	// A rollout is needed; assume the role of rollout manager.
+	isClaimed, isRefreshNeeded := rolloutmanagerclaim.ClaimAsRolloutManager(placementObj, wantRolloutManagerRef)
+	if !isClaimed {
+		klog.V(2).InfoS("Failed to claim the rollout manager role; another controller might be managing the rollout. Requeue the request and try again later", "placement", placementObjRef)
+		return runtime.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	if isRefreshNeeded {
+		if err := r.Client.Status().Update(ctx, placementObj); err != nil {
+			klog.ErrorS(err, "Failed to claim the rollout manager role for the placement", "placement", placementObjRef)
+			return runtime.Result{}, err
+		}
+	}
+
 	klog.V(2).InfoS("Picked the bindings to be updated",
 		"placement", placementObjRef,
 		"numberOfToBeUpdatedBindings", len(toBeUpdatedBindings),
@@ -236,6 +275,12 @@ func (r *Reconciler) checkAndUpdateStaleBindingsStatus(ctx context.Context, bind
 		binding := bindings[i]
 		bindingSpec := binding.GetBindingSpec()
 		if bindingSpec.State != placementv1beta1.BindingStateScheduled && bindingSpec.State != placementv1beta1.BindingStateBound {
+			continue
+		}
+
+		// Ignore provisional bindings.
+		_, isProvisional := binding.GetAnnotations()[placementv1beta1.ProvisionalBindingAnnotationKey]
+		if isProvisional {
 			continue
 		}
 

@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,11 +34,13 @@ import (
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
+	"github.com/kubefleet-dev/kubefleet/pkg/scheduler/queue"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/annotations"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/condition"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/controller"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/defaulter"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/overrider"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils/rolloutmanagerclaim"
 )
 
 // initialize initializes the UpdateRun object with all the stages computed during the initialization.
@@ -657,6 +660,35 @@ func (r *Reconciler) recordInitializationFailed(ctx context.Context, updateRun p
 		klog.ErrorS(updateErr, "Failed to update the updateRun status as failed to initialize", "updateRun", klog.KObj(updateRun))
 		// updateErr can be retried.
 		return controller.NewUpdateIgnoreConflictError(updateErr)
+	}
+
+	// Relinquish the rollout manager role for the placement.
+	wantRolloutManagerRef := placementv1beta1.RolloutManagerReference{
+		ObjectReference: corev1.ObjectReference{
+			Kind:      updateRun.GetObjectKind().GroupVersionKind().Kind,
+			Name:      updateRun.GetName(),
+			Namespace: updateRun.GetNamespace(),
+			UID:       updateRun.GetUID(),
+		},
+		Mode: placementv1beta1.RolloutManagerModeShared,
+	}
+	var placementKey string
+	if updateRun.GetNamespace() == "" {
+		placementKey = updateRun.GetUpdateRunSpec().PlacementName
+	} else {
+		placementKey = fmt.Sprintf("%s/%s", updateRun.GetNamespace(), updateRun.GetUpdateRunSpec().PlacementName)
+	}
+	placementObj, err := controller.FetchPlacementFromKey(ctx, r.Client, queue.PlacementKey(placementKey))
+	if err != nil {
+		klog.ErrorS(err, "Failed to get the placement for the updateRun", "placementKey", placementKey, "updateRun", klog.KObj(updateRun))
+		return err
+	}
+	isRefreshNeeded := rolloutmanagerclaim.RelinquishRolloutManagerRole(placementObj, &wantRolloutManagerRef)
+	if isRefreshNeeded {
+		if err := r.Client.Status().Update(ctx, placementObj); err != nil {
+			klog.ErrorS(err, "Failed to relinquish the rollout manager role for the placement", "placement", klog.KObj(placementObj), "updateRun", klog.KObj(updateRun))
+			return err
+		}
 	}
 	return nil
 }

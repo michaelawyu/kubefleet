@@ -63,6 +63,8 @@ const (
 	ClusterResourceEnvelopeKind = "ClusterResourceEnvelope"
 	// ClusterResourcePlacementStatusKind is the kind of the ClusterResourcePlacementStatus.
 	ClusterResourcePlacementStatusKind = "ClusterResourcePlacementStatus"
+	// ClusterRebalancingRequestKind is the kind of the ClusterRebalancingRequest.
+	ClusterRebalancingRequestKind = "ClusterRebalancingRequest"
 )
 
 const (
