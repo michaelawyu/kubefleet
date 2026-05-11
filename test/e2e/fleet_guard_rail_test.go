@@ -1323,7 +1323,7 @@ var _ = Describe("fleet guard rail webhook tests for service accounts in restric
 				Namespace: kubeSystemNamespaceName,
 			},
 		}
-		Expect(hubClient.Create(ctx, svcAccount)).Should(Succeed())
+		Expect(hubClient.Create(ctx, svcAccount)).Should(Succeed(), "Failed to create service account")
 	})
 
 	AfterAll(func() {
@@ -1349,7 +1349,7 @@ var _ = Describe("fleet guard rail webhook tests for service accounts in restric
 				return fmt.Errorf("failed to retrieve service account: %w", err)
 			}
 			return fmt.Errorf("service account still exists")
-		}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Fail to delete service account")
+		}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to delete service account")
 	})
 
 	It("should deny creation of service accounts in kube-system namespace for non-whitelisted users", func() {
@@ -1366,7 +1366,7 @@ var _ = Describe("fleet guard rail webhook tests for service accounts in restric
 			svcAccountGVK, "",
 			types.NamespacedName{Name: newSvcAccount.Name, Namespace: newSvcAccount.Namespace},
 		)
-		Expect(checkIfStatusErrorWithMessage(impersonateHubClient.Create(ctx, newSvcAccount), wantErrMsg)).Should(Succeed())
+		Expect(checkIfStatusErrorWithMessage(impersonateHubClient.Create(ctx, newSvcAccount), wantErrMsg)).Should(Succeed(), "Failed to deny creation of service account in kube-system namespace")
 	})
 
 	It("should deny access to service account token subresource in restricted namespace for non-whitelisted users", func() {
@@ -1387,6 +1387,6 @@ var _ = Describe("fleet guard rail webhook tests for service accounts in restric
 			tokenReqGVK, "token",
 			types.NamespacedName{Name: svcAccountName, Namespace: kubeSystemNamespaceName},
 		)
-		Expect(checkIfStatusErrorWithMessage(impersonateHubClient.SubResource("token").Create(ctx, svcAccount, tokenRequest), wantErrMsg)).Should(Succeed())
+		Expect(checkIfStatusErrorWithMessage(impersonateHubClient.SubResource("token").Create(ctx, svcAccount, tokenRequest), wantErrMsg)).Should(Succeed(), "Failed to deny access to service account token subresource in restricted namespace")
 	})
 })
