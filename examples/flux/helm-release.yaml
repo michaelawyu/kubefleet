@@ -1,0 +1,14 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: psql
+  namespace: work
+spec:
+  interval: 15m
+  chartRef:
+    kind: OCIRepository
+    name: bitnami-psql
+    namespace: work
+  values:
+    auth:
+      postgresPassword: "000000"

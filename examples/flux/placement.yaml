@@ -1,0 +1,26 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ClusterResourcePlacement
+metadata:
+  name: flux-psql-chart
+spec:
+  resourceSelectors:
+    - group: ""
+      kind: Namespace
+      name: work
+      version: v1
+      selectionScope: NamespaceWithResourceSelectors
+    - group: source.toolkit.fluxcd.io
+      version: v1
+      kind: OCIRepository
+      name: bitnami-psql
+    - group: helm.toolkit.fluxcd.io
+      version: v2
+      kind: HelmRelease
+      name: psql
+  policy:
+    placementType: PickFixed
+    clusterNames:
+    - kind-cluster-1
+    - kind-cluster-2
+  strategy:
+    type: External

@@ -408,6 +408,8 @@ func beforeSuiteForProcess1() {
 
 	setAllMemberClustersToJoin()
 	checkIfAllMemberClustersHaveJoined()
+
+	panic("")
 	checkIfAzurePropertyProviderIsWorking()
 
 	// Simulate that member cluster 4 become unhealthy, and member cluster 5 has left the fleet.
@@ -421,6 +423,7 @@ func beforeSuiteForProcess1() {
 var _ = SynchronizedBeforeSuite(beforeSuiteForProcess1, beforeSuiteForAllProcesses)
 
 var _ = SynchronizedAfterSuite(func() {}, func() {
+	panic("")
 	deleteResourcesForFleetGuardRail()
 	deleteTestResourceCRD()
 	setAllMemberClustersToLeave()

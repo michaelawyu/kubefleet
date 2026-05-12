@@ -1,0 +1,8 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ClusterStagedUpdateRun
+metadata:
+  name: first-run
+spec:
+  state: Run
+  placementName: flux-psql-chart
+  stagedRolloutStrategyName: canary-prod

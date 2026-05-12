@@ -1,0 +1,15 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ClusterStagedUpdateStrategy
+metadata:
+  name: canary-prod
+spec:
+  stages:
+    - name: canary
+      labelSelector:
+        matchLabels:
+          env: canary
+    - name: production
+      labelSelector:
+        matchLabels:
+          env: prod
+
