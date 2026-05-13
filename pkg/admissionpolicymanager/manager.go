@@ -74,6 +74,10 @@ type PolicyManager struct {
 }
 
 func New(client client.Client, policyGeneratorConfigs *PolicyGeneratorConfigs, enabledPolicyNames []string) (*PolicyManager, error) {
+	if policyGeneratorConfigs == nil {
+		klog.V(2).Info("No admission policy generator configuration provided, falling back to the default configuration")
+		policyGeneratorConfigs = DefaultPolicyGeneratorConfigs
+	}
 	// Prepare a set of generators based on the list of enabled policies.
 	enabledPolicyGenerators, err := preparePolicyGenerators(policyGeneratorConfigs, enabledPolicyNames)
 	if err != nil {

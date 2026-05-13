@@ -17,7 +17,6 @@ limitations under the License.
 package admissionpolicymanager
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/google/go-cmp/cmp"
@@ -40,6 +39,9 @@ var (
 	ignoreSystemManagedObjectMetaFields = cmpopts.IgnoreFields(metav1.ObjectMeta{}, "UID", "ResourceVersion", "Generation", "CreationTimestamp", "ManagedFields")
 
 	lessFuncValidatingAdmissionPolicy = func(i, j admissionregistrationv1.ValidatingAdmissionPolicy) bool {
+		return i.Name < j.Name
+	}
+	lessFuncValidatingAdmissionPolicyBinding = func(i, j admissionregistrationv1.ValidatingAdmissionPolicyBinding) bool {
 		return i.Name < j.Name
 	}
 )
@@ -170,13 +172,13 @@ var _ = Describe("Policies, Policy Bindings and their Effects", Ordered, func() 
 			},
 		}
 
-		Eventually(func() error {
+		Eventually(ctx, func() error {
 			policyList := &admissionregistrationv1.ValidatingAdmissionPolicyList{}
 			matchingLabels := map[string]string{
 				VAPManagedByKubeFleetLabelKey: VAPManagedByKubeFleetLabelValue,
 				VAPPartOfKubeFleetLabelKey:    VAPPartOfKubeFleetLabelValue,
 			}
-			if err := hubUncachedClient.List(context.TODO(), policyList, client.MatchingLabels(matchingLabels)); err != nil {
+			if err := hubUncachedClient.List(ctx, policyList, client.MatchingLabels(matchingLabels)); err != nil {
 				return fmt.Errorf("failed to list matching policies: %w", err)
 			}
 
@@ -231,17 +233,13 @@ var _ = Describe("Policies, Policy Bindings and their Effects", Ordered, func() 
 			},
 		}
 
-		lessFuncValidatingAdmissionPolicyBinding := func(i, j admissionregistrationv1.ValidatingAdmissionPolicyBinding) bool {
-			return i.Name < j.Name
-		}
-
-		Eventually(func() error {
+		Eventually(ctx, func() error {
 			bindingList := &admissionregistrationv1.ValidatingAdmissionPolicyBindingList{}
 			matchingLabels := map[string]string{
 				VAPManagedByKubeFleetLabelKey: VAPManagedByKubeFleetLabelValue,
 				VAPPartOfKubeFleetLabelKey:    VAPPartOfKubeFleetLabelValue,
 			}
-			if err := hubUncachedClient.List(context.TODO(), bindingList, client.MatchingLabels(matchingLabels)); err != nil {
+			if err := hubUncachedClient.List(ctx, bindingList, client.MatchingLabels(matchingLabels)); err != nil {
 				return fmt.Errorf("failed to list matching policy bindings: %w", err)
 			}
 
