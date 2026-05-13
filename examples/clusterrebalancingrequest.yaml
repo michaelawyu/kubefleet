@@ -1,0 +1,9 @@
+apiVersion: placement.kubernetes-fleet.io/v1beta1
+kind: ClusterRebalancingRequest
+metadata:
+  name: crp-0
+spec:
+  clustersToRemove:
+    - kind-cluster-1
+  clustersToAdd:
+    - kind-cluster-3

@@ -107,6 +107,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req controllerruntime.Reques
 	if resourceBinding.GetDeletionTimestamp() != nil {
 		return r.handleDelete(ctx, resourceBinding)
 	}
+	// If the binding has been withdrawn, delete all the works and remove the finalizer.
+	if _, withdrawn := resourceBinding.GetAnnotations()[fleetv1beta1.WithdrawnBindingAnnotationKey]; withdrawn {
+		klog.V(2).InfoS("The binding is withdrawn; deleting all the works and removing the finalizer", "binding", bindingRef)
+		return r.handleDelete(ctx, resourceBinding)
+	}
 
 	// we only care about the bound bindings. We treat unscheduled bindings as bound until they are deleted.
 	if resourceBinding.GetBindingSpec().State != fleetv1beta1.BindingStateBound && resourceBinding.GetBindingSpec().State != fleetv1beta1.BindingStateUnscheduled {
@@ -348,7 +353,7 @@ func (r *Reconciler) handleDelete(ctx context.Context, resourceBinding fleetv1be
 	klog.V(2).InfoS("The resource binding still has undeleted work", "binding", klog.KObj(resourceBinding),
 		"number of associated work", len(works))
 	// we watch the work objects deleting events, so we can afford to wait a bit longer here as a fallback case.
-	return controllerruntime.Result{RequeueAfter: 30 * time.Second}, nil
+	return controllerruntime.Result{RequeueAfter: 3 * time.Second}, nil
 }
 
 // ensureFinalizer makes sure that the binding CR has a finalizer on it.
@@ -1475,7 +1480,7 @@ func (r *Reconciler) SetupWithManagerForClusterResourceBinding(mgr controllerrun
 	r.recorder = mgr.GetEventRecorderFor("cluster resource binding work generator")
 	return controllerruntime.NewControllerManagedBy(mgr).Named("cluster-resource-binding-work-generator").
 		WithOptions(ctrl.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}). // set the max number of concurrent reconciles
-		For(&fleetv1beta1.ClusterResourceBinding{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&fleetv1beta1.ClusterResourceBinding{}, builder.WithPredicates(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.AnnotationChangedPredicate{}))).
 		Watches(&fleetv1beta1.Work{}, workHandlerFuncs(true)).
 		Complete(r)
 }
@@ -1486,7 +1491,7 @@ func (r *Reconciler) SetupWithManagerForResourceBinding(mgr controllerruntime.Ma
 	r.recorder = mgr.GetEventRecorderFor("resource binding work generator")
 	return controllerruntime.NewControllerManagedBy(mgr).Named("resource-binding-work-generator").
 		WithOptions(ctrl.Options{MaxConcurrentReconciles: r.MaxConcurrentReconciles}). // set the max number of concurrent reconciles
-		For(&fleetv1beta1.ResourceBinding{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&fleetv1beta1.ResourceBinding{}, builder.WithPredicates(predicate.Or(predicate.GenerationChangedPredicate{}, predicate.AnnotationChangedPredicate{}))).
 		Watches(&fleetv1beta1.Work{}, workHandlerFuncs(false)).
 		Complete(r)
 }

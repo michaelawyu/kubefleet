@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	fleetv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
+	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	hubmetrics "github.com/kubefleet-dev/kubefleet/pkg/metrics/hub"
 	"github.com/kubefleet-dev/kubefleet/pkg/scheduler/framework"
 	"github.com/kubefleet-dev/kubefleet/pkg/scheduler/queue"
@@ -161,7 +161,7 @@ func (s *Scheduler) scheduleOnce(ctx context.Context, worker int) {
 	// Check if the placement has been marked for deletion, and if it has the scheduler cleanup finalizer.
 	if placement.GetDeletionTimestamp() != nil {
 		// Use SchedulerCleanupFinalizer consistently for all placement types
-		if controllerutil.ContainsFinalizer(placement, fleetv1beta1.SchedulerCleanupFinalizer) {
+		if controllerutil.ContainsFinalizer(placement, placementv1beta1.SchedulerCleanupFinalizer) {
 			if err := s.cleanUpAllBindingsFor(ctx, placement); err != nil {
 				klog.ErrorS(err, "Failed to clean up all bindings for placement", "placement", placementKey)
 				if errors.Is(err, controller.ErrUnexpectedBehavior) {
@@ -208,7 +208,7 @@ func (s *Scheduler) scheduleOnce(ctx context.Context, worker int) {
 	// Note that the scheduler will enter this cycle as long as the placement is active and an active
 	// policy snapshot has been produced.
 	cycleStartTime := time.Now()
-	res, err := s.framework.RunSchedulingCycleFor(ctx, placementKey, latestPolicySnapshot)
+	res, err := s.framework.RunSchedulingCycleFor(ctx, placementKey, placement, latestPolicySnapshot)
 	if err != nil {
 		if errors.Is(err, controller.ErrUnexpectedBehavior) {
 			// The placement is in an unexpected state; this is a scheduler-side error, and
@@ -295,7 +295,7 @@ func (s *Scheduler) Run(ctx context.Context) {
 }
 
 // cleanUpAllBindingsFor cleans up all bindings derived from a placement.
-func (s *Scheduler) cleanUpAllBindingsFor(ctx context.Context, placement fleetv1beta1.PlacementObj) error {
+func (s *Scheduler) cleanUpAllBindingsFor(ctx context.Context, placement placementv1beta1.PlacementObj) error {
 	placementRef := klog.KObj(placement)
 
 	// List all bindings derived from the placement.
@@ -319,7 +319,7 @@ func (s *Scheduler) cleanUpAllBindingsFor(ctx context.Context, placement fleetv1
 	// run the deletion.
 	for idx := range bindings {
 		binding := bindings[idx]
-		controllerutil.RemoveFinalizer(binding, fleetv1beta1.SchedulerBindingCleanupFinalizer)
+		controllerutil.RemoveFinalizer(binding, placementv1beta1.SchedulerBindingCleanupFinalizer)
 		if err := s.client.Update(ctx, binding); err != nil {
 			klog.ErrorS(err, "Failed to remove scheduler reconcile finalizer from binding", "binding", klog.KObj(binding))
 			return controller.NewUpdateIgnoreConflictError(err)
@@ -335,7 +335,7 @@ func (s *Scheduler) cleanUpAllBindingsFor(ctx context.Context, placement fleetv1
 
 	// All bindings have been deleted; remove the scheduler cleanup finalizer from the placement.
 	// Use SchedulerCleanupFinalizer consistently for all placement types.
-	controllerutil.RemoveFinalizer(placement, fleetv1beta1.SchedulerCleanupFinalizer)
+	controllerutil.RemoveFinalizer(placement, placementv1beta1.SchedulerCleanupFinalizer)
 	if err := s.client.Update(ctx, placement); err != nil {
 		klog.ErrorS(err, "Failed to remove scheduler cleanup finalizer from placement", "placement", placementRef)
 		return controller.NewUpdateIgnoreConflictError(err)
@@ -364,10 +364,10 @@ func (s *Scheduler) lookupLatestPolicySnapshot(ctx context.Context, placement fl
 
 // addSchedulerCleanupFinalizer adds the scheduler cleanup finalizer to a placement (if it does not
 // have it yet).
-func (s *Scheduler) addSchedulerCleanUpFinalizer(ctx context.Context, placement fleetv1beta1.PlacementObj) error {
+func (s *Scheduler) addSchedulerCleanUpFinalizer(ctx context.Context, placement placementv1beta1.PlacementObj) error {
 	// Add the finalizer only if the placement does not have one yet.
-	if !controllerutil.ContainsFinalizer(placement, fleetv1beta1.SchedulerCleanupFinalizer) {
-		controllerutil.AddFinalizer(placement, fleetv1beta1.SchedulerCleanupFinalizer)
+	if !controllerutil.ContainsFinalizer(placement, placementv1beta1.SchedulerCleanupFinalizer) {
+		controllerutil.AddFinalizer(placement, placementv1beta1.SchedulerCleanupFinalizer)
 
 		if err := s.client.Update(ctx, placement); err != nil {
 			klog.ErrorS(err, "Failed to update placement", "placement", klog.KObj(placement))
