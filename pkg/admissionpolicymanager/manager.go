@@ -37,19 +37,26 @@ const (
 	// The following labels are added to all policies created by the policy manager,
 	// so that the agent can track the lifecycle of created policies across different runs
 	// and act accordingly.
-	VAPManagedByKubeFleetLabelKey   = "app.kubernetes.io/managed-by"
-	VAPManagedByKubeFleetLabelValue = "fleet"
-	VAPPartOfKubeFleetLabelKey      = "app.kubernetes.io/part-of"
-	VAPPartOfKubeFleetLabelValue    = "fleet"
+	VAPManagedByKubeFleetLabelKey                = "app.kubernetes.io/managed-by"
+	VAPManagedByKubeFleetLabelValue              = "fleet-hub-agent"
+	VAPPartOfKubeFleetLabelKey                   = "app.kubernetes.io/part-of"
+	VAPPartOfKubeFleetLabelValue                 = "fleet"
+	VAPComponentKubeFleetLabelKey                = "app.kubernetes.io/component"
+	VAPComponentAdmissionPolicyManagerLabelValue = "admission-policy-manager"
 )
 
 var (
 	// A list of all available policy generators.
-	AllGenerators = sets.Set[string]{
+	allGenerators = sets.Set[string]{
 		PodsAndReplicaSetsVAPGeneratorName:          {},
 		SvcAccountsAndTokenRequestsVAPGeneratorName: {},
 	}
 )
+
+// AllGenerators returns a copy of all available policy generators.
+func AllGenerators() sets.Set[string] {
+	return allGenerators.Clone()
+}
 
 var (
 	policyRWOpBackoff = wait.Backoff{
@@ -163,13 +170,18 @@ func (m *PolicyManager) createOrUpdatePoliciesAndBindingsForEnabledGenerators(ct
 			}
 			policy.Labels[VAPManagedByKubeFleetLabelKey] = VAPManagedByKubeFleetLabelValue
 			policy.Labels[VAPPartOfKubeFleetLabelKey] = VAPPartOfKubeFleetLabelValue
+			policy.Labels[VAPComponentKubeFleetLabelKey] = VAPComponentAdmissionPolicyManagerLabelValue
 
 			policyToCreateOrUpdate := &admissionregistrationv1.ValidatingAdmissionPolicy{
 				ObjectMeta: policy.ObjectMeta,
 			}
 			err := retry.OnError(policyRWOpBackoff, func(err error) bool {
-				// Retry on any error. Note that nil errors are not passed to this function,
+				// Retry on any error expect for context cancellation. Note that nil errors are not passed to this function,
 				// and AlreadyExists errors will not occur.
+				if ctx.Err() != nil {
+					// The main context has been cancelled. No need to retry anymore.
+					return false
+				}
 				return true
 			}, func() error {
 				opRes, err := controllerutil.CreateOrUpdate(ctx, m.Client, policyToCreateOrUpdate, func() error {
@@ -204,13 +216,18 @@ func (m *PolicyManager) createOrUpdatePoliciesAndBindingsForEnabledGenerators(ct
 			}
 			policyBinding.Labels[VAPManagedByKubeFleetLabelKey] = VAPManagedByKubeFleetLabelValue
 			policyBinding.Labels[VAPPartOfKubeFleetLabelKey] = VAPPartOfKubeFleetLabelValue
+			policyBinding.Labels[VAPComponentKubeFleetLabelKey] = VAPComponentAdmissionPolicyManagerLabelValue
 
 			policyBindingToCreateOrUpdate := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{
 				ObjectMeta: policyBinding.ObjectMeta,
 			}
 			err := retry.OnError(policyRWOpBackoff, func(err error) bool {
-				// Retry on any error. Note that nil errors are not passed to this function,
+				// Retry on any error expect for context cancellation. Note that nil errors are not passed to this function,
 				// and AlreadyExists errors will not occur.
+				if ctx.Err() != nil {
+					// The main context has been cancelled. No need to retry anymore.
+					return false
+				}
 				return true
 			}, func() error {
 				opRes, err := controllerutil.CreateOrUpdate(ctx, m.Client, policyBindingToCreateOrUpdate, func() error {
@@ -248,9 +265,14 @@ func (m *PolicyManager) garbageCollectUnusedPoliciesAndBindings(ctx context.Cont
 	managedByAndPartOfKubeFleetLabelSelector := client.MatchingLabels{
 		VAPManagedByKubeFleetLabelKey: VAPManagedByKubeFleetLabelValue,
 		VAPPartOfKubeFleetLabelKey:    VAPPartOfKubeFleetLabelValue,
+		VAPComponentKubeFleetLabelKey: VAPComponentAdmissionPolicyManagerLabelValue,
 	}
 	err := retry.OnError(policyRWOpBackoff, func(err error) bool {
 		// Retry on any error. Note that nil errors are not passed to this function.
+		if ctx.Err() != nil {
+			// The main context has been cancelled. No need to retry anymore.
+			return false
+		}
 		return true
 	}, func() error {
 		if err := m.Client.List(ctx, existingPolicyList, managedByAndPartOfKubeFleetLabelSelector); err != nil {
@@ -265,6 +287,10 @@ func (m *PolicyManager) garbageCollectUnusedPoliciesAndBindings(ctx context.Cont
 
 	err = retry.OnError(policyRWOpBackoff, func(err error) bool {
 		// Retry on any error. Note that nil errors are not passed to this function.
+		if ctx.Err() != nil {
+			// The main context has been cancelled. No need to retry anymore.
+			return false
+		}
 		return true
 	}, func() error {
 		if err := m.Client.List(ctx, existingPolicyBindingList, managedByAndPartOfKubeFleetLabelSelector); err != nil {
@@ -283,6 +309,10 @@ func (m *PolicyManager) garbageCollectUnusedPoliciesAndBindings(ctx context.Cont
 		if !createdOrUpdatedPolicyNames.Has(policy.Name) {
 			err := retry.OnError(policyRWOpBackoff, func(err error) bool {
 				// Retry on any error. Note that nil errors are not passed to this function, and NotFound errors will not occur.
+				if ctx.Err() != nil {
+					// The main context has been cancelled. No need to retry anymore.
+					return false
+				}
 				return true
 			}, func() error {
 				if err := m.Client.Delete(ctx, policy); err != nil && !apierrors.IsNotFound(err) {
@@ -308,6 +338,10 @@ func (m *PolicyManager) garbageCollectUnusedPoliciesAndBindings(ctx context.Cont
 		if !createdOrUpdatedPolicyBindingNames.Has(policyBinding.Name) {
 			err := retry.OnError(policyRWOpBackoff, func(err error) bool {
 				// Retry on any error. Note that nil errors are not passed to this function, and NotFound errors will not occur.
+				if ctx.Err() != nil {
+					// The main context has been cancelled. No need to retry anymore.
+					return false
+				}
 				return true
 			}, func() error {
 				if err := m.Client.Delete(ctx, policyBinding); err != nil && !apierrors.IsNotFound(err) {

@@ -21,7 +21,6 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
-	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
@@ -29,6 +28,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 )
 
 const (
@@ -70,6 +71,7 @@ var _ = Describe("Policies, Policy Bindings and their Effects", Ordered, func() 
 					Labels: map[string]string{
 						VAPManagedByKubeFleetLabelKey: VAPManagedByKubeFleetLabelValue,
 						VAPPartOfKubeFleetLabelKey:    VAPPartOfKubeFleetLabelValue,
+						VAPComponentKubeFleetLabelKey: VAPComponentAdmissionPolicyManagerLabelValue,
 					},
 				},
 				Spec: admissionregistrationv1.ValidatingAdmissionPolicySpec{
@@ -109,7 +111,7 @@ var _ = Describe("Policies, Policy Bindings and their Effects", Ordered, func() 
 					},
 					Validations: []admissionregistrationv1.Validation{
 						{
-							Expression: `object.metadata.namespace.startsWith("fleet-") || object.metadata.namespace.startsWith("kube-")`,
+							Expression: `request.namespace.startsWith("fleet-") || request.namespace.startsWith("kube-")`,
 							Message:    "creating pods and replicas is disallowed in the fleet hub cluster",
 							Reason:     ptr.To(metav1.StatusReasonForbidden),
 						},
@@ -122,6 +124,7 @@ var _ = Describe("Policies, Policy Bindings and their Effects", Ordered, func() 
 					Labels: map[string]string{
 						VAPManagedByKubeFleetLabelKey: VAPManagedByKubeFleetLabelValue,
 						VAPPartOfKubeFleetLabelKey:    VAPPartOfKubeFleetLabelValue,
+						VAPComponentKubeFleetLabelKey: VAPComponentAdmissionPolicyManagerLabelValue,
 					},
 				},
 				Spec: admissionregistrationv1.ValidatingAdmissionPolicySpec{
@@ -163,7 +166,7 @@ var _ = Describe("Policies, Policy Bindings and their Effects", Ordered, func() 
 					},
 					Validations: []admissionregistrationv1.Validation{
 						{
-							Expression: `!(object.metadata.namespace.startsWith("fleet-") || object.metadata.namespace.startsWith("kube-")) || (request.userInfo.username == "system:kube-scheduler" || request.userInfo.username == "system:kube-controller-manager" || "system:nodes" in request.userInfo.groups || "system:masters" in request.userInfo.groups)`,
+							Expression: `!(request.namespace.startsWith("fleet-") || request.namespace.startsWith("kube-")) || (request.userInfo.username == "system:kube-scheduler" || request.userInfo.username == "system:kube-controller-manager" || "system:nodes" in request.userInfo.groups || "system:masters" in request.userInfo.groups)`,
 							Message:    "writing service accounts in reserved namespaces or requesting tokens from such service accounts is disallowed",
 							Reason:     ptr.To(metav1.StatusReasonForbidden),
 						},
@@ -177,6 +180,7 @@ var _ = Describe("Policies, Policy Bindings and their Effects", Ordered, func() 
 			matchingLabels := map[string]string{
 				VAPManagedByKubeFleetLabelKey: VAPManagedByKubeFleetLabelValue,
 				VAPPartOfKubeFleetLabelKey:    VAPPartOfKubeFleetLabelValue,
+				VAPComponentKubeFleetLabelKey: VAPComponentAdmissionPolicyManagerLabelValue,
 			}
 			if err := hubUncachedClient.List(ctx, policyList, client.MatchingLabels(matchingLabels)); err != nil {
 				return fmt.Errorf("failed to list matching policies: %w", err)
@@ -207,6 +211,7 @@ var _ = Describe("Policies, Policy Bindings and their Effects", Ordered, func() 
 					Labels: map[string]string{
 						VAPManagedByKubeFleetLabelKey: VAPManagedByKubeFleetLabelValue,
 						VAPPartOfKubeFleetLabelKey:    VAPPartOfKubeFleetLabelValue,
+						VAPComponentKubeFleetLabelKey: VAPComponentAdmissionPolicyManagerLabelValue,
 					},
 				},
 				Spec: admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec{
@@ -222,6 +227,7 @@ var _ = Describe("Policies, Policy Bindings and their Effects", Ordered, func() 
 					Labels: map[string]string{
 						VAPManagedByKubeFleetLabelKey: VAPManagedByKubeFleetLabelValue,
 						VAPPartOfKubeFleetLabelKey:    VAPPartOfKubeFleetLabelValue,
+						VAPComponentKubeFleetLabelKey: VAPComponentAdmissionPolicyManagerLabelValue,
 					},
 				},
 				Spec: admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec{
@@ -238,6 +244,7 @@ var _ = Describe("Policies, Policy Bindings and their Effects", Ordered, func() 
 			matchingLabels := map[string]string{
 				VAPManagedByKubeFleetLabelKey: VAPManagedByKubeFleetLabelValue,
 				VAPPartOfKubeFleetLabelKey:    VAPPartOfKubeFleetLabelValue,
+				VAPComponentKubeFleetLabelKey: VAPComponentAdmissionPolicyManagerLabelValue,
 			}
 			if err := hubUncachedClient.List(ctx, bindingList, client.MatchingLabels(matchingLabels)); err != nil {
 				return fmt.Errorf("failed to list matching policy bindings: %w", err)

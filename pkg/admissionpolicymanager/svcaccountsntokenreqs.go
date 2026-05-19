@@ -28,7 +28,8 @@ import (
 )
 
 const (
-	SvcAccountsAndTokenRequestsVAPGeneratorName = "DenyServiceAccountsAndTokenRequestsInReservedNamespaces"
+	// Exempt the value from the linter as it miscategorizes it as a credential.
+	SvcAccountsAndTokenRequestsVAPGeneratorName = "DenyServiceAccountsAndTokenRequestsInReservedNamespaces" //nolint:gosec
 )
 
 const (
@@ -74,7 +75,7 @@ func (g *ServiceAccountsAndTokenRequestsValidatingAdmissionPolicyGenerator) Vali
 	}
 	// Check if any of the prefixes includes illegal characters.
 	for _, prefix := range g.ReservedNamespacePrefixes {
-		if !reservedNamespacePrefixRegExp.MatchString(prefix) {
+		if !reservedNamespacePrefixRegexp.MatchString(prefix) {
 			return errors.NewUserError(nil, "prefix contains illegal characters; only lowercase alphanumeric characters and hyphens are allowed", "prefix", prefix)
 		}
 	}
@@ -96,6 +97,8 @@ func (g *ServiceAccountsAndTokenRequestsValidatingAdmissionPolicyGenerator) Vali
 // Policies generates a ValidatingAdmissionPolicy that denies creation/update/deletion of service accounts
 // and creation of token requests in reserved namespaces, except for requests from certain
 // whitelisted users and user groups.
+//
+// For simplicity reasons, the code here assumes that the generator has been validated before Policies() is called.
 func (g *ServiceAccountsAndTokenRequestsValidatingAdmissionPolicyGenerator) Policies() []*admissionregistrationv1.ValidatingAdmissionPolicy {
 	celExprAccSegs := []string{}
 
@@ -124,7 +127,7 @@ func (g *ServiceAccountsAndTokenRequestsValidatingAdmissionPolicyGenerator) Poli
 
 	celExprNSSegs := []string{}
 	for _, prefix := range g.ReservedNamespacePrefixes {
-		celExprNSSegs = append(celExprNSSegs, fmt.Sprintf(`object.metadata.namespace.startsWith("%s")`, prefix))
+		celExprNSSegs = append(celExprNSSegs, fmt.Sprintf(`request.namespace.startsWith("%s")`, prefix))
 	}
 	celExprNS := strings.Join(celExprNSSegs, " || ")
 

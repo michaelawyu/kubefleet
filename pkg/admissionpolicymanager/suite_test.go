@@ -95,7 +95,7 @@ var _ = BeforeSuite(func() {
 
 	By("Setting up the policy manager")
 	enabledGeneratorNames := []string{}
-	for name := range AllGenerators {
+	for name := range allGenerators {
 		enabledGeneratorNames = append(enabledGeneratorNames, name)
 	}
 	policyManager, err := New(hubUncachedClient, DefaultPolicyGeneratorConfigs, enabledGeneratorNames)

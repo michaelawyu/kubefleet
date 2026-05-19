@@ -33,9 +33,9 @@ type PolicyGeneratorConfigs struct {
 // DefaultPolicyGeneratorConfigs is the default configuration for all available admission policy generators.
 var DefaultPolicyGeneratorConfigs = &PolicyGeneratorConfigs{
 	PodsAndReplicaSetsVAPGeneratorConfig: &PodsAndReplicaSetsValidatingAdmissionPolicyGenerator{
-		ReservedNamespacePrefixes: []string{utils.FleetPrefix, utils.KubePrefix},
+		ReservedNamespacePrefixes: []string{utils.FleetNSNamePrefix, utils.KubeNSNamePrefix},
 	},
 	SvcAccountsAndTokenRequestsVAPGeneratorConfig: &ServiceAccountsAndTokenRequestsValidatingAdmissionPolicyGenerator{
-		ReservedNamespacePrefixes: []string{utils.FleetPrefix, utils.KubePrefix},
+		ReservedNamespacePrefixes: []string{utils.FleetNSNamePrefix, utils.KubeNSNamePrefix},
 	},
 }

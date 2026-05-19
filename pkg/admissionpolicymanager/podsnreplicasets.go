@@ -37,8 +37,8 @@ const (
 	podsAndReplicaSetsVAPPolicyBindingName = "deny-pods-and-replicasets-outside-reserved-namespaces-binding"
 )
 
-// reservedNamespacePrefixRegExp matches valid namespace prefix characters (DNS label subset).
-var reservedNamespacePrefixRegExp = regexp.MustCompile(`^[a-z0-9-]+$`)
+// reservedNamespacePrefixRegexp matches valid namespace prefix characters (DNS label subset).
+var reservedNamespacePrefixRegexp = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 // Verify that PodsAndReplicaSetsValidatingAdmissionPolicyGenerator implements
 // the ValidatingAdmissionPolicyGenerator interface.
@@ -63,7 +63,7 @@ func (g *PodsAndReplicaSetsValidatingAdmissionPolicyGenerator) Validate() error 
 	}
 	// Check if any of the prefixes includes illegal characters.
 	for _, prefix := range g.ReservedNamespacePrefixes {
-		if !reservedNamespacePrefixRegExp.MatchString(prefix) {
+		if !reservedNamespacePrefixRegexp.MatchString(prefix) {
 			return errors.NewUserError(nil, "prefix contains illegal characters; only lowercase alphanumeric characters and hyphens are allowed", "prefix", prefix)
 		}
 	}
@@ -72,10 +72,12 @@ func (g *PodsAndReplicaSetsValidatingAdmissionPolicyGenerator) Validate() error 
 
 // Policies generates a ValidatingAdmissionPolicy that denies creation of pods and
 // replicasets in non-reserved namespaces.
+//
+// For simplicity reasons, the code here assumes that the generator has been validated before Policies() is called.
 func (g *PodsAndReplicaSetsValidatingAdmissionPolicyGenerator) Policies() []*admissionregistrationv1.ValidatingAdmissionPolicy {
 	celExprSegs := []string{}
 	for _, prefix := range g.ReservedNamespacePrefixes {
-		celExprSegs = append(celExprSegs, fmt.Sprintf(`object.metadata.namespace.startsWith("%s")`, prefix))
+		celExprSegs = append(celExprSegs, fmt.Sprintf(`request.namespace.startsWith("%s")`, prefix))
 	}
 	celExpr := strings.Join(celExprSegs, " || ")
 
