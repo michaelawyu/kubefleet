@@ -49,13 +49,13 @@ import (
 )
 
 const (
-	KubePrefix                 = "kube-"
-	FleetPrefix                = "fleet-"
-	FleetMemberNamespacePrefix = FleetPrefix + "member-"
-	FleetSystemNamespace       = FleetPrefix + "system"
+	KubeNSNamePrefix           = "kube-"
+	FleetNSNamePrefix          = "fleet-"
+	FleetMemberNamespacePrefix = FleetNSNamePrefix + "member-"
+	FleetSystemNamespace       = FleetNSNamePrefix + "system"
 	NamespaceNameFormat        = FleetMemberNamespacePrefix + "%s"
-	RoleNameFormat             = FleetPrefix + "role-%s"
-	RoleBindingNameFormat      = FleetPrefix + "rolebinding-%s"
+	RoleNameFormat             = FleetNSNamePrefix + "role-%s"
+	RoleBindingNameFormat      = FleetNSNamePrefix + "rolebinding-%s"
 	ValidationPathFmt          = "/validate-%s-%s-%s"
 	MutatingPathFmt            = "/mutate-%s-%s-%s"
 	lessGroupsStringFormat     = "groups: %v"
@@ -501,7 +501,7 @@ func CheckCRDInstalled(discoveryClient discovery.DiscoveryInterface, gvk schema.
 
 // IsReservedNamespace indicates if an argued namespace is reserved.
 func IsReservedNamespace(namespace string) bool {
-	return strings.HasPrefix(namespace, FleetPrefix) || strings.HasPrefix(namespace, KubePrefix)
+	return strings.HasPrefix(namespace, FleetNSNamePrefix) || strings.HasPrefix(namespace, KubeNSNamePrefix)
 }
 
 // IsFleetMemberNamespace indicates if an argued namespace is a fleet member namespace.
