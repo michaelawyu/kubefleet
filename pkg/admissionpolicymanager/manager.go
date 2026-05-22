@@ -47,11 +47,24 @@ const (
 
 var (
 	// A list of all available policy generators.
-	allGenerators = sets.Set[string]{
-		PodsAndReplicaSetsVAPGeneratorName:          {},
-		SvcAccountsAndTokenRequestsVAPGeneratorName: {},
-	}
+	allGenerators = sets.Set[string]{}
 )
+
+func init() {
+	// Add all available generators to the set.
+	v := reflect.ValueOf(DefaultPolicyGeneratorConfigs).Elem()
+	for i := range v.NumField() {
+		field := v.Field(i)
+		if field.IsNil() {
+			continue
+		}
+		gen, ok := field.Interface().(ValidatingAdmissionPolicyGenerator)
+		if !ok {
+			continue
+		}
+		allGenerators.Insert(gen.Name())
+	}
+}
 
 // AllGenerators returns a copy of all available policy generators.
 func AllGenerators() sets.Set[string] {
@@ -67,11 +80,15 @@ var (
 	}
 )
 
+type PolicyWithBindings struct {
+	Policy   *admissionregistrationv1.ValidatingAdmissionPolicy
+	Bindings []*admissionregistrationv1.ValidatingAdmissionPolicyBinding
+}
+
 type ValidatingAdmissionPolicyGenerator interface {
 	Name() string
 	Validate() error
-	Policies() []*admissionregistrationv1.ValidatingAdmissionPolicy
-	PolicyBindings() []*admissionregistrationv1.ValidatingAdmissionPolicyBinding
+	PoliciesWithBindings() []PolicyWithBindings
 }
 
 type PolicyManager struct {
@@ -159,31 +176,19 @@ func (m *PolicyManager) createOrUpdatePoliciesAndBindingsForEnabledGenerators(ct
 			return nil, nil, errors.Wraps(err, "policy generator is invalid", "generator", gen.Name())
 		}
 
-		policies := gen.Policies()
-		policyBindings := gen.PolicyBindings()
+		policiesWithBindings := gen.PoliciesWithBindings()
 
-		for _, policy := range policies {
-			// Add the managed by and part of labels to the policy, so that the agent can track the
-			// lifecycle of created policies across different runs and act accordingly.
-			if policy.Labels == nil {
-				policy.Labels = make(map[string]string)
-			}
-			policy.Labels[VAPManagedByKubeFleetLabelKey] = VAPManagedByKubeFleetLabelValue
-			policy.Labels[VAPPartOfKubeFleetLabelKey] = VAPPartOfKubeFleetLabelValue
-			policy.Labels[VAPComponentKubeFleetLabelKey] = VAPComponentAdmissionPolicyManagerLabelValue
+		for _, pb := range policiesWithBindings {
+			policy := pb.Policy
+			policyBindings := pb.Bindings
 
+			// Create the policy.
+			addManagedByPartOfAndComponentLabels(policy)
 			policyToCreateOrUpdate := &admissionregistrationv1.ValidatingAdmissionPolicy{
 				ObjectMeta: policy.ObjectMeta,
 			}
-			err := retry.OnError(policyRWOpBackoff, func(err error) bool {
-				// Retry on any error expect for context cancellation. Note that nil errors are not passed to this function,
-				// and AlreadyExists errors will not occur.
-				if ctx.Err() != nil {
-					// The main context has been cancelled. No need to retry anymore.
-					return false
-				}
-				return true
-			}, func() error {
+
+			err := retry.OnError(policyRWOpBackoff, buildRetryUnlessCtxErr(ctx), func() error {
 				opRes, err := controllerutil.CreateOrUpdate(ctx, m.Client, policyToCreateOrUpdate, func() error {
 					policyCopy := policy.DeepCopy()
 					policyToCreateOrUpdate.Spec = policyCopy.Spec
@@ -202,56 +207,41 @@ func (m *PolicyManager) createOrUpdatePoliciesAndBindingsForEnabledGenerators(ct
 				// No need to wrap this for another time. The inner error already contains sufficient context about the failure.
 				return nil, nil, err
 			}
-
 			createdOrUpdatedPolicyNames.Insert(policy.Name)
-
 			klog.V(2).InfoS("Successfully created or updated validating admission policy", "policyName", policy.Name, "policyGenerator", gen.Name())
-		}
 
-		for _, policyBinding := range policyBindings {
-			// Add the managed by and part of labels to the policy binding, so that the agent can track the
-			// lifecycle of created policy bindings across different runs and act accordingly.
-			if policyBinding.Labels == nil {
-				policyBinding.Labels = make(map[string]string)
-			}
-			policyBinding.Labels[VAPManagedByKubeFleetLabelKey] = VAPManagedByKubeFleetLabelValue
-			policyBinding.Labels[VAPPartOfKubeFleetLabelKey] = VAPPartOfKubeFleetLabelValue
-			policyBinding.Labels[VAPComponentKubeFleetLabelKey] = VAPComponentAdmissionPolicyManagerLabelValue
+			// Create the bindings.
+			for idx := range policyBindings {
+				policyBinding := policyBindings[idx]
 
-			policyBindingToCreateOrUpdate := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{
-				ObjectMeta: policyBinding.ObjectMeta,
-			}
-			err := retry.OnError(policyRWOpBackoff, func(err error) bool {
-				// Retry on any error expect for context cancellation. Note that nil errors are not passed to this function,
-				// and AlreadyExists errors will not occur.
-				if ctx.Err() != nil {
-					// The main context has been cancelled. No need to retry anymore.
-					return false
+				addManagedByPartOfAndComponentLabels(policyBinding)
+				policyBindingToCreateOrUpdate := &admissionregistrationv1.ValidatingAdmissionPolicyBinding{
+					ObjectMeta: policyBinding.ObjectMeta,
 				}
-				return true
-			}, func() error {
-				opRes, err := controllerutil.CreateOrUpdate(ctx, m.Client, policyBindingToCreateOrUpdate, func() error {
-					policyBindingCopy := policyBinding.DeepCopy()
-					policyBindingToCreateOrUpdate.Spec = policyBindingCopy.Spec
-					policyBindingToCreateOrUpdate.Labels = policyBindingCopy.Labels
+
+				err := retry.OnError(policyRWOpBackoff, buildRetryUnlessCtxErr(ctx), func() error {
+					opRes, err := controllerutil.CreateOrUpdate(ctx, m.Client, policyBindingToCreateOrUpdate, func() error {
+						policyBindingCopy := policyBinding.DeepCopy()
+						policyBindingToCreateOrUpdate.Spec = policyBindingCopy.Spec
+						policyBindingToCreateOrUpdate.Labels = policyBindingCopy.Labels
+						return nil
+					})
+					if err != nil {
+						return errors.NewAPIServerError(err,
+							"failed to create/update validating admission policy binding",
+							false,
+							"op", opRes, "policyBindingName", policyBinding.Name, "policyGenerator", gen.Name())
+					}
 					return nil
 				})
 				if err != nil {
-					return errors.NewAPIServerError(err,
-						"failed to create/update validating admission policy binding",
-						false,
-						"op", opRes, "policyBindingName", policyBinding.Name, "policyGenerator", gen.Name())
+					// No need to wrap this for another time. The inner error already contains sufficient context about the failure.
+					return nil, nil, err
 				}
-				return nil
-			})
-			if err != nil {
-				// No need to wrap this for another time. The inner error already contains sufficient context about the failure.
-				return nil, nil, err
+
+				createdOrUpdatedPolicyBindingNames.Insert(policyBinding.Name)
+				klog.V(2).InfoS("Successfully created or updated validating admission policy binding", "policyBindingName", policyBinding.Name, "policyGenerator", gen.Name())
 			}
-
-			createdOrUpdatedPolicyBindingNames.Insert(policyBinding.Name)
-
-			klog.V(2).InfoS("Successfully created or updated validating admission policy binding", "policyBindingName", policyBinding.Name, "policyGenerator", gen.Name())
 		}
 	}
 
@@ -262,19 +252,8 @@ func (m *PolicyManager) garbageCollectUnusedPoliciesAndBindings(ctx context.Cont
 	// List all existing policies and policy bindings created by the manager.
 	existingPolicyList := &admissionregistrationv1.ValidatingAdmissionPolicyList{}
 	existingPolicyBindingList := &admissionregistrationv1.ValidatingAdmissionPolicyBindingList{}
-	managedByAndPartOfKubeFleetLabelSelector := client.MatchingLabels{
-		VAPManagedByKubeFleetLabelKey: VAPManagedByKubeFleetLabelValue,
-		VAPPartOfKubeFleetLabelKey:    VAPPartOfKubeFleetLabelValue,
-		VAPComponentKubeFleetLabelKey: VAPComponentAdmissionPolicyManagerLabelValue,
-	}
-	err := retry.OnError(policyRWOpBackoff, func(err error) bool {
-		// Retry on any error. Note that nil errors are not passed to this function.
-		if ctx.Err() != nil {
-			// The main context has been cancelled. No need to retry anymore.
-			return false
-		}
-		return true
-	}, func() error {
+
+	err := retry.OnError(policyRWOpBackoff, buildRetryUnlessCtxErr(ctx), func() error {
 		if err := m.Client.List(ctx, existingPolicyList, managedByAndPartOfKubeFleetLabelSelector); err != nil {
 			return errors.NewAPIServerError(err, "failed to list all validating admission policies managed by KubeFleet", false)
 		}
@@ -285,14 +264,7 @@ func (m *PolicyManager) garbageCollectUnusedPoliciesAndBindings(ctx context.Cont
 		return err
 	}
 
-	err = retry.OnError(policyRWOpBackoff, func(err error) bool {
-		// Retry on any error. Note that nil errors are not passed to this function.
-		if ctx.Err() != nil {
-			// The main context has been cancelled. No need to retry anymore.
-			return false
-		}
-		return true
-	}, func() error {
+	err = retry.OnError(policyRWOpBackoff, buildRetryUnlessCtxErr(ctx), func() error {
 		if err := m.Client.List(ctx, existingPolicyBindingList, managedByAndPartOfKubeFleetLabelSelector); err != nil {
 			return errors.NewAPIServerError(err, "failed to list all validating admission policy bindings managed by KubeFleet", false)
 		}
@@ -307,14 +279,7 @@ func (m *PolicyManager) garbageCollectUnusedPoliciesAndBindings(ctx context.Cont
 	for i := range existingPolicyList.Items {
 		policy := &existingPolicyList.Items[i]
 		if !createdOrUpdatedPolicyNames.Has(policy.Name) {
-			err := retry.OnError(policyRWOpBackoff, func(err error) bool {
-				// Retry on any error. Note that nil errors are not passed to this function, and NotFound errors will not occur.
-				if ctx.Err() != nil {
-					// The main context has been cancelled. No need to retry anymore.
-					return false
-				}
-				return true
-			}, func() error {
+			err := retry.OnError(policyRWOpBackoff, buildRetryUnlessCtxErr(ctx), func() error {
 				if err := m.Client.Delete(ctx, policy); err != nil && !apierrors.IsNotFound(err) {
 					return errors.NewAPIServerError(err,
 						"failed to delete validating admission policy",
@@ -336,14 +301,7 @@ func (m *PolicyManager) garbageCollectUnusedPoliciesAndBindings(ctx context.Cont
 	for i := range existingPolicyBindingList.Items {
 		policyBinding := &existingPolicyBindingList.Items[i]
 		if !createdOrUpdatedPolicyBindingNames.Has(policyBinding.Name) {
-			err := retry.OnError(policyRWOpBackoff, func(err error) bool {
-				// Retry on any error. Note that nil errors are not passed to this function, and NotFound errors will not occur.
-				if ctx.Err() != nil {
-					// The main context has been cancelled. No need to retry anymore.
-					return false
-				}
-				return true
-			}, func() error {
+			err := retry.OnError(policyRWOpBackoff, buildRetryUnlessCtxErr(ctx), func() error {
 				if err := m.Client.Delete(ctx, policyBinding); err != nil && !apierrors.IsNotFound(err) {
 					return errors.NewAPIServerError(err,
 						"failed to delete validating admission policy binding",
