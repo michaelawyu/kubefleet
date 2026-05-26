@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// TO-DO (chenyu1): refactor the building logic from the current state (static generation)
+// to CEL expression trees after the initial set of VAPs are validated to be working as expected.
+
 package admissionpolicymanager
 
 import (
