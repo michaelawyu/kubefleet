@@ -1316,6 +1316,10 @@ var _ = Describe("fleet guard rail webhook tests for service accounts in restric
 
 	var svcAccount *corev1.ServiceAccount
 	BeforeAll(func() {
+		if isDenySvcAccountsAndTokenReqsInReservedNSVAPEnabled {
+			Skip("A VAP that serves the same purpose is enabled; skip this test as the request will be rejected by the VAP instead")
+		}
+
 		// Create a service account in the kube-system namespace.
 		svcAccount = &corev1.ServiceAccount{
 			ObjectMeta: metav1.ObjectMeta{
