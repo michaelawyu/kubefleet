@@ -69,7 +69,7 @@ type WebhookAndAdmissionPolicyOptions struct {
 	// Enable the KubeFleet admission policy manager or not.
 	//
 	// KubeFleet admission policy manager manages admission policies that help enforce and validate
-	// certain behaviors, which serves as a in-process, more performant and more available alternative
+	// certain behaviors, which serves as an in-process, more performant and more available alternative
 	// to some of the applicable KubeFleet validating webhooks. The manager installs and uninstalls
 	// admission policies when the hub agent starts.
 	//
@@ -155,7 +155,7 @@ func (o *WebhookAndAdmissionPolicyOptions) AddFlags(flags *flag.FlagSet) {
 		&o.EnableAdmissionPolicyManager,
 		"enable-admission-policy-manager",
 		false,
-		"Enable the KubeFleet admission policy manager or not. KubeFleet admission policy manager manages admission policies that help enforce and validate certain behaviors, which serves as a in-process, more performant and more available alternative to some of the applicable KubeFleet validating webhooks.",
+		"Enable the KubeFleet admission policy manager or not. KubeFleet admission policy manager manages admission policies that help enforce and validate certain behaviors, which serves as an in-process, more performant and more available alternative to some of the applicable KubeFleet validating webhooks.",
 	)
 
 	flags.StringVar(

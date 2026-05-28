@@ -176,8 +176,6 @@ var (
 	fleetBinaryPath = filepath.Join("../../", "hack", "tools", "bin", "kubectl-fleet")
 )
 
-const ()
-
 var (
 	isAzurePropertyProviderEnabled = (os.Getenv(propertyProviderEnvVarName) == azurePropertyProviderEnvVarValue)
 
