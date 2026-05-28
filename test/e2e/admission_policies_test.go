@@ -32,16 +32,16 @@ import (
 )
 
 var _ = Describe("deny service account writes and token requests in restricted namespaces via VAP", Ordered, func() {
-	if !isDenySvcAccountsAndTokenReqsInReservedNSVAPEnabled {
-		Skip("VAP required for this test is not enabled; skip the test")
-	}
-
 	svcAccountName := fmt.Sprintf(svcAccountNameTemplate, GinkgoParallelProcess())
 	svcAccountToAddName := "added-sa"
 	kubeSystemNamespaceName := "kube-system"
 
 	var svcAccount *corev1.ServiceAccount
 	BeforeAll(func() {
+		if !isDenySvcAccountsAndTokenReqsInReservedNSVAPEnabled {
+			Skip("VAP required for this test is not enabled; skip the test")
+		}
+
 		// Create a service account in the kube-system namespace.
 		svcAccount = &corev1.ServiceAccount{
 			ObjectMeta: metav1.ObjectMeta{
@@ -106,12 +106,14 @@ var _ = Describe("deny service account writes and token requests in restricted n
 })
 
 var _ = Describe("deny pod and replica set creation in non-reserved namespaces via VAP", Ordered, func() {
-	if !isDenyPodsAndReplicaSetsInNonReservedNSVAPEnabled {
-		Skip("VAP required for this test is not enabled; skip the test")
-	}
-
 	podName := "dummy-pod"
 	replicaSetName := "dummy-replica-set"
+
+	BeforeAll(func() {
+		if !isDenyPodsAndReplicaSetsInNonReservedNSVAPEnabled {
+			Skip("VAP required for this test is not enabled; skip the test")
+		}
+	})
 
 	AfterAll(func() {
 		// Ensure the removal of the pod in case the test fails and the object was inadvertently created.
