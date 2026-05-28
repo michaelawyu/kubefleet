@@ -176,6 +176,8 @@ var (
 	fleetBinaryPath = filepath.Join("../../", "hack", "tools", "bin", "kubectl-fleet")
 )
 
+const ()
+
 var (
 	isAzurePropertyProviderEnabled = (os.Getenv(propertyProviderEnvVarName) == azurePropertyProviderEnvVarValue)
 
@@ -186,6 +188,14 @@ var (
 	memberCluster1AKSRegion = "westus"
 	memberCluster2AKSRegion = "northeurope"
 	memberCluster3AKSRegion = "eastasia"
+)
+
+var (
+	// VAP related flags for running or skipping certain webhook and VAP related test cases.
+	//
+	// TO-DO (chenyu1): consider moving webhook and VAP related tests to its own separate test suite.
+	isDenySvcAccountsAndTokenReqsInReservedNSVAPEnabled = true
+	isDenyPodsAndReplicaSetsInNonReservedNSVAPEnabled   = false
 )
 
 var (

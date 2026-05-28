@@ -44,8 +44,9 @@ const (
 	kubeSchedulerUserName         = "system:kube-scheduler"
 	kubeControllerManagerUserName = "system:kube-controller-manager"
 
-	kubeNodeUserGroup = "system:nodes"
-	adminUserGroup    = "system:masters"
+	kubeNodeUserGroup     = "system:nodes"
+	adminUserGroup        = "system:masters"
+	kubeadmAdminUserGroup = "kubeadm:cluster-admins"
 )
 
 // Verify that ServiceAccountsAndTokenRequestsValidatingAdmissionPolicyGenerator implements
@@ -119,8 +120,11 @@ func (g *ServiceAccountsAndTokenRequestsValidatingAdmissionPolicyGenerator) Poli
 	celExprAccSegs = append(celExprAccSegs, fmt.Sprintf(`request.userInfo.username == "%s"`, kubeSchedulerUserName))
 	celExprAccSegs = append(celExprAccSegs, fmt.Sprintf(`request.userInfo.username == "%s"`, kubeControllerManagerUserName))
 	celExprAccSegs = append(celExprAccSegs, fmt.Sprintf(`"%s" in request.userInfo.groups`, kubeNodeUserGroup))
-	// Exempt requests from admin users from this admission policy.
+	// Exempt requests from cluster admin users from this admission policy.
 	celExprAccSegs = append(celExprAccSegs, fmt.Sprintf(`"%s" in request.userInfo.groups`, adminUserGroup))
+	// Exempt kubeadm cluster admins from this policy as well, so that bootstrapping a hub cluster with
+	// kubeadm credentials can proceed without being blocked.
+	celExprAccSegs = append(celExprAccSegs, fmt.Sprintf(`"%s" in request.userInfo.groups`, kubeadmAdminUserGroup))
 
 	celExprAcc := strings.Join(celExprAccSegs, " || ")
 

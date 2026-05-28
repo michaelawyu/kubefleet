@@ -122,6 +122,10 @@ _See [helm install](https://helm.sh/docs/helm/helm_install/) for command documen
 | `resourceSnapshotCreationMinimumInterval` | The minimum interval at which resource snapshots could be created.                         | `30s`                                            |
 | `resourceChangesCollectionDuration`       | The duration for collecting resource changes into one snapshot.                            | `15s`                                            |
 | `enableWorkload`                          | Enable kubernetes builtin workload to run in hub cluster.                                  | `false`                                          |
+| `additionalConfigData`                    | Additional key-value data to include in the hub-agent ConfigMap.                           | `{}`                                             |
+| `additionalConfigDataMountPath`           | Mount path for the additional config data volume.                                          | `/etc/kubefleet/additional-config`               |
+| `enableAdmissionPolicyManager`            | Enable the admission policy manager to enforce VAP-based policies on the hub cluster.      | `false`                                          |
+| `admissionPolicyManagerConfigName`        | Name of the ConfigMap containing the admission policy manager configuration.               | `""`                                             |
 
 ## Certificate Management
 
