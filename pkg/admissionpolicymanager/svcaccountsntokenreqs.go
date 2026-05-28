@@ -47,6 +47,7 @@ const (
 	kubeNodeUserGroup     = "system:nodes"
 	adminUserGroup        = "system:masters"
 	kubeadmAdminUserGroup = "kubeadm:cluster-admins"
+	svcAccountUserGroup   = "system:serviceaccounts"
 )
 
 // Verify that ServiceAccountsAndTokenRequestsValidatingAdmissionPolicyGenerator implements
@@ -125,6 +126,11 @@ func (g *ServiceAccountsAndTokenRequestsValidatingAdmissionPolicyGenerator) Poli
 	// Exempt kubeadm cluster admins from this policy as well, so that bootstrapping a hub cluster with
 	// kubeadm credentials can proceed without being blocked.
 	celExprAccSegs = append(celExprAccSegs, fmt.Sprintf(`"%s" in request.userInfo.groups`, kubeadmAdminUserGroup))
+	// Exempt service accounts from this admission policy. Note that VAP check happens after authentication and
+	// authorization have been performed. This is added to keep things consistent with the original webhook behavior,
+	// and also for the reason that some controller manager components (e.g., the service account controller)
+	// need to create service accounts as part of their normal operations.
+	celExprAccSegs = append(celExprAccSegs, fmt.Sprintf(`"%s" in request.userInfo.groups`, svcAccountUserGroup))
 
 	celExprAcc := strings.Join(celExprAccSegs, " || ")
 
