@@ -102,7 +102,7 @@ func New(client client.Client, policyGeneratorConfigs *PolicyGeneratorConfigs) (
 		klog.V(2).Info("No admission policy generator configuration provided, falling back to the default configuration")
 		policyGeneratorConfigs = DefaultPolicyGeneratorConfigs
 	}
-	// Prepare a set of generators based on the list of enabled policies.
+	// Prepare a set of generators based on the given configuration.
 	enabledPolicyGenerators, err := preparePolicyGenerators(policyGeneratorConfigs)
 	if err != nil {
 		return nil, errors.Wraps(err, "failed to create policy manager")

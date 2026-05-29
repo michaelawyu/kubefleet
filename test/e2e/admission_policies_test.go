@@ -29,6 +29,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+
+	"github.com/kubefleet-dev/kubefleet/pkg/admissionpolicymanager"
 )
 
 var _ = Describe("deny service account writes and token requests in restricted namespaces via VAP", Ordered, func() {
@@ -38,7 +40,7 @@ var _ = Describe("deny service account writes and token requests in restricted n
 
 	var svcAccount *corev1.ServiceAccount
 	BeforeAll(func() {
-		if !isDenySvcAccountsAndTokenReqsInReservedNSVAPEnabled {
+		if !EnabledVAPGenerators.Has(admissionpolicymanager.SvcAccountsAndTokenRequestsVAPGeneratorName) {
 			Skip("VAP required for this test is not enabled; skip the test")
 		}
 
@@ -110,7 +112,7 @@ var _ = Describe("deny pod and replica set creation in non-reserved namespaces v
 	replicaSetName := "dummy-replica-set"
 
 	BeforeAll(func() {
-		if !isDenyPodsAndReplicaSetsInNonReservedNSVAPEnabled {
+		if !EnabledVAPGenerators.Has(admissionpolicymanager.PodsAndReplicaSetsVAPGeneratorName) {
 			Skip("VAP required for this test is not enabled; skip the test")
 		}
 	})
