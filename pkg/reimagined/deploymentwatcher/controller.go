@@ -18,19 +18,31 @@ package deploymentwatcher
 
 import (
 	"context"
+	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	experimentalv1beta1 "github.com/kubefleet-dev/kubefleet/apis/experimental/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
 )
 
 const (
 	controllerName = "DeploymentWatcher"
+
+	deploymentForPlacementFinalizer = "experimental.kubefleet.dev/deployment-for-placement"
+
+	deploymentForPlacementAnnotationKey = "experimental.kubefleet.dev/place-to-regions"
+
+	workloadPlacementNameFmt = "%s"
 )
 
 type Reconciler struct {
@@ -46,8 +58,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}()
 
 	// Retrieve the Deployment object.
-	deploy := appsv1.Deployment{}
-	err := r.HubClient.Get(ctx, req.NamespacedName, &deploy)
+	deploy := &appsv1.Deployment{}
+	err := r.HubClient.Get(ctx, req.NamespacedName, deploy)
 	switch {
 	case apierrors.IsNotFound(err):
 		// The Deployment object cannot be found; it may have been deleted already. No need for further
@@ -56,10 +68,77 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	case err != nil:
 		// An error occurred while trying to retrieve the Deployment object; retry later.
-		wrappedErr := errors.NewAPIServerError()
-		klog.ErrorS(err, "Failed to get Deployment object. Requeuing.", "deployment", req.NamespacedName, "controller", controllerName)
-		return ctrl.Result{Requeue: true}, nil
+		wrappedErr := errors.NewAPIServerError(err, "", false, "deployment", req.NamespacedName, "controller", controllerName)
+		klog.ErrorS(wrappedErr, "Failed to get Deployment object", errors.Args(wrappedErr)...)
+		return ctrl.Result{}, wrappedErr
 	}
 
+	if deploy.DeletionTimestamp != nil {
+		if err := r.deleteWorkloadPlacementFor(ctx, deploy); err != nil {
+			klog.ErrorS(err, "Failed to delete workload placement for the deployment", append(errors.Args(err), "deployment", req.NamespacedName, "controller", controllerName)...)
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	placeToVal, ok := deploy.Annotations[deploymentForPlacementAnnotationKey]
+	if !ok {
+		// The place-to annotation is not present; the deployment is not marked for placement.
+		// No further reconciliation is needed.
+		klog.V(2).InfoS("Deployment is not marked for placement as the place-to annotation is not present", "deployment", req.NamespacedName, "controller", controllerName)
+		return ctrl.Result{}, nil
+	}
+
+	placeTos := strings.Split(placeToVal, ",")
+	// Sort the target names for deterministic processing.
+	slices.SortFunc(placeTos, func(x, y string) int {
+		return strings.Compare(x, y)
+	})
+
+	additionalResRefs, err := r.collectAdditionalResourceManifests(ctx, deploy)
+
+	placement := &experimentalv1beta1.WorkloadPlacement{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf(workloadPlacementNameFmt, deploy.Name),
+			Namespace: deploy.Namespace,
+		},
+	}
+	resOp, err := ctrl.CreateOrUpdate(ctx, r.HubClient, placement, func() error {
+		// Add the finalizer.
+		controllerutil.AddFinalizer(placement, deploymentForPlacementFinalizer)
+
+		// Add the cluster by region selector.
+		clusterByRegionSelector := make([]map[string]string, 0, len(placeTos))
+		for _, placeTo := range placeTos {
+			clusterByRegionSelector = append(clusterByRegionSelector, map[string]string{
+				"topology.kubernetes.io/region": placeTo,
+			})
+		}
+		placement.Spec.ClusterSelector = clusterByRegionSelector
+
+		// Add the workload reference.
+		placement.Spec.WorkloadRef = experimentalv1beta1.SameNamespacedObjectReference{
+			Kind:       "Deployment",
+			APIGroup:   "apps",
+			APIVersion: "v1",
+			Resource:   "deployments",
+			Name:       deploy.Name,
+		}
+
+		// Add the additional resource references.
+		placement.Spec.AdditionalResourceRefs = additionalResRefs
+		return nil
+	})
+	if err != nil {
+		wrappedErr := errors.NewAPIServerError(err, "", false, "deployment", req.NamespacedName, "workloadPlacement", client.ObjectKeyFromObject(placement), "op", resOp, "controller", controllerName)
+		klog.ErrorS(wrappedErr, "Failed to create or update workload placement for the deployment", errors.Args(wrappedErr)...)
+	}
+	klog.V(2).InfoS("Created or updated workload placement for the deployment", "deployment", req.NamespacedName, "workloadPlacement", client.ObjectKeyFromObject(placement), "op", resOp, "controller", controllerName)
 	return ctrl.Result{}, nil
+}
+
+func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&appsv1.Deployment{}).
+		Complete(r)
 }

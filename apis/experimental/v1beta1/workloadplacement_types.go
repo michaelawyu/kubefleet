@@ -21,8 +21,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	WorkloadPlacementCondTypeScheduled    = "Scheduled"
+	WorkloadPlacementCondTypeSynchronized = "Synchronized"
+)
+
 // WorkloadPlacement is a KubeFleet API that allows users to place workloads across
-// multi-cluster node pools as needed.
+// member clusters.
 //
 // +genclient
 // +kubebuilder:object:root=true
@@ -43,21 +48,17 @@ type WorkloadPlacement struct {
 }
 
 type WorkloadPlacementSpec struct {
-	// A list of label matchers that specifies the multi-cluster node pools where KubeFleet should place
-	// the workloads.
+	// A list of label matchers that specifies the member clusters where KubeFleet should place
+	// the workloads. For **each** label matcher, KubeFleet will find all matching member cluster and
+	// pick one of them to place the workload, as appropriate; if none can be found for a specific
+	// label matcher, KubeFleet will request a member cluster to be provisioned.
 	//
-	// Currently, KubeFleet will place the workloads on one member cluster per multi-cluster node pool.
-	// KubeFleet may scale up an existing member cluster or provision a new member cluster under a
-	// selected multi-cluster node pool as necessary.
-	//
-	// These matchers are AND'd.
-	//
-	// If not specified, all multi-cluster node pools will be selected.
+	// If not specified, KubeFleet will pick one member cluster from all member clusters.
 	//
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=5
-	MultiClusterNodePoolSelecter []map[string]string `json:"multiClusterNodePoolSelecter,omitempty"`
+	ClusterSelectors []map[string]string `json:"clusterSelectors,omitempty"`
 
 	// An object reference that points to the workload that KubeFleet will place.
 	//
@@ -78,31 +79,32 @@ type WorkloadPlacementSpec struct {
 	// +kubebuilder:validation:Optional
 	AdditionalResourceRefs []SameNamespacedObjectReference `json:"additionalResourceRefs,omitempty"`
 
-	// The capacity request for each pod of this workload. KubeFleet will use this information
-	// to request fitting nodes as needed from each selected multi-cluster node pool; it also
-	// helps KubeFleet collect and report resource usage across multi-cluster node pools and
-	// their member clusters.
+	// The capacity request for each pod of this workload. KubeFleet uses this information to help
+	// find the most appropriate member cluster(s) for placing the workload, taking information
+	// such as node availability into consideration.
 	//
 	// The information is not currently in use by KubeFleet.
 	//
 	// +kubebuilder:validation:Optional
-	CapacityRequest *CapacityRequestPerPod `json:"capacityRequest,omitempty"`
+	CapacityRequest *CapacityRequest `json:"capacityRequest,omitempty"`
 
 	// The revision history limit for this application. Every change to the application, including
 	// changes to the pod template and to the supplementary resources (e.g., ConfigMaps, Secrets)
 	// will create a new revision.
 	//
-	// The default value is 1.
+	// The default value is 3.
+	//
+	// This field is not currently in use by KubeFleet.
 	//
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=20
 	// +kubebuilder:validation:Optional
-	// +kubebuilder:default=1
+	// +kubebuilder:default=3
 	RevisionHistoryLimit *int32 `json:"revisionHistoryLimit,omitempty"`
 }
 
-// CapacityRequestPerPod is a request of nodes and resources for each pod of a workload.
-type CapacityRequestPerPod struct {
+// CapacityRequest is a request of nodes and resources for each pod of a workload.
+type CapacityRequest struct {
 	// A list of label matchers that specifies the nodes appropriate for running pods of this
 	// application. These selectors are OR'd. If not specified, any node is considered appropriate.
 	//
@@ -111,10 +113,6 @@ type CapacityRequestPerPod struct {
 	//   to ensure that all pods will run on the specified VM types only.
 	// * use kubernetes.io/arch to specify the architecture needed, e.g., amd64 or arm64.
 	// * use kubernetes.io/os to specify the OS needed, e.g., linux or windows.
-	//
-	// KubeFleet will request fitting nodes from the selected multi-cluster node pool(s) based on these selectors.
-	// It may run a pod on an existing cluster, or scale up an existing cluster, or even provision a new cluster
-	// if necessary.
 	//
 	// +kubebuilder:validation:Optional
 	NodeInstanceRequests []map[string]string `json:"nodeInstanceRequests,omitempty"`
@@ -136,10 +134,57 @@ type WorkloadPlacementStatus struct {
 	// The name of the latest revision of the resource snapshot created for this placement.
 	// +kubebuilder:validation:Optional
 	LatestResourceSnapshotRevisionName *string `json:"latestResourceSnapshotRevisionName,omitempty"`
+
+	// A list of binding managers that are currently managing the bindings for this placement.
+	// +kubebuilder:validation:Optional
+	BindingManagers []PlacementBindingManager `json:"bindingManagers,omitempty"`
+}
+
+type BindingManagerMode string
+
+const (
+	// The exclusive mode implies that the bindings for a placement is currently solely managed by one
+	// object or one controller; no other object or controller should add itself as a binding manager
+	// and should wait until the current manager removes itself from the binding managers list.
+	BindingManagerModeExclusive BindingManagerMode = "Exclusive"
+
+	// The shared among same-kind objects mode implies that the bindings for a placement can be managed
+	// by multiple objects of the same kind if needed; such objects can add themselves as binding managers by
+	// inserting to the list of binding managers.
+	BindingManagerModeSharedAmongSameKindObjects BindingManagerMode = "SharedAmongSameKindObjects"
+)
+
+// +kubebuilder:validation:XValidation:rule="has(self.objectRef) != has(self.controllerName)",message="exactly one of objectRef or controllerName must be set"
+type PlacementBindingManager struct {
+	// The mode of this binding manager. See the comments for each mode for more information.
+	//
+	// The default value is "Exclusive".
+	//
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=Exclusive
+	// +kubebuilder:validation:Enum=Exclusive;SharedAmongSameKindObjects
+	Mode BindingManagerMode `json:"mode"`
+
+	// A reference that points to the binding manager object.
+	//
+	// This field is mutually exclusive with the field, `ControllerName`. Exactly one of them
+	// should be set.
+	//
+	// +kubebuilder:validation:Optional
+	ObjectRef *SameNamespacedObjectReference `json:"objectRef,omitempty"`
+
+	// A name of the controller that manages the bindings for this placement.
+	//
+	// This field is mutually exclusive with the field, `ObjectRef`. Exactly one of them
+	// should be set.
+	//
+	// +kubebuilder:validation:Optional
+	ControllerName *string `json:"controllerName,omitempty"`
 }
 
 // WorkloadPlacementList contains a list of WorkloadPlacement.
 //
+// +kubebuilder:object:root=true
 // +kubebuilder:resource:scope="Namespaced"
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type WorkloadPlacementList struct {

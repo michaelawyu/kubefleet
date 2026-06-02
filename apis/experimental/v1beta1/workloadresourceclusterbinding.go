@@ -19,7 +19,7 @@ package v1beta1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // WorkloadResourceClusterBinding is the KubeFleet API that binds a workload placement to a
-// specific member cluster from a multi-cluster node pool.
+// specific member cluster.
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope="Namespaced",shortName=mcbinding,categories={kubefleet, kubefleet-experimental}
@@ -42,17 +42,13 @@ type WorkloadResourceClusterBindingSpec struct {
 	// +kubebuilder:validation:Required
 	WorkloadPlacementName string `json:"workloadPlacementName"`
 
-	// The name of the multi-cluster node pool that this binding is associated with.
-	// +kubebuilder:validation:Required
-	MultiClusterNodePoolName string `json:"multiClusterNodePoolName"`
-
 	// The name of the member cluster that this binding is associated with.
 	// +kubebuilder:validation:Optional
 	MemberClusterName *string `json:"memberClusterName"`
 
 	// The name of the resource snapshot revision that this binding is associated with.
-	// +kubebuilder:validation:Required
-	LatestResourceSnapshotRevisionName string `json:"latestResourceSnapshotRevisionName,omitempty"`
+	// +kubebuilder:validation:Optional
+	ResourceSnapshotRevisionName *string `json:"resourceSnapshotRevisionName,omitempty"`
 }
 
 type WorkloadResourceClusterBindingStatus struct {
