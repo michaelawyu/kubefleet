@@ -38,3 +38,6 @@ ut-coverage.xml
 
 # Helm chart packaging
 .helm-packages/
+
+# Local testing environment configuration
+apiserver.local.config
