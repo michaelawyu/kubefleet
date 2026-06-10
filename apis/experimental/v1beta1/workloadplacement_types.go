@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	WorkloadPlacementCondTypeScheduled    = "Scheduled"
-	WorkloadPlacementCondTypeSynchronized = "Synchronized"
+	WorkloadPlacementCondTypeScheduled             = "Scheduled"
+	WorkloadPlacementCondTypeSynchronized          = "Synchronized"
+	WorkloadPlacementCondTypeAllResourcesAvailable = "AllResourcesAvailable"
 )
 
 // WorkloadPlacement is a KubeFleet API that allows users to place workloads across
@@ -32,7 +33,7 @@ const (
 // +genclient
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Namespaced,shortName=wp,categories={kubefleet, kubefleet-experimental}
+// +kubebuilder:resource:scope=Namespaced,shortName=wkp,categories={kubefleet, kubefleet-experimental}
 // +kubebuilder:storageversion
 type WorkloadPlacement struct {
 	metav1.TypeMeta   `json:",inline"`

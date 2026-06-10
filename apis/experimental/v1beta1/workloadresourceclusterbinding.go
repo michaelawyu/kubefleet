@@ -18,11 +18,32 @@ package v1beta1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+const (
+	WorkloadResourceClusterBindingOwnedByLabelKey               = "experimental.kubefleet.dev/cluster-binding-owned-by"
+	WorkloadResourceClusterBindingCreatedForMigrationRequestKey = "experimental.kubefleet.dev/cluster-binding-created-for-migration-request"
+	WorkloadResourceClusterBindingCreatedInPlaceForKey          = "experimental.kubefleet.dev/cluster-binding-created-in-place-for"
+
+	WorkloadResourceClusterBindingSelectorHashAnnotationKey = "experimental.kubefleet.dev/cluster-selector-hash"
+)
+
+const (
+	WorkOwnedByClusterBindingLabelKey = "experimental.kubefleet.dev/work-owned-by-cluster-binding"
+	WorkOwnedByPlacementLabelKey      = "experimental.kubefleet.dev/work-owned-by-placement"
+	WorkOwnerNamespaceLabelKey        = "experimental.kubefleet.dev/work-owner-namespace"
+
+	WorkDerivedFromSnapshotRevisionAnnotationKey = "experimental.kubefleet.dev/derived-from-snapshot-revision"
+)
+
+const (
+	WorkloadResourceClusterBindingCondTypeSynchronized          = "Synchronized"
+	WorkloadResourceClusterBindingCondTypeAllResourcesAvailable = "AllResourcesAvailable"
+)
+
 // WorkloadResourceClusterBinding is the KubeFleet API that binds a workload placement to a
 // specific member cluster.
 //
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:scope="Namespaced",shortName=mcbinding,categories={kubefleet, kubefleet-experimental}
+// +kubebuilder:resource:scope="Namespaced",shortName=wkbinding,categories={kubefleet, kubefleet-experimental}
 // +kubebuilder:subresource:status
 // +kubebuilder:storageversion
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -42,6 +63,10 @@ type WorkloadResourceClusterBindingSpec struct {
 	// +kubebuilder:validation:Required
 	WorkloadPlacementName string `json:"workloadPlacementName"`
 
+	// The hash of the cluster selector associated with this binding.
+	// +kubebuilder:validation:Required
+	ClusterSelectorHash string `json:"clusterSelectorHash"`
+
 	// The name of the member cluster that this binding is associated with.
 	// +kubebuilder:validation:Optional
 	MemberClusterName *string `json:"memberClusterName"`
@@ -49,6 +74,12 @@ type WorkloadResourceClusterBindingSpec struct {
 	// The name of the resource snapshot revision that this binding is associated with.
 	// +kubebuilder:validation:Optional
 	ResourceSnapshotRevisionName *string `json:"resourceSnapshotRevisionName,omitempty"`
+
+	// Whether the binding is suspended. If true, KubeFleet will remove resources
+	// from the associated member cluster.
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=false
+	Suspended bool `json:"suspended,omitempty"`
 }
 
 type WorkloadResourceClusterBindingStatus struct {

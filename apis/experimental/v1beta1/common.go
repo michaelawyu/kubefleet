@@ -37,3 +37,27 @@ type SameNamespacedObjectReference struct {
 	// +kubebuilder:validation:Required
 	Resource string `json:"resource,omitempty"`
 }
+
+type CrossNamespaceObjectReference struct {
+	// The namespace of the referenced object.
+	// +kubebuilder:validation:Required
+	Namespace string `json:"namespace"`
+
+	// The name of the referenced object.
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+
+	// The API group, version, kind, and resource of the referenced object.
+
+	// +kubebuilder:validation:Optional
+	APIGroup string `json:"apiGroup,omitempty"`
+
+	// +kubebuilder:validation:Required
+	APIVersion string `json:"apiVersion,omitempty"`
+
+	// +kubebuilder:validation:Required
+	Kind string `json:"kind,omitempty"`
+
+	// +kubebuilder:validation:Required
+	Resource string `json:"resource,omitempty"`
+}

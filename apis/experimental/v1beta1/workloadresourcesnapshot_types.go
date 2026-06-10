@@ -22,7 +22,8 @@ import (
 )
 
 const (
-	ResourceSnapshotOwnedByLabelKey = "experimental.kubefleet.dev/resource-snapshot-owned-by"
+	ResourceSnapshotOwnedByLabelKey  = "experimental.kubefleet.dev/resource-snapshot-owned-by"
+	ResourceSnapshotRevisionLabelKey = "experimental.kubefleet.dev/resource-snapshot-revision"
 )
 
 const (
@@ -33,14 +34,15 @@ const (
 	WorkloadResourceSnapshotRequestCompletedReasonWorkloadPlacementNotFound = "WorkloadPlacementNotFound"
 )
 
-// MultiClusterAppResourceSnapshot is the KubeFleet API that captures the resources
-// (e.g., pod templates, configmaps, secrets, etc.) of a multi-cluster application as seen on the hub cluster
-// at a specific point in time. It can be referenced by other KubeFleet APIs (e.g., MultiClusterAppResourceBinding)
+// WorkloadResourceSnapshot is the KubeFleet API that captures the resources
+// (e.g., pod templates, configmaps, secrets, etc.) of a workload as seen on the hub cluster
+// at a specific point in time. It can be referenced by other KubeFleet APIs
 // to enable consistent rollouts of resources across multiple member clusters in the fleet.
 //
 // +kubebuilder:object:root=true
-// +kubebuilder:resource:scope=Namespaced,shortname="apprs",categories={kubefleet, kubefleet-experimental}
+// +kubebuilder:resource:scope=Namespaced,shortName=wkrs,categories={kubefleet, kubefleet-experimental}
 // +kubebuilder:storageversion
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type WorkloadResourceSnapshot struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -62,7 +64,7 @@ type WorkloadResourceSnapshotSpec struct {
 type ManifestWithIdentifier struct {
 	// The identifier of the resource represented by the manifest.
 	// +kubebuilder:validation:Required
-	Identifier SameNamespacedObjectReference `json:",inline"`
+	Identifier SameNamespacedObjectReference `json:"identifier,omitempty"`
 
 	// The manifest of the resource. It should be a Kubernetes object in YAML or JSON format.
 	// +kubebuilder:validation:Required
@@ -74,6 +76,7 @@ type ManifestWithIdentifier struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced,categories={kubefleet, kubefleet-experimental}
 // +kubebuilder:storageversion
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type WorkloadResourceSnapshotList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
@@ -88,6 +91,8 @@ type WorkloadResourceSnapshotList struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced,categories={kubefleet, kubefleet-experimental}
 // +kubebuilder:storageversion
+// +kubebuilder:subresource:status
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type WorkloadResourceSnapshotRequest struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -102,7 +107,7 @@ type WorkloadResourceSnapshotRequest struct {
 type WorkloadResourceSnapshotRequestSpec struct {
 	// The reference to the workload for which a resource snapshot is requested.
 	// +kubebuilder:validation:Required
-	WorkloadPlacementRef SameNamespacedObjectReference `json:",inline"`
+	WorkloadPlacementRef SameNamespacedObjectReference `json:"workloadPlacementRef,omitempty"`
 
 	// The TTL (time to live) of the request. KubeFleet will GC old requests that have outlived their TTL.
 	//
@@ -125,9 +130,23 @@ type WorkloadResourceSnapshotRequestStatus struct {
 	WorkloadResourceSnapshotName string `json:"workloadResourceSnapshotName,omitempty"`
 }
 
+// WorkloadResourceSnapshotRequestList is a list of WorkloadResourceSnapshotRequest objects.
+//
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Namespaced,categories={kubefleet, kubefleet-experimental}
+// +kubebuilder:storageversion
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type WorkloadResourceSnapshotRequestList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+
+	// A list of workload resource snapshot requests.
+	Items []WorkloadResourceSnapshotRequest `json:"items"`
+}
+
 func init() {
 	SchemeBuilder.Register(
 		&WorkloadResourceSnapshot{}, &WorkloadResourceSnapshotList{},
-		&WorkloadResourceSnapshotRequest{},
+		&WorkloadResourceSnapshotRequest{}, &WorkloadResourceSnapshotRequestList{},
 	)
 }

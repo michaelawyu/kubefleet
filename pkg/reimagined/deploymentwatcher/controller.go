@@ -68,12 +68,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	case err != nil:
 		// An error occurred while trying to retrieve the Deployment object; retry later.
-		wrappedErr := errors.NewAPIServerError(err, "", false, "deployment", req.NamespacedName, "controller", controllerName)
+		wrappedErr := errors.NewAPIServerError(err, "", true, "deployment", req.NamespacedName, "controller", controllerName)
 		klog.ErrorS(wrappedErr, "Failed to get Deployment object", errors.Args(wrappedErr)...)
 		return ctrl.Result{}, wrappedErr
 	}
 
-	if deploy.DeletionTimestamp != nil {
+	if !deploy.DeletionTimestamp.IsZero() {
 		if err := r.deleteWorkloadPlacementFor(ctx, deploy); err != nil {
 			klog.ErrorS(err, "Failed to delete workload placement for the deployment", append(errors.Args(err), "deployment", req.NamespacedName, "controller", controllerName)...)
 			return ctrl.Result{}, err
@@ -84,9 +84,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	placeToVal, ok := deploy.Annotations[deploymentForPlacementAnnotationKey]
 	if !ok {
 		// The place-to annotation is not present; the deployment is not marked for placement.
-		// No further reconciliation is needed.
 		klog.V(2).InfoS("Deployment is not marked for placement as the place-to annotation is not present", "deployment", req.NamespacedName, "controller", controllerName)
+
+		// In case the deployment was previously marked for placement but now is not,
+		// delete the corresponding placement object (if any) and remove the finalizer from the deployment.
+		if err := r.deleteWorkloadPlacementFor(ctx, deploy); err != nil {
+			klog.ErrorS(err, "Failed to delete workload placement for the deployment that is no longer marked for placement", append(errors.Args(err), "deployment", req.NamespacedName, "controller", controllerName)...)
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
+	}
+
+	// Add a finalizer to the deployment.
+	if !controllerutil.ContainsFinalizer(deploy, deploymentForPlacementFinalizer) {
+		controllerutil.AddFinalizer(deploy, deploymentForPlacementFinalizer)
+		if err := r.HubClient.Update(ctx, deploy); err != nil {
+			wrappedErr := errors.NewAPIServerError(err, "", false, "deployment", req.NamespacedName, "controller", controllerName)
+			klog.ErrorS(wrappedErr, "Failed to add finalizer to the deployment", errors.Args(wrappedErr)...)
+			return ctrl.Result{}, wrappedErr
+		}
 	}
 
 	placeTos := strings.Split(placeToVal, ",")
@@ -96,6 +112,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	})
 
 	additionalResRefs, err := r.collectAdditionalResourceManifests(ctx, deploy)
+	if err != nil {
+		wrappedErr := errors.Wraps(err, "", "deployment", req.NamespacedName, "controller", controllerName)
+		klog.ErrorS(wrappedErr, "Failed to collect additional resource manifests for the deployment", errors.Args(wrappedErr)...)
+		return ctrl.Result{}, wrappedErr
+	}
 
 	placement := &experimentalv1beta1.WorkloadPlacement{
 		ObjectMeta: metav1.ObjectMeta{
@@ -104,17 +125,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		},
 	}
 	resOp, err := ctrl.CreateOrUpdate(ctx, r.HubClient, placement, func() error {
-		// Add the finalizer.
-		controllerutil.AddFinalizer(placement, deploymentForPlacementFinalizer)
-
 		// Add the cluster by region selector.
-		clusterByRegionSelector := make([]map[string]string, 0, len(placeTos))
+		clusterByRegionSelectors := make([]map[string]string, 0, len(placeTos))
 		for _, placeTo := range placeTos {
-			clusterByRegionSelector = append(clusterByRegionSelector, map[string]string{
+			clusterByRegionSelectors = append(clusterByRegionSelectors, map[string]string{
 				"topology.kubernetes.io/region": placeTo,
 			})
 		}
-		placement.Spec.ClusterSelector = clusterByRegionSelector
+		placement.Spec.ClusterSelectors = clusterByRegionSelectors
 
 		// Add the workload reference.
 		placement.Spec.WorkloadRef = experimentalv1beta1.SameNamespacedObjectReference{
@@ -132,6 +150,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if err != nil {
 		wrappedErr := errors.NewAPIServerError(err, "", false, "deployment", req.NamespacedName, "workloadPlacement", client.ObjectKeyFromObject(placement), "op", resOp, "controller", controllerName)
 		klog.ErrorS(wrappedErr, "Failed to create or update workload placement for the deployment", errors.Args(wrappedErr)...)
+		return ctrl.Result{}, wrappedErr
 	}
 	klog.V(2).InfoS("Created or updated workload placement for the deployment", "deployment", req.NamespacedName, "workloadPlacement", client.ObjectKeyFromObject(placement), "op", resOp, "controller", controllerName)
 	return ctrl.Result{}, nil
