@@ -256,13 +256,10 @@ spec:
                     name:
                       description: The name of the referenced object.
                       type: string
-                    resource:
-                      type: string
                   required:
                   - apiVersion
                   - kind
                   - name
-                  - resource
                   type: object
                 maxItems: 20
                 minItems: 1
@@ -441,13 +438,10 @@ spec:
                         name:
                           description: The name of the referenced object.
                           type: string
-                        resource:
-                          type: string
                       required:
                       - apiVersion
                       - kind
                       - name
-                      - resource
                       type: object
                     type: array
                 required:

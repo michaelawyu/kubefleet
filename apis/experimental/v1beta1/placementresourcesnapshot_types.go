@@ -24,6 +24,8 @@ import (
 const (
 	ResourceSnapshotOwnedByLabelKey  = "experimental.kubefleet.dev/resource-snapshot-owned-by"
 	ResourceSnapshotRevisionLabelKey = "experimental.kubefleet.dev/resource-snapshot-revision"
+
+	ResourceSnapshotContentsHashAnnotationKey = "experimental.kubefleet.dev/resource-snapshot-contents-hash"
 )
 
 const (
@@ -66,9 +68,9 @@ type ResourceContent struct {
 	// +kubebuilder:validation:Required
 	Manifest runtime.RawExtension `json:"manifest,omitempty"`
 
-	// The name of the data bundle that is associated with the resource, if any.
+	// Additional information associated with the resource, if any.
 	// +kubebuilder:validation:Optional
-	DataBundleName *string `json:"dataBundleName,omitempty"`
+	AdditionalInfo map[string][]byte `json:"additionalInfo,omitempty"`
 }
 
 // PlacementResourceSnapshotList is a list of PlacementResourceSnapshot objects.

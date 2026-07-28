@@ -547,7 +547,7 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 	}
 
 	// Set up reimagined controllers.
-	snapshotMgr := placementresourcesnapshot.NewManager(mgr.GetClient(), dynamicClient, 100)
+	snapshotMgr := placementresourcesnapshot.NewManager(mgr.GetClient(), dynamicClient, mgr.GetRESTMapper(), 100)
 	snapshotReqReconciler := placementresourcesnapshot.NewPlacementResourceSnapshotReqReconciler(
 		mgr.GetClient(), snapshotMgr, 30,
 	)

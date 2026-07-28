@@ -138,53 +138,6 @@ spec:
                       If unset, KubeFleet will check for updates every 30 minutes (1800 seconds).
                     format: int32
                     type: integer
-                  layerSelectors:
-                    description: |-
-                      The layer to process from the OCI artifact. KubeFleet will untar (and unzip, if applicable)
-                      the selected layer and save the contents for placement.
-
-                      In many cases KubeFleet can auto-process OCI artifacts with no additional instructions needed.
-                      If the OCI artifact is:
-
-                      * a single-layer artifact packaged with Helm that contains a Helm chart (using the media type
-                      `application/vnd.cncf.helm.chart.content.v1.tar+gzip`); or
-                      * a single- or multi-layer artifact packaged with ORAS that contains a bundle of Kubernetes manifests
-                        (possibly organized in a hierarchy of directories) with proper media types (e.g.,
-                        `application/vnd.oci.image.layer.v1.tar`) and annotations (e.g., `org.opencontainers.image.title`),
-
-                      No configuration is needed for this field. However, if the you package your artifact with
-                      a custom tool that sets different media types/annotations, you might need to explicitly specify
-                      which layer to pick and process by setting this field.
-
-                      If this field is unset and KubeFleet cannot recognize the layers, an error will be raised.
-
-                      If there are multiple matching layers, the first one (as ordered in the OCI artifact manifest)
-                      will be selected.
-                    properties:
-                      mediaType:
-                        description: The media type of the layer to select. The layer
-                          must be a tarball (possibly gzipped).
-                        type: string
-                        x-kubernetes-validations:
-                        - message: mediaType must end with '.tar' or '.tar+gzip'
-                          rule: self.endsWith('.tar') || self.endsWith('.tar+gzip')
-                      path:
-                        default: app
-                        description: |-
-                          The (relative) path where the contents of the layer will be extracted.
-                          It must be a single-level directory or file name.
-
-                          The default value is `app`.
-                        type: string
-                        x-kubernetes-validations:
-                        - message: path must be a single-level directory or file name
-                            using only alphanumeric characters, underscores, or dashes,
-                            e.g., 'app', 'deploy.yaml'
-                          rule: self.matches('^[a-zA-Z0-9_-]+([.][a-zA-Z0-9]+)?$')
-                    required:
-                    - mediaType
-                    - path
-                    type: object
                   timeoutSeconds:
                     default: 60
                     description: |-
@@ -261,13 +214,6 @@ spec:
                       type: string
                     description: The annotations of the OCI artifact.
                     type: object
-                  path:
-                    description: The path where the contents of the artifact are extracted.
-                    type: string
-                  size:
-                    description: The size of the OCI artifact in bytes.
-                    format: int64
-                    type: integer
                   tag:
                     description: The tag of the OCI artifact.
                     type: string

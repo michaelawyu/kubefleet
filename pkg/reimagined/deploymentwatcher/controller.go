@@ -147,7 +147,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			Kind:       "Deployment",
 			APIGroup:   "apps",
 			APIVersion: "v1",
-			Resource:   "deployments",
 			Name:       deploy.Name,
 		})
 		resourceSelectors = append(resourceSelectors, additionalResRefs...)

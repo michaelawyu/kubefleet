@@ -501,14 +501,11 @@ spec:
                         namespace:
                           description: The namespace of the referenced object.
                           type: string
-                        resource:
-                          type: string
                       required:
                       - apiVersion
                       - kind
                       - name
                       - namespace
-                      - resource
                       type: object
                     placementPolicyRef:
                       description: The reference to the placement policy involved
@@ -526,14 +523,11 @@ spec:
                         namespace:
                           description: The namespace of the referenced object.
                           type: string
-                        resource:
-                          type: string
                       required:
                       - apiVersion
                       - kind
                       - name
                       - namespace
-                      - resource
                       type: object
                     toClusterName:
                       description: |-
