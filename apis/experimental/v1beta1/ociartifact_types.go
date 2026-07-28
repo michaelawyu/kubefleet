@@ -16,31 +16,7 @@ limitations under the License.
 
 package v1beta1
 
-import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
-// OCIArtifact is the KubeFleet API that represents an ORAS (OCI Registry as Storage)
-// artifact (e.g., a Helm chart, or a bundle of Kubernetes manifests), which can be deployed to
-// member clusters via KubeFleet's placement APIs.
-//
-// +genclient
-// +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Namespaced,categories={kubefleet, kubefleet-experimental}
-// +kubebuilder:storageversion
 type OCIArtifact struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-
-	// The specification of the OCI artifact.
-	Spec OCIArtifactSpec `json:"spec,omitempty"`
-
-	// The observed status of the OCI artifact.
-	Status OCIArtifactStatus `json:"status,omitempty"`
-}
-
-type OCIArtifactSpec struct {
 	// The authentication provider to use when connecting to the OCI registry for artifact retrieval.
 	//
 	// If unset, KubeFleet will connect to the OCI registry directly (i.e., the registry is a public one).
@@ -86,7 +62,7 @@ type OCIArtifactSpec struct {
 	//
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=false
-	Suspend bool `json:"suspend,omitempty"`
+	//Suspend bool `json:"suspend,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:rule="self.authProviderType != 'Generic' || has(self.secretRef)",message="secretRef must be set when authProviderType is Generic"
@@ -112,7 +88,7 @@ type OCIArtifactAuthProvider struct {
 	// for more information.
 	//
 	// +kubebuilder:validation:Optional
-	SecretRef *SameNamespacedObjectReference `json:"secretRef,omitempty"`
+	SecretRef *CrossNamespaceObjectReference `json:"secretRef,omitempty"`
 }
 
 type AuthProviderType string
@@ -163,7 +139,7 @@ type OCIArtifactRetrievalPolicy struct {
 	// will be selected.
 	//
 	// +kubebuilder:validation:Optional
-	LayerSelectors OCIArtifactLayerSelector `json:"layerSelectors,omitempty"`
+	//LayerSelectors OCIArtifactLayerSelector `json:"layerSelectors,omitempty"`
 }
 
 type OCIArtifactLayerSelector struct {
@@ -227,18 +203,13 @@ type OCIArtifactReference struct {
 	//
 	// +kubebuilder:validation:Optional
 	Digest string `json:"digest,omitempty"`
-}
 
-type OCIArtifactStatus struct {
-	// A list of observed conditions about the OCI artifact.
+	/**
+	// The target platform of the OCI artifact.
 	//
-	// +kubebuilder:validation:Optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
-
-	// The details about the retrieved OCI artifact (if any).
-	//
-	// +kubebuilder:validation:Optional
-	ArtifactDetails OCIArtifactDetails `json:"artifact,omitempty"`
+	// If left empty, KubeFleet will not
+	Platform *ociimagespecv1.Platform `json:"platform,omitempty"`
+	*/
 }
 
 type OCIArtifactDetails struct {
@@ -250,10 +221,6 @@ type OCIArtifactDetails struct {
 	Digest string `json:"digest,omitempty"`
 	// The annotations of the OCI artifact.
 	Annotations map[string]string `json:"metadata,omitempty"`
-	// The path where the contents of the artifact are extracted.
-	Path string `json:"path,omitempty"`
-	// The size of the OCI artifact in bytes.
-	SizeBytes int64 `json:"size,omitempty"`
 	// The media type of the OCI artifact.
 	MediaType string `json:"mediaType,omitempty"`
 	// The type of the OCI artifact.
@@ -273,6 +240,6 @@ type OCIArtifactLayerDetails struct {
 	Digest string `json:"digest,omitempty"`
 	// The annotations of the layer.
 	Annotations map[string]string `json:"metadata,omitempty"`
-	// The path where the contents of the layer are extracted.
+	// The relative path where the contents of the layer are extracted.
 	Path string `json:"path,omitempty"`
 }

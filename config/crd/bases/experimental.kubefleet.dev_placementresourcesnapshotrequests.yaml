@@ -58,13 +58,10 @@ spec:
                   name:
                     description: The name of the referenced object.
                     type: string
-                  resource:
-                    type: string
                 required:
                 - apiVersion
                 - kind
                 - name
-                - resource
                 type: object
               ttl:
                 default: 600

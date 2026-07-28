@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-2
+  namespace: work
+data:
+  foo: baz

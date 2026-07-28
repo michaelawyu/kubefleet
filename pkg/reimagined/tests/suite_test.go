@@ -140,7 +140,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred())
 
 	By("Wiring up the placement resource snapshot manager and controller")
-	snapshotMgr = placementresourcesnapshot.NewManager(hubMgr.GetClient(), dynamicClient, 100)
+	snapshotMgr = placementresourcesnapshot.NewManager(hubMgr.GetClient(), dynamicClient, hubMgr.GetRESTMapper(), 100)
 	snapshotReconciler := placementresourcesnapshot.NewPlacementResourceSnapshotReqReconciler(
 		hubMgr.GetClient(), snapshotMgr, 30,
 	)

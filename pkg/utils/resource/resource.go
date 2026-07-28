@@ -38,7 +38,8 @@ func HashOf(resource any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%x", sha256.Sum256(jsonBytes)), nil
+	trimmed := bytes.TrimRight(jsonBytes, "\n\r")
+	return fmt.Sprintf("%x", sha256.Sum256(trimmed)), nil
 }
 
 func HashOfBytes(input []byte) string {

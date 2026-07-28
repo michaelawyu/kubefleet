@@ -12,6 +12,7 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/onsi/ginkgo/v2 v2.23.4
 	github.com/onsi/gomega v1.37.0
+	github.com/opencontainers/image-spec v1.1.1
 	github.com/prometheus/client_golang v1.22.0
 	github.com/prometheus/client_model v0.6.2
 	github.com/qri-io/jsonpointer v0.1.1
@@ -22,7 +23,7 @@ require (
 	go.goms.io/fleet-networking v0.3.3
 	go.uber.org/atomic v1.11.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/sync v0.18.0
+	golang.org/x/sync v0.20.0
 	golang.org/x/time v0.11.0
 	gomodules.xyz/jsonpatch/v2 v2.4.0
 	k8s.io/api v0.34.1
@@ -34,6 +35,7 @@ require (
 	k8s.io/kubectl v0.32.3
 	k8s.io/metrics v0.32.3
 	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
+	oras.land/oras-go/v2 v2.6.1
 	sigs.k8s.io/cloud-provider-azure v1.32.4
 	sigs.k8s.io/cloud-provider-azure/pkg/azclient v0.5.20
 	sigs.k8s.io/cluster-inventory-api v0.0.0-20251028164203-2e3fabb46733
@@ -89,6 +91,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/monochromegane/go-gitignore v0.0.0-20200626010858-205db1a8cc00 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/patrickmn/go-cache v2.1.0+incompatible // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect

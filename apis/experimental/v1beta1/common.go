@@ -33,9 +33,6 @@ type SameNamespacedObjectReference struct {
 
 	// +kubebuilder:validation:Required
 	Kind string `json:"kind,omitempty"`
-
-	// +kubebuilder:validation:Required
-	Resource string `json:"resource,omitempty"`
 }
 
 type CrossNamespaceObjectReference struct {
@@ -57,7 +54,4 @@ type CrossNamespaceObjectReference struct {
 
 	// +kubebuilder:validation:Required
 	Kind string `json:"kind,omitempty"`
-
-	// +kubebuilder:validation:Required
-	Resource string `json:"resource,omitempty"`
 }

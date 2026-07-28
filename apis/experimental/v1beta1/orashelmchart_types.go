@@ -21,30 +21,29 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// HelmRelease is the KubeFleet API that represents a Helm chart for placement, as extracted from an
-// OCI artifact.
+// ORASHelmChart is the KubeFleet API that represents a Helm chart from an OCI registry for placement.
 //
 // +genclient
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,categories={kubefleet, kubefleet-experimental}
 // +kubebuilder:storageversion
-type HelmRelease struct {
+type ORASHelmChart struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// The specification of the Helm release.
-	Spec HelmReleaseSpec `json:"spec,omitempty"`
+	// The specification of the ORAS Helm chart.
+	Spec ORASHelmChartSpec `json:"spec,omitempty"`
 
-	// The observed status of the Helm release.
-	Status HelmReleaseStatus `json:"status,omitempty"`
+	// The observed status of the ORAS Helm chart.
+	Status ORASHelmChartStatus `json:"status,omitempty"`
 }
 
-type HelmReleaseSpec struct {
-	// The reference to the OCI artifact that contains the Helm chart.
+type ORASHelmChartSpec struct {
+	// The reference to the OCI Helm chart artifact.
 	//
 	// +kubebuilder:Validation:Required
-	ChartRef SameNamespacedOCIArtifactReference `json:"chartRef,omitempty"`
+	OCIArtifactRef *OCIArtifact `json:"ociArtifactRef,omitempty"`
 
 	// The options for rendering the manifests from the Helm chart via the Helm Go SDK.
 	//
@@ -81,14 +80,7 @@ type HelmReleaseSpec struct {
 	// precedence over those from the previous sources in the list.
 	//
 	// +kubebuilder:Validation:Optional
-	ValuesFrom []HelmValuesFromObjectReference `json:"valuesFrom,omitempty"`
-}
-
-type SameNamespacedOCIArtifactReference struct {
-	// The name of the OCI artifact. The object must be in the same namespace as the helm release object.
-	//
-	// +kubebuilder:Validation:Required
-	Name string `json:"name,omitempty"`
+	//ValuesFrom []HelmValuesFromObjectReference `json:"valuesFrom,omitempty"`
 }
 
 type HelmOptions struct {
@@ -140,6 +132,7 @@ type HelmOptions struct {
 	SkipTests bool `json:"skipTests,omitempty"`
 }
 
+/**
 type HelmValuesFromObjectReference struct {
 	// The kind of the object that contains the Helm chart values.
 	// This can be either `ConfigMap` or `Secret`.
@@ -174,15 +167,11 @@ type HelmValuesFromObjectReference struct {
 	// +kubebuilder:Validation:Optional
 	SetAsLiteral bool `json:"setAsLiteral,omitempty"`
 }
+*/
 
-type HelmReleaseStatus struct {
+type ORASHelmChartStatus struct {
 	// A list of observed conditions of the Helm release.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// The hash of the Helm chart values, merged from all sources. This is a field kept for tracking
-	// changes in the Helm chart values.
-	ValuesHash string `json:"valuesHash,omitempty"`
-
-	// The path where the Helm chart values is kept, after merging the inputs from all sources.
-	ValuesPath string `json:"valuesPath,omitempty"`
+	OCIArtifactDetials *OCIArtifactDetails `json:"ociArtifactDetails,omitempty"`
 }

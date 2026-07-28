@@ -134,7 +134,7 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).ToNot(HaveOccurred())
 
-	snapshotMgr = placementresourcesnapshot.NewManager(hubMgr.GetClient(), dynamicClient, 100)
+	snapshotMgr = placementresourcesnapshot.NewManager(hubMgr.GetClient(), dynamicClient, hubMgr.GetRESTMapper(), 100)
 	reconciler = &Reconciler{
 		HubClient:                        hubMgr.GetClient(),
 		PlacementResourceSnapshotManager: snapshotMgr,
