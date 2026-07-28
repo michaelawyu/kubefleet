@@ -51,10 +51,13 @@ spec:
                   policy at the time of snapshot creation.
                 items:
                   properties:
-                    dataBundleName:
-                      description: The name of the data bundle that is associated
-                        with the resource, if any.
-                      type: string
+                    additionalInfo:
+                      additionalProperties:
+                        format: byte
+                        type: string
+                      description: Additional information associated with the resource,
+                        if any.
+                      type: object
                     identifier:
                       description: The identifier of the resource.
                       properties:
@@ -67,13 +70,10 @@ spec:
                         name:
                           description: The name of the referenced object.
                           type: string
-                        resource:
-                          type: string
                       required:
                       - apiVersion
                       - kind
                       - name
-                      - resource
                       type: object
                     manifest:
                       description: The manifest of the resource. It should be a Kubernetes

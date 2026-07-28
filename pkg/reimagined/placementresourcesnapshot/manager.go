@@ -23,13 +23,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	experimentalv1beta1 "github.com/kubefleet-dev/kubefleet/apis/experimental/v1beta1"
 	errors "github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
-	"github.com/kubefleet-dev/kubefleet/pkg/utils/resource"
 )
 
 const (
@@ -51,6 +51,8 @@ type Manager struct {
 	client        client.Client
 	dynamicClient dynamic.Interface
 
+	restMapper meta.RESTMapper
+
 	q chan newSnapshotRequest
 
 	isShutDown atomic.Bool
@@ -59,11 +61,13 @@ type Manager struct {
 func NewManager(
 	client client.Client,
 	dynamicClient dynamic.Interface,
+	restMapper meta.RESTMapper,
 	bufferSize int,
 ) *Manager {
 	return &Manager{
 		client:        client,
 		dynamicClient: dynamicClient,
+		restMapper:    restMapper,
 		q:             make(chan newSnapshotRequest, bufferSize),
 	}
 }
@@ -151,7 +155,7 @@ func (m *Manager) processOneNewSnapshotRequest(ctx context.Context, req *newSnap
 	//
 	// Note: for simplicity, ignore the case where the user simply shuffles the order
 	// of the additional resources in a placement.
-	resourceContents, err := m.retrieveResourceContentsFrom(ctx, placementPolicy)
+	resourceContents, resourceContentsHash, err := m.retrieveResourceContentsFrom(ctx, placementPolicy)
 	if err != nil {
 		wrappedErr := errors.Wraps(err, "failed to retrieve additional resources in use by the placement policy",
 			"placementPolicy", klog.KObj(placementPolicy))
@@ -161,7 +165,7 @@ func (m *Manager) processOneNewSnapshotRequest(ctx context.Context, req *newSnap
 	}
 
 	// Create a new snapshot.
-	newSnapshot, err := m.createNewResourceSnapshot(ctx, placementPolicy, resourceContents)
+	newSnapshot, err := m.createNewResourceSnapshot(ctx, placementPolicy, resourceContents, resourceContentsHash)
 	if err != nil {
 		wrappedErr := errors.Wraps(err, "failed to create new placement resource snapshot for the placement policy",
 			"placementPolicy", klog.KObj(placementPolicy))
@@ -226,22 +230,21 @@ func (m *Manager) IsResourceSnapshotUpToDate(
 	placementResourceSnapshot *experimentalv1beta1.PlacementResourceSnapshot,
 ) (bool, error) {
 	// Retrieve the manifests of the selected resources in this placement policy.
-	resourceContents, err := m.retrieveResourceContentsFrom(ctx, placementPolicy)
+	_, resourceContentsHash, err := m.retrieveResourceContentsFrom(ctx, placementPolicy)
 	if err != nil {
 		wrappedErr := errors.Wraps(err, "failed to retrieve additional resources in use by the placement policy",
 			"placementPolicy", klog.KObj(placementPolicy))
 		return false, wrappedErr
 	}
-	if len(resourceContents) != len(placementResourceSnapshot.Spec.Resources) {
+	if resourceContentsHash != placementResourceSnapshot.Annotations[experimentalv1beta1.ResourceSnapshotContentsHashAnnotationKey] {
 		return false, nil
 	}
-	for i := range resourceContents {
-		curAdditionalResManifestHash := resource.HashOfBytes(resourceContents[i].Manifest.Raw)
-		snapshotAdditionalResManifestHash := resource.HashOfBytes(placementResourceSnapshot.Spec.Resources[i].Manifest.Raw)
 
-		if curAdditionalResManifestHash != snapshotAdditionalResManifestHash {
-			return false, nil
-		}
-	}
+	// The hashes match, but there exists a corner case scenario where the user attempts an A-B-A type of
+	// changes where the resource contents are changed and then reverted back to the original state.
+	// For the demo this scenario is not handled; however, in production code this should be countered
+	// by a dry-run to ensure that the currently observed latest resource snapshot is indeed the most
+	// up-to-date snapshot.
+
 	return true, nil
 }

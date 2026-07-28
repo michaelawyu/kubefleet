@@ -23,7 +23,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -34,7 +33,7 @@ import (
 
 	experimentalv1beta1 "github.com/kubefleet-dev/kubefleet/apis/experimental/v1beta1"
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
-	"github.com/kubefleet-dev/kubefleet/pkg/utils/condition"
+	"github.com/kubefleet-dev/kubefleet/pkg/reimagined/ociartifactcachedlocalfsstore"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
 )
 
@@ -49,6 +48,10 @@ const (
 
 type Reconciler struct {
 	HubClient client.Client
+
+	OCIArtifactCachedStoreManager *ociartifactcachedlocalfsstore.Manager
+
+	UseHTTPToConnectToOCIRegistry bool
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -77,40 +80,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if !placementBinding.DeletionTimestamp.IsZero() || placementBinding.Spec.Suspended {
 		// Perform some cleanup.
-		if placementBinding.Spec.ClusterName != "" {
-			workNSName := fmt.Sprintf(memberClusterReservedNSFmt, placementBinding.Spec.ClusterName)
-
-			labelSelector := client.MatchingLabels{
-				experimentalv1beta1.WorkOwnedByPlacementBindingLabelKey: placementBinding.Name,
-				experimentalv1beta1.WorkOwnerNamespaceLabelKey:          placementBinding.Namespace,
-			}
-			workList := &placementv1beta1.WorkList{}
-			if err := r.HubClient.List(ctx, workList, labelSelector, client.InNamespace(workNSName)); err != nil {
-				wrappedErr := errors.NewAPIServerError(err, "", true, "work", "namespace", workNSName, "controllerName", controllerName)
-				klog.ErrorS(wrappedErr, "Failed to list work objects associated with the binding for cleanup", errors.Args(wrappedErr)...)
-				return ctrl.Result{}, wrappedErr
-			}
-
-			for idx := range workList.Items {
-				work := &workList.Items[idx]
-
-				if err := r.HubClient.Delete(ctx, work); err != nil && !apierrors.IsNotFound(err) {
-					wrappedErr := errors.NewAPIServerError(err, "", true, "work", klog.KObj(work), "controllerName", controllerName)
-					klog.ErrorS(wrappedErr, "Failed to delete work object associated with the binding for cleanup", errors.Args(wrappedErr)...)
-					return ctrl.Result{}, wrappedErr
-				}
-				klog.V(2).InfoS("Deleted work object associated with the binding for cleanup", "work", klog.KObj(work), "controller", controllerName)
-			}
+		if err := r.cleanupWorks(ctx, placementBinding); err != nil {
+			klog.ErrorS(err, "Failed to clean up work objects", append(errors.Args(err),
+				"placementBinding", req.NamespacedName, "controllerName", controllerName)...)
+			return ctrl.Result{}, err
 		}
 
 		// The binding has been marked for deletion; drop its cleanup finalizer.
-		if controllerutil.ContainsFinalizer(placementBinding, placementBindingCleanupFinalizer) {
-			controllerutil.RemoveFinalizer(placementBinding, placementBindingCleanupFinalizer)
-			if err := r.HubClient.Update(ctx, placementBinding); err != nil {
-				wrappedErr := errors.NewAPIServerError(err, "", true, "placementBinding", req.NamespacedName, "controllerName", controllerName)
-				klog.ErrorS(wrappedErr, "Failed to remove finalizer from placement binding", errors.Args(wrappedErr)...)
-				return ctrl.Result{}, wrappedErr
-			}
+		if err := r.removeFinalizer(ctx, placementBinding); err != nil {
+			klog.ErrorS(err, "Failed to remove cleanup finalizer", append(errors.Args(err),
+				"placementBinding", req.NamespacedName, "controllerName", controllerName)...)
+			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
 	}
@@ -120,7 +100,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		controllerutil.AddFinalizer(placementBinding, placementBindingCleanupFinalizer)
 		if err := r.HubClient.Update(ctx, placementBinding); err != nil {
 			wrappedErr := errors.NewAPIServerError(err, "", true, "placementBinding", req.NamespacedName, "controllerName", controllerName)
-			klog.ErrorS(wrappedErr, "Failed to add finalizer to placement binding", errors.Args(wrappedErr)...)
+			klog.ErrorS(wrappedErr, "Failed to add finalizer to placement binding")
 			return ctrl.Result{}, wrappedErr
 		}
 	}
@@ -161,70 +141,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			klog.V(2).InfoS("The corresponding Work object for the binding is up-to-date; no update is needed", "work", klog.KObj(work), "controller", controllerName)
 
 			// Refresh the status of the binding.
-			workAppliedCond := meta.FindStatusCondition(work.Status.Conditions, placementv1beta1.WorkConditionTypeApplied)
-			isWorkApplied := false
-			failedToApplyResourceCnt := 0
-			if condition.IsConditionStatusTrue(workAppliedCond, work.Generation) {
-				isWorkApplied = true
-			}
-			for idx := range work.Status.ManifestConditions {
-				manifestCond := &work.Status.ManifestConditions[idx]
-				manifestAppliedCond := meta.FindStatusCondition(manifestCond.Conditions, placementv1beta1.WorkConditionTypeApplied)
-				if !condition.IsConditionStatusTrue(manifestAppliedCond, work.Generation) {
-					failedToApplyResourceCnt++
-				}
-			}
-
 			updatedBinding := placementBinding.DeepCopy()
-			if isWorkApplied {
-				meta.SetStatusCondition(&updatedBinding.Status.Conditions, metav1.Condition{
-					Type:               experimentalv1beta1.PlacementBindingCondTypeSynchronized,
-					Status:             metav1.ConditionTrue,
-					Reason:             "AllResourcesApplied",
-					Message:            "All resources in the snapshot have been applied on the member cluster",
-					ObservedGeneration: updatedBinding.Generation,
-				})
-			} else {
-				meta.SetStatusCondition(&updatedBinding.Status.Conditions, metav1.Condition{
-					Type:               experimentalv1beta1.PlacementBindingCondTypeSynchronized,
-					Status:             metav1.ConditionFalse,
-					Reason:             "NotAllResourcesApplied",
-					Message:            fmt.Sprintf("%d of %d resources in the snapshot have been applied on the member cluster", len(work.Status.ManifestConditions)-failedToApplyResourceCnt, len(work.Status.ManifestConditions)),
-					ObservedGeneration: updatedBinding.Generation,
-				})
-			}
 
-			workAvailableCond := meta.FindStatusCondition(work.Status.Conditions, placementv1beta1.WorkConditionTypeAvailable)
-			isWorkAvailable := false
-			if condition.IsConditionStatusTrue(workAvailableCond, work.Generation) {
-				isWorkAvailable = true
-			}
-			failedToBeAvailableResourceCnt := 0
-			for idx := range work.Status.ManifestConditions {
-				manifestCond := &work.Status.ManifestConditions[idx]
-				manifestAvailableCond := meta.FindStatusCondition(manifestCond.Conditions, placementv1beta1.WorkConditionTypeAvailable)
-				if !condition.IsConditionStatusTrue(manifestAvailableCond, work.Generation) {
-					failedToBeAvailableResourceCnt++
-				}
-			}
-
-			if isWorkAvailable {
-				meta.SetStatusCondition(&updatedBinding.Status.Conditions, metav1.Condition{
-					Type:               experimentalv1beta1.PlacementBindingCondTypeAllResourcesAvailable,
-					Status:             metav1.ConditionTrue,
-					Reason:             "AllResourcesAvailable",
-					Message:            "All resources in the snapshot are available on the member cluster",
-					ObservedGeneration: updatedBinding.Generation,
-				})
-			} else {
-				meta.SetStatusCondition(&updatedBinding.Status.Conditions, metav1.Condition{
-					Type:               experimentalv1beta1.PlacementBindingCondTypeAllResourcesAvailable,
-					Status:             metav1.ConditionFalse,
-					Reason:             "NotAllResourcesAvailable",
-					Message:            fmt.Sprintf("%d of %d resources in the snapshot are available on the member cluster", len(work.Status.ManifestConditions)-failedToBeAvailableResourceCnt, len(work.Status.ManifestConditions)),
-					ObservedGeneration: updatedBinding.Generation,
-				})
-			}
+			prepareSynchronizedCondition(work, updatedBinding)
+			prepareAllResourcesAvailableCondition(work, updatedBinding)
 
 			// Write the status.
 			if !equality.Semantic.DeepEqual(placementBinding.Status, updatedBinding.Status) {
@@ -247,17 +167,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Retrieve the associated resource snapshot.
 	resourceSnapshot := &experimentalv1beta1.PlacementResourceSnapshot{}
 	if err := r.HubClient.Get(ctx, client.ObjectKey{Namespace: placementBinding.Namespace, Name: *placementBinding.Spec.ResourceSnapshotName}, resourceSnapshot); err != nil {
-		wrappedErr := errors.NewAPIServerError(err, "", true, "placementResourceSnapshot", client.ObjectKey{Namespace: placementBinding.Namespace, Name: *placementBinding.Spec.ResourceSnapshotName}, "controllerName", controllerName)
+		wrappedErr := errors.NewAPIServerError(err, "", true,
+			"placementResourceSnapshot", req.NamespacedName, "controllerName", controllerName)
 		klog.ErrorS(wrappedErr, "Failed to get the associated resource snapshot for the binding", errors.Args(wrappedErr)...)
 		return ctrl.Result{}, wrappedErr
 	}
 
-	manifests := []placementv1beta1.Manifest{}
-	// Add the resource manifests (if any).
-	for _, res := range resourceSnapshot.Spec.Resources {
-		manifests = append(manifests, placementv1beta1.Manifest{
-			RawExtension: res.Manifest,
-		})
+	manifests, err := r.extractManifestsFrom(ctx, resourceSnapshot)
+	if err != nil {
+		wrappedErr := errors.Wraps(err, "",
+			"placementResourceSnapshot", req.NamespacedName, "controllerName", controllerName)
+		klog.ErrorS(wrappedErr, "Failed to extract manifests from the associated resource snapshot for the binding", errors.Args(wrappedErr)...)
+		return ctrl.Result{}, wrappedErr
 	}
 
 	workToCreateOrUpdate := &placementv1beta1.Work{

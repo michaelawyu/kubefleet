@@ -131,7 +131,6 @@ func (r *Reconciler) relinquishBindingManagerRoleForAllAffectedPlacements(
 				APIGroup:   experimentalv1beta1.GroupVersion.Group,
 				APIVersion: experimentalv1beta1.GroupVersion.Version,
 				Kind:       "PlacementMigrationRequest",
-				Resource:   "placementmigrationrequests",
 			},
 		},
 	}

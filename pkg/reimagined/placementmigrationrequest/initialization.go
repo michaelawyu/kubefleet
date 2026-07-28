@@ -63,7 +63,6 @@ func (r *Reconciler) initialize(ctx context.Context, req *experimentalv1beta1.Pl
 				APIGroup:   experimentalv1beta1.GroupVersion.Group,
 				APIVersion: experimentalv1beta1.GroupVersion.Version,
 				Kind:       "PlacementMigrationRequest",
-				Resource:   "placementmigrationrequests",
 			},
 		},
 	}
@@ -230,7 +229,6 @@ func (r *Reconciler) retrieveOrCalculateFromClusterNameSetAndTargetBindings(
 				APIGroup:   experimentalv1beta1.GroupVersion.Group,
 				APIVersion: experimentalv1beta1.GroupVersion.Version,
 				Kind:       "PlacementBinding",
-				Resource:   "placementbindings",
 			},
 			PlacementPolicyRef: experimentalv1beta1.CrossNamespaceObjectReference{
 				Name:       binding.Spec.PlacementPolicyName,
@@ -238,7 +236,6 @@ func (r *Reconciler) retrieveOrCalculateFromClusterNameSetAndTargetBindings(
 				APIGroup:   experimentalv1beta1.GroupVersion.Group,
 				APIVersion: experimentalv1beta1.GroupVersion.Version,
 				Kind:       "PlacementPolicy",
-				Resource:   "placementpolicies",
 			},
 			FromClusterName: fromClusterName,
 		}

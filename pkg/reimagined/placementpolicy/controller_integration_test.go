@@ -132,14 +132,12 @@ var _ = Describe("placement policy ops", func() {
 							APIGroup:   "apps",
 							APIVersion: "v1",
 							Kind:       "Deployment",
-							Resource:   "deployments",
 						},
 						{
 							Name:       "app-config",
 							APIGroup:   "",
 							APIVersion: "v1",
 							Kind:       "ConfigMap",
-							Resource:   "configmaps",
 						},
 					},
 				},
@@ -173,6 +171,9 @@ var _ = Describe("placement policy ops", func() {
 						experimentalv1beta1.ResourceSnapshotOwnedByLabelKey:  "my-placement",
 						experimentalv1beta1.ResourceSnapshotRevisionLabelKey: "1",
 					},
+					Annotations: map[string]string{
+						experimentalv1beta1.ResourceSnapshotContentsHashAnnotationKey: "ea0f6f9962329f52c225aa54b34dd9542f70b024fa0c39d602423c62c79d5343", // SHA256 hash of empty string
+					},
 				},
 				Spec: experimentalv1beta1.PlacementResourceSnapshotSpec{
 					Resources: []experimentalv1beta1.ResourceContent{
@@ -181,7 +182,6 @@ var _ = Describe("placement policy ops", func() {
 								APIGroup:   "apps",
 								APIVersion: "v1",
 								Kind:       "Deployment",
-								Resource:   "deployments",
 								Name:       "app",
 							},
 						},
@@ -190,7 +190,6 @@ var _ = Describe("placement policy ops", func() {
 								APIGroup:   "",
 								APIVersion: "v1",
 								Kind:       "ConfigMap",
-								Resource:   "configmaps",
 								Name:       "app-config",
 							},
 						},
@@ -566,14 +565,12 @@ var _ = Describe("placement policy ops", func() {
 							APIGroup:   "apps",
 							APIVersion: "v1",
 							Kind:       "Deployment",
-							Resource:   "deployments",
 						},
 						{
 							Name:       "app2-config",
 							APIGroup:   "",
 							APIVersion: "v1",
 							Kind:       "ConfigMap",
-							Resource:   "configmaps",
 						},
 					},
 				},
@@ -607,6 +604,9 @@ var _ = Describe("placement policy ops", func() {
 						experimentalv1beta1.ResourceSnapshotOwnedByLabelKey:  "my-placement-2",
 						experimentalv1beta1.ResourceSnapshotRevisionLabelKey: "1",
 					},
+					Annotations: map[string]string{
+						experimentalv1beta1.ResourceSnapshotContentsHashAnnotationKey: "dffbc24a5b3337130682d5668233dc2373256cf5f24d40888b53f9270afc4908",
+					},
 				},
 				Spec: experimentalv1beta1.PlacementResourceSnapshotSpec{
 					Resources: []experimentalv1beta1.ResourceContent{
@@ -615,7 +615,6 @@ var _ = Describe("placement policy ops", func() {
 								APIGroup:   "apps",
 								APIVersion: "v1",
 								Kind:       "Deployment",
-								Resource:   "deployments",
 								Name:       "app2",
 							},
 						},
@@ -624,7 +623,6 @@ var _ = Describe("placement policy ops", func() {
 								APIGroup:   "",
 								APIVersion: "v1",
 								Kind:       "ConfigMap",
-								Resource:   "configmaps",
 								Name:       "app2-config",
 							},
 						},
@@ -985,14 +983,12 @@ var _ = Describe("placement policy ops", func() {
 							APIGroup:   "apps",
 							APIVersion: "v1",
 							Kind:       "Deployment",
-							Resource:   "deployments",
 						},
 						{
 							Name:       "app3-config",
 							APIGroup:   "",
 							APIVersion: "v1",
 							Kind:       "ConfigMap",
-							Resource:   "configmaps",
 						},
 					},
 				},

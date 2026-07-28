@@ -121,49 +121,6 @@ spec:
                   over those set in the `ValuesFrom` field.
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
-              valuesFrom:
-                description: |-
-                  The Helm chart values, set via ConfigMap or Secret objects.
-
-                  You may also set values directly via the `Values` field above. KubeFleet will merge the values from all sources
-                  and apply them when templating the Helm chart. If a value is set in multiple sources, the value explicitly set
-                  in the `Values` field will take precedence over those set in this `ValuesFrom` field. If a value is set
-                  in multiple sources from this `ValuesFrom` field, the value from the last source in the list will take
-                  precedence over those from the previous sources in the list.
-                items:
-                  properties:
-                    dataKey:
-                      default: values.yaml
-                      description: |-
-                        The key in the `.data` field of the object that contains the Helm chart values.
-                        If not specified, the default value is `values.yaml`.
-                      type: string
-                    kind:
-                      description: |-
-                        The kind of the object that contains the Helm chart values.
-                        This can be either `ConfigMap` or `Secret`.
-                      enum:
-                      - ConfigMap
-                      - Secret
-                      type: string
-                    name:
-                      description: The name of the object that contains the Helm chart
-                        values.
-                      type: string
-                    setAsLiteral:
-                      description: |-
-                        Whether to treat the extracted data as a literal value. If set to `true`, the extracted data will be
-                        merged as a literal string value, rather than as an YAML object of its own.
-                      type: boolean
-                    valuesPath:
-                      description: |-
-                        The path in the values where the extracted data will be merged. The path should be a valid Go YAML path;
-                        see https://pkg.go.dev/github.com/goccy/go-yaml#PathString for more information.
-
-                        If not specified, the data will merged at the root level.
-                      type: string
-                  type: object
-                type: array
             type: object
           status:
             description: The observed status of the Helm release.
@@ -225,15 +182,6 @@ spec:
                   - type
                   type: object
                 type: array
-              valuesHash:
-                description: |-
-                  The hash of the Helm chart values, merged from all sources. This is a field kept for tracking
-                  changes in the Helm chart values.
-                type: string
-              valuesPath:
-                description: The path where the Helm chart values is kept, after merging
-                  the inputs from all sources.
-                type: string
             type: object
         type: object
     served: true

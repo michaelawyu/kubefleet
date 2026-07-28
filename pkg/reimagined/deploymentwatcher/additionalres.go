@@ -45,7 +45,6 @@ func (r *Reconciler) collectAdditionalResourceManifests(
 				Name:       vol.ConfigMap.Name,
 				APIGroup:   "",
 				APIVersion: "v1",
-				Resource:   "configmaps",
 			})
 		case vol.Secret != nil:
 			res = append(res, experimentalv1beta1.SameNamespacedObjectReference{
@@ -53,7 +52,6 @@ func (r *Reconciler) collectAdditionalResourceManifests(
 				Name:       vol.Secret.SecretName,
 				APIGroup:   "",
 				APIVersion: "v1",
-				Resource:   "secrets",
 			})
 		}
 	}

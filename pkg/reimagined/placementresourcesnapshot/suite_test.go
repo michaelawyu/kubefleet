@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	experimentalv1beta1 "github.com/kubefleet-dev/kubefleet/apis/experimental/v1beta1"
+	localregistry "github.com/kubefleet-dev/kubefleet/test/oci"
 )
 
 var (
@@ -84,6 +85,9 @@ var _ = BeforeSuite(func() {
 	klog.SetLogger(logger)
 	ctrl.SetLogger(logger)
 
+	By("Bootstrapping the local OCI registry")
+	Expect(localregistry.BootstrapLocalRegistry()).To(Succeed())
+
 	By("Bootstrapping the test environment")
 	hubEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
@@ -121,7 +125,7 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).ToNot(HaveOccurred())
 
-	snapshotMgr = NewManager(hubMgr.GetClient(), dynamicClient, 100)
+	snapshotMgr = NewManager(hubMgr.GetClient(), dynamicClient, hubMgr.GetRESTMapper(), 100)
 	reconciler = NewPlacementResourceSnapshotReqReconciler(hubMgr.GetClient(), snapshotMgr, 30)
 	Expect(reconciler.SetupWithManager(hubMgr)).To(Succeed())
 
@@ -148,4 +152,7 @@ var _ = AfterSuite(func() {
 	wg.Wait()
 	By("Tearing down the test environment")
 	Expect(hubEnv.Stop()).To(Succeed())
+
+	By("Tearing down the local OCI registry")
+	Expect(localregistry.TearDownLocalRegistry()).To(Succeed())
 })

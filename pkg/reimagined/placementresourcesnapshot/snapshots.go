@@ -42,6 +42,7 @@ func (m *Manager) createNewResourceSnapshot(
 	ctx context.Context,
 	placementPolicy *experimentalv1beta1.PlacementPolicy,
 	resourceContents []experimentalv1beta1.ResourceContent,
+	resourceContentsHash string,
 ) (*experimentalv1beta1.PlacementResourceSnapshot, error) {
 	snapshotList := &experimentalv1beta1.PlacementResourceSnapshotList{}
 	labelSelector := client.MatchingLabels{
@@ -62,6 +63,9 @@ func (m *Manager) createNewResourceSnapshot(
 				Labels: map[string]string{
 					experimentalv1beta1.ResourceSnapshotOwnedByLabelKey:  placementPolicy.Name,
 					experimentalv1beta1.ResourceSnapshotRevisionLabelKey: fmt.Sprintf("%d", startIdx),
+				},
+				Annotations: map[string]string{
+					experimentalv1beta1.ResourceSnapshotContentsHashAnnotationKey: resourceContentsHash,
 				},
 				OwnerReferences: []metav1.OwnerReference{
 					{
@@ -117,6 +121,14 @@ func (m *Manager) createNewResourceSnapshot(
 		return nil, errors.NewUnexpectedError(err, "failed to parse revision label on the latest snapshot", "snapshotName", latestSnapshot.Name, "revisionLabelValue", latestRevisionStr)
 	}
 
+	// TO-DO: handle the corner case of A-B-A type of changes.
+	if latestSnapshot.Annotations[experimentalv1beta1.ResourceSnapshotContentsHashAnnotationKey] == resourceContentsHash {
+		klog.V(2).InfoS("No changes detected in the placement policy's resources, skipping snapshot creation",
+			"latestSnapshot", klog.KObj(&latestSnapshot), "latestRevision", latestRevision,
+			"placementPolicy", klog.KObj(placementPolicy))
+		return &latestSnapshot, nil
+	}
+
 	// Create a new snapshot with the revision number incremented by 1.
 	newRevision := latestRevision + 1
 	newSnapshot := &experimentalv1beta1.PlacementResourceSnapshot{
@@ -126,6 +138,9 @@ func (m *Manager) createNewResourceSnapshot(
 			Labels: map[string]string{
 				experimentalv1beta1.ResourceSnapshotOwnedByLabelKey:  placementPolicy.Name,
 				experimentalv1beta1.ResourceSnapshotRevisionLabelKey: fmt.Sprintf("%d", newRevision),
+			},
+			Annotations: map[string]string{
+				experimentalv1beta1.ResourceSnapshotContentsHashAnnotationKey: resourceContentsHash,
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
