@@ -36,6 +36,7 @@ type PlacementResourceSnapshot struct {
 	// The spec of a placement resource snapshot.
 	//
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="the spec field is immutable"
 	Spec PlacementResourceSnapshotSpec `json:"spec"`
 }
 
@@ -80,6 +81,7 @@ type ClusterPlacementResourceSnapshot struct {
 	// The spec of a cluster placement resource snapshot.
 	//
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="the spec field is immutable"
 	Spec PlacementResourceSnapshotSpec `json:"spec"`
 }
 

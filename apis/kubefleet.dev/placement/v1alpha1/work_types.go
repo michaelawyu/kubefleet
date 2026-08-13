@@ -79,6 +79,10 @@ type WorkStatus struct {
 	// A list of observed conditions of the work object.
 	//
 	// +kubebuilder:validation:Optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// The observed status of each manifest in the work object.
@@ -89,11 +93,17 @@ type WorkStatus struct {
 
 type PerManifestStatus struct {
 	// The identifier of the resource represented by the manifest.
+	//
 	// +kubebuilder:validation:Required
 	Identifier ManifestIdentifier `json:"identifier,omitempty"`
 
 	// A list of observed conditions of the manifest.
+	//
 	// +kubebuilder:validation:Optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// The details about observed diffs between the resource on the hub cluster and on the member cluster side, if any.
@@ -149,8 +159,8 @@ type PatchDetail struct {
 type ManifestIdentifier struct {
 	// The ordinal of the manifest.
 	//
-	// +kubebuilder:validation:Optional
-	Ordinal int `json:"ordinal,omitempty"`
+	// +kubebuilder:validation:Required
+	Ordinal int `json:"ordinal"`
 
 	// The namespace of the manifest.
 	//

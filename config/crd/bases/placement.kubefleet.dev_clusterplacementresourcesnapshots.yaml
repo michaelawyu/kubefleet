@@ -92,6 +92,9 @@ spec:
                   type: object
                 type: array
             type: object
+            x-kubernetes-validations:
+            - message: the spec field is immutable
+              rule: self == oldSelf
         required:
         - spec
         type: object

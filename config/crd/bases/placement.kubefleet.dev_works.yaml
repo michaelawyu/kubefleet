@@ -239,6 +239,9 @@ spec:
                   - type
                   type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               manifests:
                 description: The observed status of each manifest in the work object.
                 items:
@@ -301,6 +304,9 @@ spec:
                         - type
                         type: object
                       type: array
+                      x-kubernetes-list-map-keys:
+                      - type
+                      x-kubernetes-list-type: map
                     diffDetails:
                       description: |-
                         The details about observed diffs between the resource on the hub cluster and on the member cluster side, if any.
@@ -372,6 +378,7 @@ spec:
                       - apiVersion
                       - kind
                       - name
+                      - ordinal
                       - resource
                       type: object
                   required:

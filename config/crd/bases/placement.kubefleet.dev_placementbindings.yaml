@@ -413,6 +413,153 @@ spec:
                   - type
                   type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              failedResources:
+                description: |-
+                  A list of resources that have failed to be synchronized to the target cluster, or have failed to become
+                  available in the target cluster.
+
+                  If there are more than 50 failed resources, only the first 50 will be included in this list.
+                items:
+                  properties:
+                    conditions:
+                      description: A list of observed conditions about the failed
+                        resource.
+                      items:
+                        description: Condition contains details for one aspect of
+                          the current state of this API Resource.
+                        properties:
+                          lastTransitionTime:
+                            description: |-
+                              lastTransitionTime is the last time the condition transitioned from one status to another.
+                              This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                            format: date-time
+                            type: string
+                          message:
+                            description: |-
+                              message is a human readable message indicating details about the transition.
+                              This may be an empty string.
+                            maxLength: 32768
+                            type: string
+                          observedGeneration:
+                            description: |-
+                              observedGeneration represents the .metadata.generation that the condition was set based upon.
+                              For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                              with respect to the current state of the instance.
+                            format: int64
+                            minimum: 0
+                            type: integer
+                          reason:
+                            description: |-
+                              reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                              Producers of specific condition types may define expected values and meanings for this field,
+                              and whether the values are considered a guaranteed API.
+                              The value should be a CamelCase string.
+                              This field may not be empty.
+                            maxLength: 1024
+                            minLength: 1
+                            pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                            type: string
+                          status:
+                            description: status of the condition, one of True, False,
+                              Unknown.
+                            enum:
+                            - "True"
+                            - "False"
+                            - Unknown
+                            type: string
+                          type:
+                            description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                            maxLength: 316
+                            pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                            type: string
+                        required:
+                        - lastTransitionTime
+                        - message
+                        - reason
+                        - status
+                        - type
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - type
+                      x-kubernetes-list-type: map
+                    diffDetails:
+                      description: |-
+                        The details about observed diffs between the resource on the hub cluster and on the member cluster side, if any.
+                        This field is populated when drift detection is enabled and the resource is of a drifted state,
+                        or when diff check upon takeovers is enabled and diffs have been detected on the resource to take over.
+                      properties:
+                        firstDiffedObservedTimestamp:
+                          description: The timestamp when the diffs are first detected.
+                          format: date-time
+                          type: string
+                        observedDiffs:
+                          description: |-
+                            The diffs observed between the state of the resource on the hub cluster and on the member cluster
+                            side. A diff is reported as a JSON path and the values at the path on both sides.
+                          items:
+                            properties:
+                              path:
+                                description: The JSON path that points to a field
+                                  that has diffed.
+                                type: string
+                              valueInHub:
+                                description: |-
+                                  The value at the JSON path from the hub cluster side.
+
+                                  If empty, the JSON path does not exist on the hub cluster side.
+                                type: string
+                              valueInMember:
+                                description: |-
+                                  The value at the JSON path from the member cluster side.
+
+                                  If empty, the JSON path does not exist on the member cluster side.
+                                type: string
+                            required:
+                            - path
+                            type: object
+                          type: array
+                        observedInMemberClusterGeneration:
+                          description: |-
+                            The generation of the resource, as seen on the member cluster side.
+
+                            If set to nil, the resource has not been created yet on the member cluster.
+                          format: int64
+                          type: integer
+                      required:
+                      - firstDiffedObservedTimestamp
+                      type: object
+                    objectRef:
+                      description: The object reference of the failed resource.
+                      properties:
+                        apiGroup:
+                          type: string
+                        apiVersion:
+                          type: string
+                        kind:
+                          type: string
+                        name:
+                          description: The name of the referenced object.
+                          type: string
+                        namespace:
+                          description: |-
+                            The namespace of the referenced object.
+
+                            If the object is cluster-scoped, this field should be left empty.
+                          type: string
+                      required:
+                      - apiVersion
+                      - kind
+                      - name
+                      type: object
+                  required:
+                  - objectRef
+                  type: object
+                maxItems: 50
+                type: array
               selectedResources:
                 description: The number of resources that are included in the currently
                   associated resource snapshot(s).

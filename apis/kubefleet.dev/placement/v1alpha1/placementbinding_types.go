@@ -131,6 +131,10 @@ type PlacementBindingStatus struct {
 	// A list of observed conditions about the binding.
 	//
 	// +kubebuilder:validation:Optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// The number of resources that are included in the currently associated resource snapshot(s).
@@ -150,6 +154,38 @@ type PlacementBindingStatus struct {
 	//
 	// +kubebuilder:validation:Optional
 	AvailableResources *int32 `json:"availableResources,omitempty"`
+
+	// A list of resources that have failed to be synchronized to the target cluster, or have failed to become
+	// available in the target cluster.
+	//
+	// If there are more than 50 failed resources, only the first 50 will be included in this list.
+	//
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:validation:MaxItems=50
+	FailedResources []FailedResource `json:"failedResources,omitempty"`
+}
+
+type FailedResource struct {
+	// The object reference of the failed resource.
+	//
+	// +kubebuilder:validation:Required
+	ObjectRef ObjectReference `json:"objectRef"`
+
+	// A list of observed conditions about the failed resource.
+	//
+	// +kubebuilder:validation:Optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// The details about observed diffs between the resource on the hub cluster and on the member cluster side, if any.
+	// This field is populated when drift detection is enabled and the resource is of a drifted state,
+	// or when diff check upon takeovers is enabled and diffs have been detected on the resource to take over.
+	//
+	// +kubebuilder:validation:Optional
+	DiffDetails *DiffDetails `json:"diffDetails,omitempty"`
 }
 
 // The list objects for the PlacementBinding and ClusterPlacementBinding APIs.
