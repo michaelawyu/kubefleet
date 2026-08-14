@@ -75,9 +75,6 @@ func (p *ClusterPlacementPolicy) SetStatus(status PlacementPolicyStatus) {
 	p.Status = status
 }
 
-var _ PlacementResourceSnapshotAccessor = &PlacementResourceSnapshot{}
-var _ PlacementResourceSnapshotAccessor = &ClusterPlacementResourceSnapshot{}
-
 // PlacementResourceSnapshotAccessor provides unified access to the spec of placement resource snapshot resources,
 // namespace-scoped and cluster-scoped.
 //
@@ -105,9 +102,6 @@ func (p *ClusterPlacementResourceSnapshot) GetSpec() *PlacementResourceSnapshotS
 func (p *ClusterPlacementResourceSnapshot) SetSpec(spec PlacementResourceSnapshotSpec) {
 	p.Spec = spec
 }
-
-var _ PlacementBindingAccessor = &PlacementBinding{}
-var _ PlacementBindingAccessor = &ClusterPlacementBinding{}
 
 // PlacementBindingAccessor provides unified access to the spec and status of placement binding resources,
 // namespace-scoped and cluster-scoped.
