@@ -188,7 +188,7 @@ func (m *Manager) retrieveLatestSnapshot(ctx context.Context, placementPolicy pl
 		return nil, nil
 	}
 
-	// Sort the primary snapshots by their indice.
+	// Sort the primary snapshots by their indices.
 	var sortErrs []error
 	sort.Slice(snapshots, func(i, j int) bool {
 		indexIStr := snapshots[i].GetLabels()[placementv1alpha1.PlacementResourceSnapshotIndexLabelKey]
@@ -453,7 +453,7 @@ func (m *Manager) createResourceSnapshotAnyway(
 				placementPolicy.GetNamespace(), secondaryName, placementPolicy, nextSnapshotIdx, subIdx, resGroups[subIdx], currentHash, m.hubClient.Scheme())
 			if err != nil {
 				return nil, errors.Wraps(err, "failed to build a secondary placement resource snapshot",
-					"secondaryPlacementResourceSnapshotname", secondaryName,
+					"secondaryPlacementResourceSnapshotName", secondaryName,
 					"snapshotIndex", nextSnapshotIdx, "snapshotSubIndex", subIdx)
 			}
 

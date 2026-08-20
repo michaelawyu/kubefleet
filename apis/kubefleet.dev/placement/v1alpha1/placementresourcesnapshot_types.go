@@ -46,7 +46,7 @@ const (
 	//
 	// This label is set on all placement resource snapshots.
 	PlacementResourceSnapshotIndexLabelKey = "placement.kubefleet.dev/placement-resource-snapshot-index"
-	// PlacementResourceSnapshotSubIndexLabelKey is a label key that denotes the sub-index of a placement resource
+	// PlacementResourceSnapshotSubIndexLabelKey is a label key that denotes the sub-index of a placement resource snapshot.
 	// Its value is the sub-index integer formatted as a string.
 	//
 	// This label is set on all placement resource snapshots.
