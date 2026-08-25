@@ -22,6 +22,14 @@ import (
 )
 
 const (
+	WorkOwnerNamespaceLabelKey          = "placement.kubefleet.dev/owner-namespace"
+	WorkOwnedByPlacementPolicyLabelKey  = "placement.kubefleet.dev/owned-by-placement-policy"
+	WorkOwnedByPlacementBindingLabelKey = "placement.kubefleet.dev/owned-by-placement-binding"
+
+	WorkDerivedFromSourceAnnotationKey = "placement.kubefleet.dev/derived-from"
+)
+
+const (
 	// The condition types for the Work API.
 	WorkCondTypeApplied   = "Applied"
 	WorkCondTypeAvailable = "Available"

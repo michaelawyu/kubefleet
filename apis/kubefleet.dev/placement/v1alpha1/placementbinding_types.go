@@ -20,6 +20,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	PlacementBindingWorkListResourceVersionMustBeNoLessThanAnnotationKey = "placement.kubefleet.dev/work-list-resource-version-must-be-no-less-than"
+)
+
 // The condition types for the PlacementBinding and ClusterPlacementBinding APIs.
 const (
 	PlacementBindingCondTypeSynchronized = "Synchronized"
@@ -30,6 +34,7 @@ const (
 const (
 	PlacementBindingSynchronizedCondReasonAllResourcesSynchronized         = "AllResourcesSynchronized"
 	PlacementBindingSynchronizedCondReasonFailedToSynchronizeSomeResources = "FailedToSynchronizeSomeResources"
+	PlacementBindingSynchronizedCondReasonWaitingForSynchronization        = "WaitingForSynchronization"
 
 	PlacementBindingAvailableCondReasonAllResourcesAvailable    = "AllResourcesAvailable"
 	PlacementBindingAvailableCondReasonSomeResourcesUnavailable = "SomeResourcesUnavailable"
@@ -163,6 +168,13 @@ type PlacementBindingStatus struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=50
 	FailedResources []FailedResource `json:"failedResources,omitempty"`
+
+	// The name of the placement resource snapshot that KubeFleet has last processed for this binding.
+	// This field helps KubeFleet track the processing progress; it also reveals whether the reported status
+	// is up to date.
+	//
+	// +kubebuilder:validation:Optional
+	LastProcessedResourceSnapshotName *string `json:"lastProcessedResourceSnapshotName,omitempty"`
 }
 
 type FailedResource struct {
