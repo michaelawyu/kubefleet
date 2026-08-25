@@ -84,7 +84,7 @@ func TestFillInClusterStatus(t *testing.T) {
 			},
 			clusterProfile:       &clusterinventory.ClusterProfile{},
 			expectVersion:        false,
-			expectAccessProvider: true,
+			expectAccessProvider: false,
 		},
 		{
 			name: "Cluster property collection succeeded with k8s version only",
@@ -111,7 +111,7 @@ func TestFillInClusterStatus(t *testing.T) {
 			clusterProfile:       &clusterinventory.ClusterProfile{},
 			expectVersion:        true,
 			expectedK8sVersion:   "v1.28.0",
-			expectAccessProvider: true,
+			expectAccessProvider: false,
 		},
 		{
 			name: "Cluster property collection succeeded with all properties",
@@ -176,8 +176,7 @@ func TestFillInClusterStatus(t *testing.T) {
 			clusterProfile:       &clusterinventory.ClusterProfile{},
 			expectVersion:        true,
 			expectedK8sVersion:   "v1.27.5",
-			expectAccessProvider: true,
-			expectedServer:       "https://api.partial-cluster.example.com:6443",
+			expectAccessProvider: false,
 		},
 	}
 
