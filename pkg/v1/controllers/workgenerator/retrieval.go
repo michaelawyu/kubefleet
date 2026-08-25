@@ -49,13 +49,16 @@ func (r *Reconciler) retrievePlacementBinding(ctx context.Context, namespacedNam
 
 // listWorksByOwnerBinding lists the Work objects owned by a placement binding within a Fleet member cluster reserved
 // namespace.
-func (r *Reconciler) listWorksByOwnerBinding(ctx context.Context, clusterName, ownerBindingName string) ([]placementv1alpha1.Work, error) {
+func (r *Reconciler) listWorksByOwnerBinding(ctx context.Context, clusterName, ownerBindingNSName, ownerBindingName string) ([]placementv1alpha1.Work, error) {
 	memberClusterNamespace := fmt.Sprintf(utils.NamespaceNameFormat, clusterName)
 
 	workList := &placementv1alpha1.WorkList{}
 	listOptions := []client.ListOption{
 		client.InNamespace(memberClusterNamespace),
-		client.MatchingLabels{placementv1alpha1.WorkOwnedByPlacementBindingLabelKey: ownerBindingName},
+		client.MatchingLabels{
+			placementv1alpha1.WorkOwnedByPlacementBindingLabelKey: ownerBindingName,
+			placementv1alpha1.WorkOwnerNamespaceLabelKey:          ownerBindingNSName,
+		},
 	}
 	if err := r.hubClient.List(ctx, workList, listOptions...); err != nil {
 		return nil, errors.NewAPIServerError(err, "failed to list work objects", true)

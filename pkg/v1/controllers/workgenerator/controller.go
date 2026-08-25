@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
@@ -73,6 +74,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Retrieve the PlacementBinding object.
 	placementBinding, err := r.retrievePlacementBinding(ctx, req.NamespacedName)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			klog.V(2).InfoS("placement binding is not found", "namespacedName", req.NamespacedName, "controller", controllerName)
+			return ctrl.Result{}, nil
+		}
 		klog.ErrorS(err, "", "namespacedName", req.NamespacedName, "controller", controllerName)
 		return ctrl.Result{}, errors.Wraps(err, "", "namespacedName", req.NamespacedName, "controller", controllerName)
 	}
@@ -107,7 +112,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// Retrieve the Work objects owned by the placement binding.
-	works, err := r.listWorksByOwnerBinding(ctx, placementBindingSpec.ClusterName, placementBinding.GetName())
+	works, err := r.listWorksByOwnerBinding(ctx, placementBindingSpec.ClusterName, placementBinding.GetNamespace(), placementBinding.GetName())
 	if err != nil {
 		wrappedErr := errors.Wraps(err, "", "placementBinding", klog.KObj(placementBinding),
 			"targetCluster", placementBindingSpec.ClusterName, "controller", controllerName)
