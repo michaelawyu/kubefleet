@@ -214,7 +214,7 @@ func (r *Reconciler) fillInClusterStatus(mc *clusterv1beta1.MemberCluster, cp *c
 		}
 	} else {
 		cp.Status.AccessProviders = nil
-		klog.V(2).InfoS("Cluster entry point and/or CA data is missing; reset cluster access provider to cluster profile status",
+		klog.V(2).InfoS("Cluster entry point and/or CA data is missing or empty; reset cluster access provider to cluster profile status",
 			"memberCluster", klog.KObj(mc), "clusterProfile", klog.KObj(cp),
 			"clusterEntryPointExists", entryPtExists, "caDataExists", caDataExists)
 	}
