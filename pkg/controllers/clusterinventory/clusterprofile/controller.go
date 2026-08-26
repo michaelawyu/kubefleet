@@ -202,7 +202,7 @@ func (r *Reconciler) fillInClusterStatus(mc *clusterv1beta1.MemberCluster, cp *c
 	// cluster properties.
 	clusterEntrypoint, entryPtExists := mc.Status.Properties[propertyprovider.ClusterEntryPointProperty]
 	caData, caDataExists := mc.Status.Properties[propertyprovider.ClusterCertificateAuthorityProperty]
-	if entryPtExists && caDataExists {
+	if entryPtExists && caDataExists && len(clusterEntrypoint.Value) > 0 && len(caData.Value) > 0 {
 		cp.Status.AccessProviders = []clusterinventory.AccessProvider{
 			{
 				Name: controller.ClusterManagerName,
@@ -213,7 +213,8 @@ func (r *Reconciler) fillInClusterStatus(mc *clusterv1beta1.MemberCluster, cp *c
 			},
 		}
 	} else {
-		klog.V(2).InfoS("Cluster entry point and/or CA data is missing; skip adding cluster access provider to cluster profile status",
+		cp.Status.AccessProviders = nil
+		klog.V(2).InfoS("Cluster entry point and/or CA data is missing; reset cluster access provider to cluster profile status",
 			"memberCluster", klog.KObj(mc), "clusterProfile", klog.KObj(cp),
 			"clusterEntryPointExists", entryPtExists, "caDataExists", caDataExists)
 	}
