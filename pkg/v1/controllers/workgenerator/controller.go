@@ -123,6 +123,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Check if the Work objects are consistent with the assigned primary and secondary placement resource snapshots.
 	// If so, no need to update the spec of the Work objects; just sync the status back to the placement binding
 	// instead.
+	//
+	// Note (chenyu1): this check is intended as a shortcut to avoid constant re-generation and validation of
+	// work objects (which can be expensive when there are a large number of manifests to place); once the controller
+	// signals that it has completed processing a placement binding given a specific configuration (a specific
+	// set of placement resource snapshots) and generated all the needed work objects, the control loop will skip
+	// to status reporting. In general we do not try to guard against byzantine faults here, especially
+	// considering that work objects are KubeFleet internal API objects that reside in reserved namespaces; if a
+	// non-KubeFleet agent decides to tamper with work objects, the system is not guaranteed to auto-recover.
+	// The changes, however, will be overwritten upon rollouts.
 	if areWorksUpToDate(placementBinding, works) {
 		if err := r.refreshPlacementBindingStatus(ctx, placementBinding, works); err != nil {
 			wrappedErr := errors.Wraps(err, "failed to refresh placement binding status",
