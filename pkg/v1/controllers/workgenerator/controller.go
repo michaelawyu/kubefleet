@@ -132,7 +132,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// considering that work objects are KubeFleet internal API objects that reside in reserved namespaces; if a
 	// non-KubeFleet agent decides to tamper with work objects, the system is not guaranteed to auto-recover.
 	// The changes, however, will be overwritten upon rollouts.
-	if areWorksUpToDate(placementBinding, works) {
+	upToDate, err := areWorksUpToDate(placementBinding, works)
+	if err != nil {
+		wrappedErr := errors.Wraps(err, "failed to check if work objects are up-to-date",
+			"placementBinding", klog.KObj(placementBinding), "targetCluster", placementBindingSpec.ClusterName,
+			"controller", controllerName)
+		klog.ErrorS(wrappedErr, "failed to check if work objects are up-to-date", errors.Args(wrappedErr)...)
+		return ctrl.Result{}, wrappedErr
+	}
+	if upToDate {
 		if err := r.refreshPlacementBindingStatus(ctx, placementBinding, works); err != nil {
 			wrappedErr := errors.Wraps(err, "failed to refresh placement binding status",
 				"placementBinding", klog.KObj(placementBinding), "targetCluster", placementBindingSpec.ClusterName,
@@ -158,7 +166,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// Create or update the work objects.
-	createdOrUpdatedWorks, err := r.refreshWorks(ctx, placementBinding, placementResourceSnapshots, works)
+	createdOrUpdatedWorks, writtenToStorage, err := r.refreshWorks(ctx, placementBinding, placementResourceSnapshots, works)
 	if err != nil {
 		wrappedErr := errors.Wraps(err, "failed to refresh work objects",
 			"placementBinding", klog.KObj(placementBinding), "targetCluster", placementBindingSpec.ClusterName,
@@ -178,8 +186,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, wrappedErr
 	}
 
-	// The work objects have been refreshed; wait for the created/updated events to trigger reconciliation
-	// of the placement binding, so that status can be sync'd back. No need to manually requeue here.
+	// The work objects have been refreshed. Normally the controller needs only to wait for the work objects
+	// to be processed by the KubeFleet member agent, then refresh the placement binding status upon receiving
+	// create/update events from the work objects, and there is no need to requeue manually. However, there exists
+	// a corner case in which a rollout attempt does not involve any change in the work objects; in this case there
+	// will not be any change events from the work objects and the work generator needs to requeue manually to
+	// have the placement binding status refreshed.
+	if !writtenToStorage {
+		// The work objects have not been created or updated; requeue manually.
+		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+	}
+	// The work objects have been created or updated; wait for change events from the work objects to refresh
+	// the placement binding status.
 	return ctrl.Result{}, nil
 }
 
@@ -233,9 +251,6 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconciles 
 				enqueueOwnerBindingForWork(e.ObjectNew, "update", q)
 			}
 		},
-		// The controller watches for work object delete events just to guard against unexpected deletion of work
-		// objects. Normally the work objects are owned by placement bindings and are only deleted by this
-		// controller.
 		DeleteFunc: func(_ context.Context, e event.TypedDeleteEvent[client.Object], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			enqueueOwnerBindingForWork(e.Object, "delete", q)
 		},

@@ -19,11 +19,14 @@ package workgenerator
 import (
 	"context"
 	"fmt"
-	"reflect"
+	"strconv"
+	"sync/atomic"
 
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -34,10 +37,6 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/parallelizer"
 )
 
-const (
-	derivedFromSnapshotSourceFmt = "placement-resource-snapshot/%s"
-)
-
 var (
 	workGVK = schema.GroupVersionKind{
 		Group:   placementv1alpha1.GroupVersion.Group,
@@ -46,7 +45,13 @@ var (
 	}
 )
 
-func areWorksUpToDate(placementBinding placementv1alpha1.PlacementBindingAccessor, works []placementv1alpha1.Work) bool {
+// areWorksUpToDate checks if the work objects for a placement binding are up-to-date, i.e., if all the work objects
+// needed given the current placement binding spec have been created/updated. If so, the work generation can skip
+// the work object create/update ops and skip to refreshing the placement binding status.
+func areWorksUpToDate(placementBinding placementv1alpha1.PlacementBindingAccessor, works []placementv1alpha1.Work) (bool, error) {
+	// Check if the last processed placement resource snapshot name in the placement binding status matches the
+	// primary placement resource snapshot name in the placement binding spec. If so, it ensures that all the needed
+	// work objects have been created/updated for the placement binding.
 	lastProcessedSnapshotName := ""
 	if placementBinding.GetStatus().LastProcessedResourceSnapshotName != nil {
 		lastProcessedSnapshotName = *placementBinding.GetStatus().LastProcessedResourceSnapshotName
@@ -54,26 +59,68 @@ func areWorksUpToDate(placementBinding placementv1alpha1.PlacementBindingAccesso
 	primarySnapshotName := placementBinding.GetSpec().ResourceSnapshotName
 
 	if lastProcessedSnapshotName != primarySnapshotName {
-		return false
+		return false, nil
+	}
+
+	// Do some sanity checks, just to make sure that the cache is up to date.
+	if len(works) == 0 {
+		// No work objects exist for the placement binding. The cache might not have caught up yet.
+		return false, errors.NewTransientError(nil, "no work objects are found; the cache might be stale")
+	}
+
+	// Check if all the work objects have been linked to the expected placement resource snapshot (in the spec),
+	// and verify that the linked work count recorded on the primary work matches the number of listed works.
+	linkedWorkCount := -1
+	for idx := range works {
+		work := &works[idx]
+		annotations := work.GetAnnotations()
+		if linked := annotations[placementv1alpha1.WorkLinkedToPrimaryPlacementResourceSnapshotAnnotationKey]; linked != primarySnapshotName {
+			// The work object is linked to a different placement resource snapshot than the one in the placement binding spec.
+			// This might happen if the cache is stale.
+			return false, errors.NewTransientError(nil, "found a work object that is not linked to the expected primary placement resource snapshot",
+				"work", klog.KObj(work), "linkedPlacementResourceSnapshotName", linked, "expectedPlacementResourceSnapshotName", primarySnapshotName)
+		}
+
+		linkedWorkCountStr, found := annotations[placementv1alpha1.LinkedWorkCountAnnotationKey]
+		if !found {
+			continue
+		}
+		if linkedWorkCount != -1 {
+			// At any time there should be exactly one primary placement resource snapshot that has the
+			// linked work count annotation.
+			return false, errors.NewUnexpectedError(nil, "multiple primary placement resource snapshots have the linked work count annotation",
+				"work", klog.KObj(work), "linkedWorkCount", linkedWorkCountStr)
+		}
+		var err error
+		linkedWorkCount, err = strconv.Atoi(linkedWorkCountStr)
+		if err != nil || linkedWorkCount < 1 {
+			return false, errors.NewUnexpectedError(err, "invalid linked work count annotation on work object",
+				"work", klog.KObj(work), "linkedWorkCount", linkedWorkCountStr)
+		}
+	}
+	if linkedWorkCount != len(works) {
+		return false, errors.NewTransientError(nil, "the number of work objects is not as expected",
+			"expectedWorkCount", linkedWorkCount, "actualWorkCount", len(works))
 	}
 
 	// Check if the sync strategy of the placement binding still matches that on the work objects.
 	syncStrategy := placementBinding.GetSpec().SyncStrategy
 	for idx := range works {
 		work := &works[idx]
-		if !reflect.DeepEqual(work.Spec.SyncStrategy, syncStrategy) {
-			return false
+		if !equality.Semantic.DeepEqual(work.Spec.SyncStrategy, syncStrategy) {
+			return false, nil
 		}
 	}
 
-	return true
+	return true, nil
 }
 
 func (r *Reconciler) refreshWorks(ctx context.Context,
 	placementBinding placementv1alpha1.PlacementBindingAccessor,
 	sortedPlacementResourceSnapshots []placementv1alpha1.PlacementResourceSnapshotAccessor,
 	works []placementv1alpha1.Work,
-) ([]*placementv1alpha1.Work, error) {
+) ([]*placementv1alpha1.Work, bool, error) {
+	writtenToStorage := false
 	worksToDelete := []*placementv1alpha1.Work{}
 
 	// Build an index of work objects by their names.
@@ -83,8 +130,9 @@ func (r *Reconciler) refreshWorks(ctx context.Context,
 		existingWorksByName[work.GetName()] = work
 	}
 
-	createdOrUpdatedWorkNames := sets.Set[string]{}
-	// First, build a work object for the primary placement resource snapshot.
+	seenWorkNames := sets.Set[string]{}
+	// First, build a work object for the primary placement resource snapshot. This is considered to be the
+	// primary work object for the placement binding.
 	//
 	// This work object serves as the owner of all other work objects created for this placement binding. KubeFleet
 	// leverages this setup to ensure that if a placement binding is deleted, all the work objects created for it
@@ -94,75 +142,102 @@ func (r *Reconciler) refreshWorks(ctx context.Context,
 	// different namespaces, and cross-namespace ownership is not allowed in K8s. The list-then-delete loop has
 	// limitations as well, as stale cache might leave some work objects behind.
 	primaryPlacementResourceSnapshot := sortedPlacementResourceSnapshots[0]
-	workToCreateOrUpdate, err := buildWorkObjectFor(primaryPlacementResourceSnapshot, placementBinding, nil)
+	primaryWorkToCreateOrUpdate, err := buildWorkObjectFor(primaryPlacementResourceSnapshot, placementBinding, primaryPlacementResourceSnapshot.GetName())
 	if err != nil {
-		return nil, errors.Wraps(err, "failed to build work object for primary placement resource snapshot",
+		return nil, false, errors.Wraps(err, "failed to build work object for primary placement resource snapshot",
 			"primaryPlacementResourceSnapshot", klog.KObj(primaryPlacementResourceSnapshot))
 	}
-	createdOrUpdatedWorks, err := r.createOrUpdateWorkObjects(ctx, []*placementv1alpha1.Work{workToCreateOrUpdate}, placementBinding)
-	if err != nil {
-		return nil, errors.Wraps(err, "failed to create or update work object for primary placement resource snapshot",
-			"primaryPlacementResourceSnapshot", klog.KObj(primaryPlacementResourceSnapshot))
-	}
-	createdOrUpdatedWorkNames.Insert(createdOrUpdatedWorks[0].GetName())
-	ownerWorkObjRef := metav1.NewControllerRef(createdOrUpdatedWorks[0], workGVK)
+	seenWorkNames.Insert(primaryWorkToCreateOrUpdate.GetName())
 
-	// Then build work objects for any secondary placement resource snapshots.
+	// Then build work objects for any secondary placement resource snapshots. These work objects are considered to
+	// be secondary work objects for the placement binding.
 	var additionalWorksToCreateOrUpdate []*placementv1alpha1.Work
 	for idx := 1; idx < len(sortedPlacementResourceSnapshots); idx++ {
 		snapshot := sortedPlacementResourceSnapshots[idx]
-		work, err := buildWorkObjectFor(snapshot, placementBinding, ownerWorkObjRef)
+		work, err := buildWorkObjectFor(snapshot, placementBinding, primaryPlacementResourceSnapshot.GetName())
 		if err != nil {
-			return nil, errors.Wraps(err, "failed to build work object for placement resource snapshot",
+			return nil, false, errors.Wraps(err, "failed to build work object for placement resource snapshot",
 				"placementResourceSnapshot", klog.KObj(snapshot))
 		}
-		if alreadyCreatedOrUpdated := createdOrUpdatedWorkNames.Has(work.GetName()); alreadyCreatedOrUpdated {
-			return nil, errors.NewUnexpectedError(nil, "duplicate work object built for placement resource snapshot",
+		if seenWorkNames.Has(work.GetName()) {
+			return nil, false, errors.NewUnexpectedError(nil, "duplicate work object built for placement resource snapshot",
 				"work", klog.KObj(work), "placementResourceSnapshot", klog.KObj(snapshot))
 		}
 		additionalWorksToCreateOrUpdate = append(additionalWorksToCreateOrUpdate, work)
-		createdOrUpdatedWorkNames.Insert(work.GetName())
+		seenWorkNames.Insert(work.GetName())
 	}
+
+	// Add the linked work object count annotation on the primary work object. The count is the total number of
+	// work objects created for the placement binding, including the primary work object itself.
+	primaryWorkToCreateOrUpdate.GetAnnotations()[placementv1alpha1.LinkedWorkCountAnnotationKey] = fmt.Sprintf("%d", len(additionalWorksToCreateOrUpdate)+1)
 
 	// Check for dangling work objects (those that are no longer linked with any source) and add them to the
 	// deletion list.
 	for _, work := range existingWorksByName {
-		if updated := createdOrUpdatedWorkNames.Has(work.GetName()); updated {
+		if seenWorkNames.Has(work.GetName()) {
 			continue
 		}
 		klog.V(2).InfoS("A work object is no longer needed; mark it for deletion", "work", klog.KObj(work))
 		worksToDelete = append(worksToDelete, work)
 	}
 
-	// Issue the create or update ops for the secondary work objects in parallel.
-	additionalCreatedOrUpdatedWorks, err := r.createOrUpdateWorkObjects(ctx, additionalWorksToCreateOrUpdate, placementBinding)
+	// Issue the delete ops in parallel. The control loop deletes the dangling work objects first to avoid
+	// potential conflicts (e.g., creating the same object twice). This is a best-effort attempt as we cannot
+	// create/update/delete work objects in a transactional manner.
+	if err := r.deleteWorkObjects(ctx, worksToDelete, placementBinding); err != nil {
+		return nil, false, errors.Wraps(err, "failed to delete dangling work objects")
+	}
+
+	// Create the primary work object first. This is needed as the controller needs its object UID to set
+	// owner references on the secondary work objects.
+	createdOrUpdatedWorks, primaryWorkObjWrittenToStorage, err := r.createOrUpdateWorkObjects(ctx,
+		[]*placementv1alpha1.Work{primaryWorkToCreateOrUpdate}, placementBinding)
 	if err != nil {
-		return nil, errors.Wraps(err, "failed to create or update additional work objects for secondary placement resource snapshots")
+		return nil, false, errors.Wraps(err, "failed to create or update work object for primary placement resource snapshot",
+			"primaryPlacementResourceSnapshot", klog.KObj(primaryPlacementResourceSnapshot))
+	}
+	ownerWorkObjRef := metav1.NewControllerRef(createdOrUpdatedWorks[0], workGVK)
+	writtenToStorage = primaryWorkObjWrittenToStorage
+
+	// Set the owner reference on all secondary work objects.
+	for idx := range additionalWorksToCreateOrUpdate {
+		work := additionalWorksToCreateOrUpdate[idx]
+		work.SetOwnerReferences([]metav1.OwnerReference{*ownerWorkObjRef})
+	}
+
+	// Issue the create or update ops for the secondary work objects in parallel.
+	additionalCreatedOrUpdatedWorks, additionalCreatedOrUpdated, err := r.createOrUpdateWorkObjects(ctx, additionalWorksToCreateOrUpdate, placementBinding)
+	if err != nil {
+		return nil, false, errors.Wraps(err, "failed to create or update additional work objects for secondary placement resource snapshots")
 	}
 	createdOrUpdatedWorks = append(createdOrUpdatedWorks, additionalCreatedOrUpdatedWorks...)
-
-	// Issue the delete ops in parallel.
-	if err := r.deleteWorkObjects(ctx, worksToDelete, placementBinding); err != nil {
-		return nil, errors.Wraps(err, "failed to delete dangling work objects")
+	if !writtenToStorage {
+		writtenToStorage = additionalCreatedOrUpdated
 	}
 
-	return createdOrUpdatedWorks, nil
+	return createdOrUpdatedWorks, writtenToStorage, nil
 }
 
 func buildWorkObjectFor(
 	placementResourceSnapshot placementv1alpha1.PlacementResourceSnapshotAccessor,
 	placementBinding placementv1alpha1.PlacementBindingAccessor,
-	ownerWorkObjRef *metav1.OwnerReference,
+	primaryPlacementResourceSnapshotName string,
 ) (*placementv1alpha1.Work, error) {
 	snapshotSubIdx := placementResourceSnapshot.GetLabels()[placementv1alpha1.PlacementResourceSnapshotSubIndexLabelKey]
 	if len(snapshotSubIdx) == 0 {
 		return nil, errors.NewUnexpectedError(nil, "no sub-index label found on the placement resource snapshot")
 	}
-	derivedFromSnapshotSrc := fmt.Sprintf(derivedFromSnapshotSourceFmt, snapshotSubIdx)
+	derivedFromSnapshotSrcFormatter := &placementResourceSnapshotDerivedFromSourceFormatter{
+		snapshotNamespacedName: types.NamespacedName{
+			Namespace: placementResourceSnapshot.GetNamespace(),
+			Name:      placementResourceSnapshot.GetName(),
+		},
+		snapshotSubIdx: snapshotSubIdx,
+	}
 	placementBindingSpec := placementBinding.GetSpec()
 	placementResourceSnapshotSpec := placementResourceSnapshot.GetSpec()
 
-	workName, err := uniqueNameForWorkDerivedFromPlacementResourceSnapshot(placementBinding, snapshotSubIdx == "0", snapshotSubIdx)
+	workName, err := uniqueNameForWorkDerivedFromPlacementResourceSnapshot(placementBinding, snapshotSubIdx == "0", derivedFromSnapshotSrcFormatter)
 	if err != nil {
 		return nil, errors.Wraps(err, "failed to generate unique name for the work object", "snapshotSubIdx", snapshotSubIdx)
 	}
@@ -175,28 +250,32 @@ func buildWorkObjectFor(
 	}
 	updateWorkObjectMetadataAndSpec(
 		work,
-		ownerWorkObjRef,
 		placementBinding.GetNamespace(),
 		placementBindingSpec.PlacementPolicyName,
 		placementBinding.GetName(),
-		derivedFromSnapshotSrc,
+		primaryPlacementResourceSnapshotName,
+		derivedFromSnapshotSrcFormatter,
 		placementResourceSnapshotSpec.Resources,
-		placementBindingSpec.SyncStrategy,
+		placementBindingSpec.SyncStrategy.DeepCopy(),
 	)
 	return work, nil
 }
 
 func updateWorkObjectMetadataAndSpec(
 	work *placementv1alpha1.Work,
-	ownerWorkObjRef *metav1.OwnerReference,
-	ownerNamespace, ownerPlacementPolicy, ownerPlacementBinding, derivedFromSource string,
+	ownerNamespace, ownerPlacementPolicy, ownerPlacementBinding string,
+	primaryPlacementResourceSnapshotName string,
+	derivedFromSrcFormatter derivedFromSourceFormatter,
 	resources []placementv1alpha1.SnapshottedResource,
 	syncStrategy *placementv1alpha1.SyncStrategy,
 ) {
-	// Add owner reference to the work object.
-	if ownerWorkObjRef != nil {
-		work.SetOwnerReferences([]metav1.OwnerReference{*ownerWorkObjRef})
+	// Set annotations on the work object.
+	annotations := work.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
 	}
+	// Set the linked to primary placement resource snapshot annotation on the work object.
+	annotations[placementv1alpha1.WorkLinkedToPrimaryPlacementResourceSnapshotAnnotationKey] = primaryPlacementResourceSnapshotName
 
 	// Set the derived from source annotation on the work object.
 	//
@@ -206,11 +285,8 @@ func updateWorkObjectMetadataAndSpec(
 	//
 	// Sub-indices are used here instead of indices to avoid any fluctuations caused by the progression
 	// of placement resource snapshots over rollouts.
-	annotations := work.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
-	}
-	annotations[placementv1alpha1.WorkDerivedFromSourceAnnotationKey] = derivedFromSource
+	annotations[placementv1alpha1.WorkDerivedFromSourceAnnotationKey] = fmt.Sprintf("%s/%s",
+		derivedFromSrcFormatter.SourceType(), derivedFromSrcFormatter.SourceID())
 	work.SetAnnotations(annotations)
 
 	// Set the owner labels on the work object.
@@ -238,12 +314,13 @@ func (r *Reconciler) createOrUpdateWorkObjects(
 	ctx context.Context,
 	worksToCreateOrUpdate []*placementv1alpha1.Work,
 	placementBinding placementv1alpha1.PlacementBindingAccessor,
-) ([]*placementv1alpha1.Work, error) {
+) ([]*placementv1alpha1.Work, bool, error) {
 	childCtx, childCancel := context.WithCancel(ctx)
 	defer childCancel()
 
 	createdOrUpdatedWorks := make([]*placementv1alpha1.Work, len(worksToCreateOrUpdate))
 	errFlag := parallelizer.NewErrorFlag()
+	createdOrUpdated := atomic.Bool{}
 	r.parallelizer.ParallelizeUntil(childCtx, len(worksToCreateOrUpdate), func(idx int) {
 		work := worksToCreateOrUpdate[idx]
 
@@ -272,14 +349,18 @@ func (r *Reconciler) createOrUpdateWorkObjects(
 		}
 
 		createdOrUpdatedWorks[idx] = createdOrUpdatedWork
+		if resOp != controllerutil.OperationResultNone {
+			// The work object has been created or updated.
+			createdOrUpdated.CompareAndSwap(false, true)
+		}
 		klog.V(2).InfoS("Successfully created or updated work object",
 			"work", klog.KObj(createdOrUpdatedWork), "resOp", resOp,
 			"placementBinding", klog.KObj(placementBinding))
 	}, "createOrUpdateWorkObjects")
 	if err := errFlag.Lower(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return createdOrUpdatedWorks, nil
+	return createdOrUpdatedWorks, createdOrUpdated.Load(), nil
 }
 
 func (r *Reconciler) deleteWorkObjects(

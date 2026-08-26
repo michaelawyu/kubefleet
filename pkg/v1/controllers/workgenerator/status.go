@@ -44,6 +44,11 @@ func (r *Reconciler) refreshPlacementBindingStatus(
 	placementBinding.GetStatus().SelectedResources = ptr.To(int32(total))
 	placementBinding.GetStatus().SynchronizedResources = ptr.To(int32(synced))
 	placementBinding.GetStatus().AvailableResources = ptr.To(int32(available))
+	if len(failed) > 50 {
+		klog.V(2).InfoS("Too many failed resources to report in placement binding status; truncating the list to 50",
+			"placementBinding", klog.KObj(placementBinding), "totalFailedResources", len(failed))
+		failed = failed[:50]
+	}
 	placementBinding.GetStatus().FailedResources = failed
 
 	// Skip the update if the status has not changed.
@@ -82,6 +87,14 @@ func (r *Reconciler) reportPlacementBindingProcessingProgress(
 		ObservedGeneration: placementBinding.GetGeneration(),
 		Reason:             placementv1alpha1.PlacementBindingSynchronizedCondReasonWaitingForSynchronization,
 		Message:            "Waiting for the resources to be synchronized to the target cluster",
+	})
+	// Set an unknown Available condition with the WaitingForAvailabilityCheck reason on the placement binding.
+	meta.SetStatusCondition(&placementBindingStatus.Conditions, metav1.Condition{
+		Type:               placementv1alpha1.PlacementBindingCondTypeAvailable,
+		Status:             metav1.ConditionUnknown,
+		ObservedGeneration: placementBinding.GetGeneration(),
+		Reason:             placementv1alpha1.PlacementBindingAvailableCondReasonWaitingForAvailabilityCheck,
+		Message:            "Waiting for the resources to be checked for availability in the target cluster",
 	})
 
 	// Count the number of manifests in all created/updated work objects.
@@ -176,24 +189,40 @@ func countResourcesInWorksByProcessingResults(works []placementv1alpha1.Work) (
 ) {
 	for i := range works {
 		work := &works[i]
+		total += len(work.Spec.Manifests)
 		for j := range work.Status.Manifests {
 			manifest := &work.Status.Manifests[j]
-			total++
 
 			appliedCond := meta.FindStatusCondition(manifest.Conditions, placementv1alpha1.ManifestCondTypeApplied)
-			if !condition.IsConditionStatusTrue(appliedCond, work.GetGeneration()) {
-				// The manifest has failed to sync; it is therefore also unavailable.
+			// Note that the checks below do not take into account the condition's observed generation; this is
+			// because for manifest conditions KubeFleet uses the generation of the actual manifest object
+			// being applied, not the generation of the work object.
+			switch {
+			case appliedCond == nil:
+				// The Applied condition has not been set yet; the manifest has not been processed.
+				continue
+			case appliedCond.Status != metav1.ConditionTrue:
+				// The manifest has failed to be applied.
 				failed = append(failed, failedResourceFromManifestStatus(manifest, appliedCond))
 				continue
+			default:
+				// The manifest has been applied.
+				synced++
 			}
-			synced++
 
 			availableCond := meta.FindStatusCondition(manifest.Conditions, placementv1alpha1.ManifestCondTypeAvailable)
-			if !condition.IsConditionStatusTrue(availableCond, work.GetGeneration()) {
+			switch {
+			case availableCond == nil:
+				// The Available condition has not been set yet; the manifest has not been processed.
+				continue
+			case availableCond.Status != metav1.ConditionTrue:
+				// The manifest is not available.
 				failed = append(failed, failedResourceFromManifestStatus(manifest, availableCond))
 				continue
+			default:
+				// The manifest is available.
+				available++
 			}
-			available++
 		}
 	}
 	return total, synced, available, failed
@@ -213,6 +242,9 @@ func failedResourceFromManifestStatus(manifest *placementv1alpha1.PerManifestSta
 		DiffDetails: manifest.DiffDetails,
 	}
 	if falseCond != nil {
+		// Note that per KubeFleet API semantics, the observed generation set in the copied condition is the generation
+		// of the actual manifest object being applied in the member cluster, not the generation of the work object
+		// nor the placement binding object.
 		failedResource.Conditions = []metav1.Condition{*falseCond}
 	}
 	return failedResource

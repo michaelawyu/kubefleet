@@ -22,6 +22,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -49,7 +50,14 @@ func (r *Reconciler) cleanupWorks(ctx context.Context, placementBinding placemen
 		return nil
 	}
 
-	workName, err := uniqueNameForWorkDerivedFromPlacementResourceSnapshot(placementBinding, true, "0")
+	derivedFromSourceFormatter := &placementResourceSnapshotDerivedFromSourceFormatter{
+		snapshotNamespacedName: types.NamespacedName{
+			Namespace: placementBinding.GetNamespace(),
+			Name:      placementBinding.GetSpec().PlacementPolicyName,
+		},
+		snapshotSubIdx: "0",
+	}
+	workName, err := uniqueNameForWorkDerivedFromPlacementResourceSnapshot(placementBinding, true, derivedFromSourceFormatter)
 	if err != nil {
 		return errors.Wraps(err, "failed to generate work name for primary placement resource snapshot")
 	}

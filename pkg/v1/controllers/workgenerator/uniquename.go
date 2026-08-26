@@ -35,7 +35,7 @@ const (
 	//
 	// `[PLACEMENT-POLICY-NAMESPACED-NAME]-work-[HASH]`, if the work is derived from the primary
 	// placement resource snapshot, or
-	// `[PLACEMENT-POLICY-NAMESPACED-NAME]-work-[DERIVED-FROM-SOURCE-MARKER]-[HASH]`, if the work is
+	// `[PLACEMENT-POLICY-NAMESPACED-NAME]-work-[DERIVED-FROM-SOURCE-LABEL]-[HASH]`, if the work is
 	// derived from other sources (e.g., a secondary placement resource snapshot).
 	//
 	// where
@@ -44,12 +44,16 @@ const (
 	//   placement resource snapshot (and indirectly owns the work objects via placement binding), in the
 	//   format `[NAMESPACE]-[NAME]` (if the placement policy is cluster-scoped, the namespaced name segment is
 	//   simply the placement policy name);
-	// * `[DERIVED-FROM-SOURCE-MARKER]` is a marker that identifies the source where the work object is derived
-	//   from; for work objects derived from secondary placement resource snapshots, this marker is the sub-index of the
-	//   placement resource snapshot.
+	// * `[DERIVED-FROM-SOURCE-LABEL]` is a label that helps identify the source where the work object is derived
+	//   from; it is not guaranteed to be unique and is added for informational purposes only.
 	// * `[HASH]` is the first few characters of the hash of the value
 	// 	 `[PLACEMENT-POLICY-NAMESPACE]/[PLACEMENT-POLICY-NAME]-work` or
-	//   `[PLACEMENT-POLICY-NAMESPACE]/[PLACEMENT-POLICY-NAME]-work-[DERIVED-FROM-SOURCE-MARKER]` respectively.
+	//   `[PLACEMENT-POLICY-NAMESPACE]/[PLACEMENT-POLICY-NAME]-work-[DERIVED-FROM-SOURCE-TYPE]/[DERIVED-FROM-SOURCE-ID]`
+	//   respectively, where `[DERIVED-FROM-SOURCE-TYPE]` is the type of the source where the work object is
+	//   derived from (e.g., `placement-resource-snapshot` for placement resource snapshots), and
+	//   `[DERIVED-FROM-SOURCE-ID]` is an identifier of the source object. Together the segment uniquely identifies
+	//   the source where the work object is derived from (among all the work objects that are created/updated
+	//   for the placement binding).
 	//
 	//   The slash is used here instead of a dash to avoid collisions between different namespace/name combinations,
 	//   e.g., to make sure that a placement policy named `red` in namespace `team-a` and a placement policy named
@@ -66,7 +70,7 @@ const (
 func uniqueNameForWorkDerivedFromPlacementResourceSnapshot(
 	placementBinding placementv1alpha1.PlacementBindingAccessor,
 	isFromPrimarySnapshot bool,
-	derivedFromSourceMarker string,
+	derivedFromSrcFormatter derivedFromSourceFormatter,
 ) (string, error) {
 	namespace := placementBinding.GetNamespace()
 	policyName := placementBinding.GetSpec().PlacementPolicyName
@@ -82,7 +86,7 @@ func uniqueNameForWorkDerivedFromPlacementResourceSnapshot(
 	// so that different namespace/name combinations never collide, and so that a hash suffix is always present.
 	hashInput := fmt.Sprintf("%s/%s-work", namespace, policyName)
 	if !isFromPrimarySnapshot {
-		hashInput = fmt.Sprintf("%s/%s-work-%s", namespace, policyName, derivedFromSourceMarker)
+		hashInput = fmt.Sprintf("%s/%s-work-%s/%s", namespace, policyName, derivedFromSrcFormatter.SourceType(), derivedFromSrcFormatter.SourceID())
 	}
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput)))[:hashSegLen]
 
@@ -108,8 +112,8 @@ func uniqueNameForWorkDerivedFromPlacementResourceSnapshot(
 
 	// The work is derived from another source (e.g., a secondary placement resource snapshot); the name carries
 	// the source marker segment.
-	marker := derivedFromSourceMarker
-	name := fmt.Sprintf(workDerivedFromOtherSourcesNameFmt, namespacedName, marker, hash)
+	derivedFromSrcLabel := derivedFromSrcFormatter.StrictDNSLabel()
+	name := fmt.Sprintf(workDerivedFromOtherSourcesNameFmt, namespacedName, derivedFromSrcLabel, hash)
 	if len(name) <= nameLenLimit {
 		return name, nil
 	}
@@ -122,8 +126,8 @@ func uniqueNameForWorkDerivedFromPlacementResourceSnapshot(
 	if len(namespacedName) > availablePerSeg {
 		namespacedName = namespacedName[:availablePerSeg]
 	}
-	if len(marker) > availablePerSeg {
-		marker = marker[:availablePerSeg]
+	if len(derivedFromSrcLabel) > availablePerSeg {
+		derivedFromSrcLabel = derivedFromSrcLabel[:availablePerSeg]
 	}
-	return fmt.Sprintf(workDerivedFromOtherSourcesNameFmt, namespacedName, marker, hash), nil
+	return fmt.Sprintf(workDerivedFromOtherSourcesNameFmt, namespacedName, derivedFromSrcLabel, hash), nil
 }

@@ -166,10 +166,10 @@ func (r *Reconciler) retrievePrimaryAndSecondaryPlacementResourceSnapshots(
 
 	primarySnapshottedResHash := primarySnapshot.GetAnnotations()[placementv1alpha1.PlacementResourceSnapshotContentsHashAnnotationKey]
 	for i := range snapshots[:count] {
-		// Normally this branch will never run, as the placement resource snapshot manager uses ordered creation
-		// to make sure that hashes are consistent across all snapshots with the same index.
 		snapshottedResHash := snapshots[i].GetAnnotations()[placementv1alpha1.PlacementResourceSnapshotContentsHashAnnotationKey]
 		if snapshottedResHash != primarySnapshottedResHash {
+			// Normally this branch will never run, as the placement resource snapshot manager uses ordered creation
+			// to make sure that hashes are consistent across all snapshots with the same index.
 			return nil, errors.NewUnexpectedError(nil, "the contents hash of a placement resource snapshot does not match the primary snapshot",
 				"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot),
 				"hashMismatchedPlacementResourceSnapshot", klog.KObj(snapshots[i]),

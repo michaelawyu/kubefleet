@@ -20,10 +20,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const (
-	PlacementBindingWorkListResourceVersionMustBeNoLessThanAnnotationKey = "placement.kubefleet.dev/work-list-resource-version-must-be-no-less-than"
-)
-
 // The condition types for the PlacementBinding and ClusterPlacementBinding APIs.
 const (
 	PlacementBindingCondTypeSynchronized = "Synchronized"
@@ -36,8 +32,9 @@ const (
 	PlacementBindingSynchronizedCondReasonFailedToSynchronizeSomeResources = "FailedToSynchronizeSomeResources"
 	PlacementBindingSynchronizedCondReasonWaitingForSynchronization        = "WaitingForSynchronization"
 
-	PlacementBindingAvailableCondReasonAllResourcesAvailable    = "AllResourcesAvailable"
-	PlacementBindingAvailableCondReasonSomeResourcesUnavailable = "SomeResourcesUnavailable"
+	PlacementBindingAvailableCondReasonAllResourcesAvailable       = "AllResourcesAvailable"
+	PlacementBindingAvailableCondReasonSomeResourcesUnavailable    = "SomeResourcesUnavailable"
+	PlacementBindingAvailableCondReasonWaitingForAvailabilityCheck = "WaitingForAvailabilityCheck"
 )
 
 // PlacementBinding is the KubeFleet API that binds the resources selected by a placement

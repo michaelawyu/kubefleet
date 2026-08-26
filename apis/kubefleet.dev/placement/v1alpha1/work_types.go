@@ -26,7 +26,9 @@ const (
 	WorkOwnedByPlacementPolicyLabelKey  = "placement.kubefleet.dev/owned-by-placement-policy"
 	WorkOwnedByPlacementBindingLabelKey = "placement.kubefleet.dev/owned-by-placement-binding"
 
-	WorkDerivedFromSourceAnnotationKey = "placement.kubefleet.dev/derived-from"
+	WorkLinkedToPrimaryPlacementResourceSnapshotAnnotationKey = "placement.kubefleet.dev/linked-to-primary-placement-resource-snapshot"
+	LinkedWorkCountAnnotationKey                              = "placement.kubefleet.dev/linked-work-count"
+	WorkDerivedFromSourceAnnotationKey                        = "placement.kubefleet.dev/derived-from"
 )
 
 const (
