@@ -37,8 +37,8 @@ const (
 	// where `[PLACEMENT-POLICY-NAME]` is the name of the owner placement policy, and
 	// `[SNAPSHOT-INDEX]` is the monotonically increasing index of the snapshot.
 	//
-	// If the name becomes too long (> 251 characters), KubeFleet will truncate the placement policy name segment
-	// and the snapshot index segment as appropriate and add a hash suffix to the name, i.e.,
+	// If the name becomes too long (> 251 characters) or contains dots, KubeFleet will drop the dots and truncate the
+	// placement policy name segment and the snapshot index segment as appropriate and add a hash suffix, i.e.,
 	//
 	// `[PLACEMENT-POLICY-NAME-TRUNCATED]-resource-snapshot-[SNAPSHOT-INDEX-TRUNCATED]-[HASH]`,
 	//
@@ -56,8 +56,9 @@ const (
 	// `[SNAPSHOT-INDEX]` is the monotonically increasing index of the snapshot, and
 	// `[SNAPSHOT-SUB-INDEX]` is the monotonically increasing sub-index of the snapshot.
 	//
-	// If the name becomes too long (> 251 characters), KubeFleet will truncate the placement policy name segment
-	// and the `[SNAPSHOT-INDEX]-[SNAPSHOT-SUB-INDEX]` segment as appropriate and add a hash suffix to the name, i.e.,
+	// If the name becomes too long (> 251 characters) or contains dots, KubeFleet will drop the dots and truncate the
+	// placement policy name segment and the `[SNAPSHOT-INDEX]-[SNAPSHOT-SUB-INDEX]` segment as appropriate and add
+	// a hash suffix, i.e.,
 	//
 	// `[PLACEMENT-POLICY-NAME-TRUNCATED]-resource-snapshot-[INDEX-TRUNCATED]-[HASH]`,
 	//
@@ -70,11 +71,11 @@ const (
 // uniqueNameForPrimaryPlacementResourceSnapshot generates a unique name for a primary placement resource snapshot.
 func uniqueNameForPrimaryPlacementResourceSnapshot(placementPolicyName string, idx int) (string, error) {
 	name := fmt.Sprintf(PrimaryPlacementResourceSnapshotNameFmt, placementPolicyName, idx)
-	if len(name) <= nameLenLimit {
+	if len(name) <= nameLenLimit && !strings.Contains(name, ".") {
 		return name, nil
 	}
 
-	// The name is too long; truncate the placement policy name segment and append a hash suffix.
+	// The name is too long or contains dots; sanitize and truncate the placement policy name segment and append a hash suffix.
 	// The hash is computed over the full (untruncated) name.
 	//
 	// Note that here only the first few (12) characters are kept. This does lead to increased risk of name
@@ -109,11 +110,11 @@ func uniqueNameForPrimaryPlacementResourceSnapshot(placementPolicyName string, i
 
 func uniqueNameForSecondaryPlacementResourceSnapshot(placementPolicyName string, idx int, subIdx int) (string, error) {
 	name := fmt.Sprintf(SecondaryPlacementResourceSnapshotNameFmt, placementPolicyName, idx, subIdx)
-	if len(name) <= nameLenLimit {
+	if len(name) <= nameLenLimit && !strings.Contains(name, ".") {
 		return name, nil
 	}
 
-	// The name is too long; truncate the placement policy name segment and append a hash suffix.
+	// The name is too long or contains dots; sanitize and truncate the placement policy name segment and append a hash suffix.
 	// The hash is computed over the full (untruncated) name.
 	//
 	// Note that here only the first few (12) characters are kept. This does lead to increased risk of name

@@ -30,6 +30,7 @@ import (
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 	errors "github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
+	"github.com/kubefleet-dev/kubefleet/pkg/v1/utils/fieldindexers"
 )
 
 const (
@@ -158,7 +159,7 @@ func (m *Manager) retrieveLatestSnapshot(ctx context.Context, placementPolicy pl
 	// Retrieve the primary resource snapshots associated with the placement policy.
 	var snapshots []placementv1alpha1.PlacementResourceSnapshotAccessor
 	fieldMatchers := client.MatchingFields{
-		ownedByAndSubIndexedCustomFieldName: fmt.Sprintf(ownedByAndSubIndexedCustomFieldFmt, placementPolicy.GetName(), "0"),
+		fieldindexers.PlacementResourceSnapshotOwnedByAndSubIndexedCustomFieldName: fmt.Sprintf(fieldindexers.PlacementResourceSnapshotOwnedByAndSubIndexedCustomFieldValFmt, placementPolicyOwnerLabelVal(placementPolicy), "0"),
 	}
 	if placementPolicy.GetNamespace() == "" {
 		// The placement policy is cluster-scoped; list cluster placement resource snapshots.
@@ -233,7 +234,7 @@ func (m *Manager) retrieveLatestSnapshot(ctx context.Context, placementPolicy pl
 	// There are sub-indexed placement resource snapshots with the same index; retrieve them.
 	latestIndex := latestPrimarySnapshot.GetLabels()[placementv1alpha1.PlacementResourceSnapshotIndexLabelKey]
 	fieldMatchers = client.MatchingFields{
-		ownedByAndIndexedCustomFieldName: fmt.Sprintf(ownedByAndIndexedCustomFieldFmt, placementPolicy.GetName(), latestIndex),
+		fieldindexers.PlacementResourceSnapshotOwnedByAndIndexedCustomFieldName: fmt.Sprintf(fieldindexers.PlacementResourceSnapshotOwnedByAndIndexedCustomFieldValFmt, placementPolicyOwnerLabelVal(placementPolicy), latestIndex),
 	}
 	var subIndexedSnapshots []placementv1alpha1.PlacementResourceSnapshotAccessor
 	if placementPolicy.GetNamespace() == "" {
@@ -503,7 +504,7 @@ func (m *Manager) cleanUpOrphanedSecondarySnapshots(
 ) (bool, error) {
 	// List all placement resource snapshots at the given index.
 	fieldMatchers := client.MatchingFields{
-		ownedByAndIndexedCustomFieldName: fmt.Sprintf(ownedByAndIndexedCustomFieldFmt, placementPolicy.GetName(), strconv.Itoa(nextSnapshotIdx)),
+		fieldindexers.PlacementResourceSnapshotOwnedByAndIndexedCustomFieldName: fmt.Sprintf(fieldindexers.PlacementResourceSnapshotOwnedByAndIndexedCustomFieldValFmt, placementPolicyOwnerLabelVal(placementPolicy), strconv.Itoa(nextSnapshotIdx)),
 	}
 
 	var snapshots []placementv1alpha1.PlacementResourceSnapshotAccessor

@@ -17,6 +17,8 @@ limitations under the License.
 package placementresourcesnapshot
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"strconv"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
@@ -25,6 +27,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+)
+
+const (
+	// A limit of 61 is set here; Kubernetes labels accept values of up to 63 characters, and
+	// KubeFleet reserves 2 more characters as a buffer.
+	placementPolicyOwnerLabelValLenLimit = 61
+	placementPolicyOwnerLabelHashLen     = 12
 )
 
 func primaryPlacementResourceSnapshot(
@@ -37,7 +46,7 @@ func primaryPlacementResourceSnapshot(
 	scheme *runtime.Scheme,
 ) (placementv1alpha1.PlacementResourceSnapshotAccessor, error) {
 	labels := map[string]string{
-		placementv1alpha1.PlacementResourceSnapshotOwnedByLabelKey:         ownerPlacementPolicy.GetName(),
+		placementv1alpha1.PlacementResourceSnapshotOwnedByLabelKey:         placementPolicyOwnerLabelVal(ownerPlacementPolicy),
 		placementv1alpha1.PlacementResourceSnapshotIndexLabelKey:           strconv.Itoa(idx),
 		placementv1alpha1.PlacementResourceSnapshotSubIndexLabelKey:        "0",
 		placementv1alpha1.SubIndexedPlacementResourceSnapshotCountLabelKey: strconv.Itoa(snapshotCount),
@@ -88,7 +97,7 @@ func secondaryPlacementResourceSnapshot(
 	scheme *runtime.Scheme,
 ) (placementv1alpha1.PlacementResourceSnapshotAccessor, error) {
 	labels := map[string]string{
-		placementv1alpha1.PlacementResourceSnapshotOwnedByLabelKey:  ownerPlacementPolicy.GetName(),
+		placementv1alpha1.PlacementResourceSnapshotOwnedByLabelKey:  placementPolicyOwnerLabelVal(ownerPlacementPolicy),
 		placementv1alpha1.PlacementResourceSnapshotIndexLabelKey:    strconv.Itoa(idx),
 		placementv1alpha1.PlacementResourceSnapshotSubIndexLabelKey: strconv.Itoa(subIdx),
 	}
@@ -127,4 +136,19 @@ func secondaryPlacementResourceSnapshot(
 			"manager", managerName, "secondaryPlacementResourceSnapshot", klog.KObj(secondarySnapshot))
 	}
 	return secondarySnapshot, nil
+}
+
+// placementPolicyOwnerLabelVal returns the value for the PlacementResourceSnapshotOwnedByLabelKey label.
+//
+// If the placement policy's name does not exceed the length limit, the label value is simply the name itself.
+// Otherwise, the name is truncated and appended with a hash suffix to ensure uniqueness.
+func placementPolicyOwnerLabelVal(placementPolicy placementv1alpha1.PlacementPolicyAccessor) string {
+	name := placementPolicy.GetName()
+	if len(name) <= placementPolicyOwnerLabelValLenLimit {
+		return name
+	}
+
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(name)))[:placementPolicyOwnerLabelHashLen]
+	prefixLen := placementPolicyOwnerLabelValLenLimit - placementPolicyOwnerLabelHashLen - 1
+	return fmt.Sprintf("%s-%s", name[:prefixLen], hash)
 }
