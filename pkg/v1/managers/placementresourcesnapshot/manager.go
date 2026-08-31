@@ -52,7 +52,7 @@ type Manager struct {
 	restMapper meta.RESTMapper
 
 	mus       []sync.Mutex
-	muSlotCnt int32
+	muSlotCnt uint32
 }
 
 // New returns a new Manager.
@@ -73,7 +73,7 @@ func New(mgr ctrl.Manager,
 		hubDynamicInformerManager: hubDynamicInformerManager,
 		restMapper:                restMapper,
 		mus:                       make([]sync.Mutex, muSlotCnt),
-		muSlotCnt:                 muSlotCnt,
+		muSlotCnt:                 uint32(muSlotCnt),
 	}, nil
 }
 
@@ -83,7 +83,7 @@ func (m *Manager) acquireLock(placementPolicy placementv1alpha1.PlacementPolicyA
 	hasher := fnv.New32a()
 	hasher.Write([]byte(placementPolicyKey))
 
-	slot := int(hasher.Sum32() % uint32(m.muSlotCnt))
+	slot := int(hasher.Sum32() % m.muSlotCnt)
 	m.mus[slot].Lock()
 }
 
@@ -93,6 +93,6 @@ func (m *Manager) releaseLock(placementPolicy placementv1alpha1.PlacementPolicyA
 	hasher := fnv.New32a()
 	hasher.Write([]byte(placementPolicyKey))
 
-	slot := int(hasher.Sum32() % uint32(m.muSlotCnt))
+	slot := int(hasher.Sum32() % m.muSlotCnt)
 	m.mus[slot].Unlock()
 }

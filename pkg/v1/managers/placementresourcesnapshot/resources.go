@@ -381,7 +381,8 @@ func splitResourcesIntoSizeControlledGroups(resources []placementv1alpha1.Snapsh
 	}
 
 	var groups [][]placementv1alpha1.SnapshottedResource
-	var currentGroup []placementv1alpha1.SnapshottedResource
+	// Pre-allocate with a reasonably guessed initial capacity.
+	currentGroup := make([]placementv1alpha1.SnapshottedResource, 0, 10)
 	currentSize := 0
 
 	for i := range resources {
