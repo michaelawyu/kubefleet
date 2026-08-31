@@ -18,8 +18,10 @@ package workgenerator
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -35,6 +37,11 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/parallelizer"
+)
+
+const (
+	workOwnerLabelValueLengthLimit = 61
+	workOwnerLabelValueHashLength  = 12
 )
 
 var (
@@ -263,7 +270,7 @@ func buildWorkObjectFor(
 
 func updateWorkObjectMetadataAndSpec(
 	work *placementv1alpha1.Work,
-	ownerNamespace, ownerPlacementPolicy, ownerPlacementBinding string,
+	ownerNSName, ownerPlacementPolicyName, ownerPlacementBindingName string,
 	primaryPlacementResourceSnapshotName string,
 	derivedFromSrcFormatter derivedFromSourceFormatter,
 	resources []placementv1alpha1.SnapshottedResource,
@@ -287,6 +294,8 @@ func updateWorkObjectMetadataAndSpec(
 	// of placement resource snapshots over rollouts.
 	annotations[placementv1alpha1.WorkDerivedFromSourceAnnotationKey] = fmt.Sprintf("%s/%s",
 		derivedFromSrcFormatter.SourceType(), derivedFromSrcFormatter.SourceID())
+	annotations[placementv1alpha1.WorkOwnedByPlacementPolicyAnnotationKey] = ownerPlacementPolicyName
+	annotations[placementv1alpha1.WorkOwnedByPlacementBindingAnnotationKey] = ownerPlacementBindingName
 	work.SetAnnotations(annotations)
 
 	// Set the owner labels on the work object.
@@ -294,9 +303,9 @@ func updateWorkObjectMetadataAndSpec(
 	if labels == nil {
 		labels = make(map[string]string)
 	}
-	labels[placementv1alpha1.WorkOwnerNamespaceLabelKey] = ownerNamespace
-	labels[placementv1alpha1.WorkOwnedByPlacementPolicyLabelKey] = ownerPlacementPolicy
-	labels[placementv1alpha1.WorkOwnedByPlacementBindingLabelKey] = ownerPlacementBinding
+	labels[placementv1alpha1.WorkOwnerNamespaceLabelKey] = ownerNSName
+	labels[placementv1alpha1.WorkOwnedByPlacementPolicyLabelKey] = workOwnerLabelValue(ownerPlacementPolicyName)
+	labels[placementv1alpha1.WorkOwnedByPlacementBindingLabelKey] = workOwnerLabelValue(ownerPlacementBindingName)
 	work.SetLabels(labels)
 
 	// Set the snapshotted resources on the work object.
@@ -386,4 +395,18 @@ func (r *Reconciler) deleteWorkObjects(
 			"placementBinding", klog.KObj(placementBinding))
 	}, "deleteWorkObjects")
 	return errFlag.Lower()
+}
+
+func workOwnerLabelValue(ownerName string) string {
+	if len(ownerName) <= workOwnerLabelValueLengthLimit && !strings.Contains(ownerName, ".") {
+		return ownerName
+	}
+
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(ownerName)))[:workOwnerLabelValueHashLength]
+	name := strings.ReplaceAll(ownerName, ".", "")
+	prefixLength := workOwnerLabelValueLengthLimit - workOwnerLabelValueHashLength - 1
+	if len(name) > prefixLength {
+		name = name[:prefixLength]
+	}
+	return fmt.Sprintf("%s-%s", name, hash)
 }

@@ -202,7 +202,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconciles int) error {
-	// enqueueOwnerBindingForWork resolves the owner placement binding from a work object's labels and enqueues it
+	// enqueueOwnerBindingForWork resolves the owner placement binding from a work object's metadata and enqueues it
 	// for reconciliation. eventType is used for logging only.
 	enqueueOwnerBindingForWork := func(work client.Object, eventType string, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 		if work == nil {
@@ -211,12 +211,13 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconciles 
 			return
 		}
 		labels := work.GetLabels()
+		annotations := work.GetAnnotations()
 		ownerBindingNSName, nsNameFound := labels[placementv1alpha1.WorkOwnerNamespaceLabelKey]
-		ownerBindingName, bindingNameFound := labels[placementv1alpha1.WorkOwnedByPlacementBindingLabelKey]
+		ownerBindingName, bindingNameFound := annotations[placementv1alpha1.WorkOwnedByPlacementBindingAnnotationKey]
 		if !nsNameFound || !bindingNameFound {
-			err := errors.NewUnexpectedError(nil, "work object is missing required labels",
+			err := errors.NewUnexpectedError(nil, "work object is missing required labels or annotations",
 				"work", klog.KObj(work), "eventType", eventType, "controller", controllerName)
-			klog.ErrorS(err, "work object is missing required labels", errors.Args(err)...)
+			klog.ErrorS(err, "work object is missing required labels or annotations", errors.Args(err)...)
 			return
 		}
 		ownerBinding := types.NamespacedName{Namespace: ownerBindingNSName, Name: ownerBindingName}

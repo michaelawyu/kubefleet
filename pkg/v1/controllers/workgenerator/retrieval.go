@@ -56,7 +56,7 @@ func (r *Reconciler) listWorksByOwnerBinding(ctx context.Context, clusterName, o
 	listOptions := []client.ListOption{
 		client.InNamespace(memberClusterNamespace),
 		client.MatchingLabels{
-			placementv1alpha1.WorkOwnedByPlacementBindingLabelKey: ownerBindingName,
+			placementv1alpha1.WorkOwnedByPlacementBindingLabelKey: workOwnerLabelValue(ownerBindingName),
 			placementv1alpha1.WorkOwnerNamespaceLabelKey:          ownerBindingNSName,
 		},
 	}
