@@ -184,12 +184,12 @@ func refreshPlacementBindingAvailableCond(placementBinding placementv1alpha1.Pla
 }
 
 func countResourcesInWorksByProcessingResults(works []placementv1alpha1.Work) (
-	total, synced, available int,
+	total, synced, available int32,
 	failed []placementv1alpha1.FailedResource,
 ) {
 	for i := range works {
 		work := &works[i]
-		total += len(work.Spec.Manifests)
+		total += int32(len(work.Spec.Manifests))
 		for j := range work.Status.Manifests {
 			manifest := &work.Status.Manifests[j]
 

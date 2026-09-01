@@ -132,7 +132,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// considering that work objects are KubeFleet internal API objects that reside in reserved namespaces; if a
 	// non-KubeFleet agent decides to tamper with work objects, the system is not guaranteed to auto-recover.
 	// The changes, however, will be overwritten upon rollouts.
-	upToDate, err := areWorksUpToDate(placementBinding, works)
+	upToDate, err := areWorksUpToDate(placementBinding, works) // codespell:ignore
 	if err != nil {
 		wrappedErr := errors.Wraps(err, "failed to check if work objects are up-to-date",
 			"placementBinding", klog.KObj(placementBinding), "targetCluster", placementBindingSpec.ClusterName,
@@ -140,7 +140,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		klog.ErrorS(wrappedErr, "failed to check if work objects are up-to-date", errors.Args(wrappedErr)...)
 		return ctrl.Result{}, wrappedErr
 	}
-	if upToDate {
+	if upToDate { // codespell:ignore
 		if err := r.refreshPlacementBindingStatus(ctx, placementBinding, works); err != nil {
 			wrappedErr := errors.Wraps(err, "failed to refresh placement binding status",
 				"placementBinding", klog.KObj(placementBinding), "targetCluster", placementBindingSpec.ClusterName,
