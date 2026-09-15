@@ -83,7 +83,7 @@ func primaryPlacementResourceSnapshot(
 
 	if err := controllerutil.SetControllerReference(ownerPlacementPolicy, primarySnapshot, scheme); err != nil {
 		return nil, errors.NewUnexpectedError(err, "failed to set controller reference on the primary placement resource snapshot",
-			"manager", managerName, "primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot))
+			"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot))
 	}
 	return primarySnapshot, nil
 }
@@ -133,7 +133,7 @@ func secondaryPlacementResourceSnapshot(
 
 	if err := controllerutil.SetControllerReference(ownerPlacementPolicy, secondarySnapshot, scheme); err != nil {
 		return nil, errors.NewUnexpectedError(err, "failed to set controller reference on a secondary placement resource snapshot",
-			"manager", managerName, "secondaryPlacementResourceSnapshot", klog.KObj(secondarySnapshot))
+			"secondaryPlacementResourceSnapshot", klog.KObj(secondarySnapshot))
 	}
 	return secondarySnapshot, nil
 }

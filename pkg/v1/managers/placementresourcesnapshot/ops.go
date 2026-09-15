@@ -22,9 +22,6 @@ import (
 	"sort"
 	"strconv"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -33,20 +30,31 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/v1/utils/fieldindexers"
 )
 
-const (
-	dryRunAnnotationKey = "kubefleet.dev/dry-run"
-)
-
-// SnapshotResourcesIfNoLatestSnapshot checks for the latest placement resource snapshot(s) associated
-// with a placement policy. If no snapshot exists at all, it creates a new placement resource snapshot; otherwise,
-// it returns the current latest placement resource snapshot(s) and a flag that signals whether the
-// latest snapshot is up-to-date.
-//
-// This method is exposed for controllers such as the placement policy controller, which needs to check
-// placement resource snapshots for status reporting and generally do not need to manipulate the snapshots themselves.
-func (m *Manager) SnapshotResourcesIfNoLatestSnapshot(
-	ctx context.Context,
+// SnapshotResourcesIfNoSnapshotExists creates a new placement resource snapshot only if no snapshots exist.
+func (m *Manager) SnapshotResourcesIfNoSnapshotExists(ctx context.Context,
 	placementPolicy placementv1alpha1.PlacementPolicyAccessor,
+) ([]placementv1alpha1.PlacementResourceSnapshotAccessor, bool, error) {
+	return m.snapshotResources(ctx, placementPolicy, true)
+}
+
+// SnapshotResourcesIfStale creates a new placement resource snapshot if the current latest snapshot has become stale.
+func (m *Manager) SnapshotResourcesIfStale(ctx context.Context,
+	placementPolicy placementv1alpha1.PlacementPolicyAccessor,
+) ([]placementv1alpha1.PlacementResourceSnapshotAccessor, bool, error) {
+	return m.snapshotResources(ctx, placementPolicy, false)
+}
+
+// snapshotResources checks for the latest placement resource snapshot(s) associated
+// with a placement policy; it will then:
+//
+// a) create new placement resource snapshot(s) if none exists, or
+// b) return the latest placement resource snapshot(s) if they exist and are up-to-date;
+// c) create new placement resource snapshot(s) if the latest ones exist but have become stale.
+//
+// Set the createOnlyWhenMissing flag to true if one only needs to create a new snapshot when none exists.
+func (m *Manager) snapshotResources(ctx context.Context,
+	placementPolicy placementv1alpha1.PlacementPolicyAccessor,
+	createOnlyWhenMissing bool,
 ) ([]placementv1alpha1.PlacementResourceSnapshotAccessor, bool, error) {
 	// Do a sanity check.
 	if placementPolicy == nil {
@@ -69,82 +77,42 @@ func (m *Manager) SnapshotResourcesIfNoLatestSnapshot(
 		return nil, false, errors.Wraps(err, "failed to retrieve and hash the selected resources")
 	}
 
+	var latestPrimarySnapshot placementv1alpha1.PlacementResourceSnapshotAccessor
+	var isUpToDate bool
 	if len(snapshots) > 0 {
 		// A latest placement resource snapshot exists; check if it is up-to-date.
-		primarySnapshot := snapshots[0]
+		latestPrimarySnapshot = snapshots[0]
 
-		isUpToDate, err := m.isSnapshotUpToDate(ctx, placementPolicy, primarySnapshot, currentHash)
+		isUpToDate, err = m.isSnapshotUpToDate(ctx, placementPolicy, latestPrimarySnapshot, currentHash)
 		if err != nil {
 			return nil, false, errors.Wraps(err, "failed to check if the latest placement resource snapshot is up-to-date",
-				"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot))
-		}
-		return snapshots, isUpToDate, nil
-	}
-
-	// No latest placement resource snapshot exists; create one.
-	createdSnapshots, err := m.createResourceSnapshotAnyway(ctx, placementPolicy, nil, currentResources, currentHash)
-	if err != nil {
-		return nil, false, errors.Wraps(err, "failed to create a placement resource snapshot", "manager", managerName)
-	}
-	// A freshly created placement resource snapshot is up-to-date.
-	return createdSnapshots, true, nil
-}
-
-// SnapshotResourcesIfLatestSnapshotIsNotUpToDate checks for the latest placement resource snapshot(s) associated
-// with a placement policy. If the latest snapshot is not up-to-date or no snapshots are present, it creates a
-// new placement resource snapshot; otherwise, it returns the current latest placement resource snapshot(s).
-//
-// This method is exposed for rollout purposes, where a controller may need to create a new placement resource
-// snapshot per user requests to complete a rollout.
-func (m *Manager) SnapshotResourcesIfLatestSnapshotIsNotUpToDate(
-	ctx context.Context,
-	placementPolicy placementv1alpha1.PlacementPolicyAccessor,
-) ([]placementv1alpha1.PlacementResourceSnapshotAccessor, error) {
-	// Do a sanity check.
-	if placementPolicy == nil {
-		return nil, errors.NewUnexpectedError(nil, "placement policy accessor is nil", "manager", managerName)
-	}
-
-	// Acquire the mutex for the placement policy.
-	m.acquireLock(placementPolicy)
-	defer m.releaseLock(placementPolicy)
-
-	// Retrieve the latest placement resource snapshot(s) associated with the placement policy.
-	snapshots, err := m.retrieveLatestSnapshot(ctx, placementPolicy)
-	if err != nil {
-		return nil, errors.Wraps(err, "failed to retrieve the latest placement resource snapshot(s)")
-	}
-
-	// Retrieve the currently selected resources and their hash based on the placement policy.
-	currentResources, currentHash, err := m.retrieveAndHashSelectedResources(ctx, placementPolicy)
-	if err != nil {
-		return nil, errors.Wraps(err, "failed to retrieve and hash the selected resources")
-	}
-
-	if len(snapshots) > 0 {
-		// A latest placement resource snapshot exists; check if it is up-to-date.
-		latestPrimarySnapshot := snapshots[0]
-		isUpToDate, err := m.isSnapshotUpToDate(ctx, placementPolicy, latestPrimarySnapshot, currentHash)
-		if err != nil {
-			return nil, errors.Wraps(err, "failed to check if the latest placement resource snapshot is up-to-date",
 				"primaryPlacementResourceSnapshot", klog.KObj(latestPrimarySnapshot))
 		}
-		// If the latest snapshot is up-to-date, return it.
-		if isUpToDate {
-			return snapshots, nil
-		}
 	}
 
-	// No latest placement resource snapshot exists, or the latest one is not up-to-date; create a new one.
-	var latestPrimarySnapshot placementv1alpha1.PlacementResourceSnapshotAccessor
-	if len(snapshots) > 0 {
-		latestPrimarySnapshot = snapshots[0]
+	switch {
+	case createOnlyWhenMissing && len(snapshots) > 0:
+		// A placement resource snapshot already exists, and the requestor dictates that a new snapshot can only be created if none exists.
+		// Return the retrieved snapshots and their freshness state.
+		return snapshots, isUpToDate, nil
+	case len(snapshots) == 0:
+		// No placement resource snapshot exists; create one.
+		createdSnapshots, err := m.createResourceSnapshotAnyway(ctx, placementPolicy, nil, currentResources, currentHash)
+		if err != nil {
+			return nil, false, errors.Wraps(err, "failed to create a placement resource snapshot", "manager", managerName)
+		}
+		return createdSnapshots, true, nil
+	case isUpToDate:
+		// The latest placement resource snapshot is up-to-date; return it as it is.
+		return snapshots, isUpToDate, nil
+	default:
+		// The latest placement resource snapshot exists but has become stale; create a new one.
+		createdSnapshots, err := m.createResourceSnapshotAnyway(ctx, placementPolicy, latestPrimarySnapshot, currentResources, currentHash)
+		if err != nil {
+			return nil, false, errors.Wraps(err, "failed to create a placement resource snapshot", "manager", managerName)
+		}
+		return createdSnapshots, true, nil
 	}
-	createdSnapshots, err := m.createResourceSnapshotAnyway(ctx, placementPolicy, latestPrimarySnapshot, currentResources, currentHash)
-	if err != nil {
-		return nil, errors.Wraps(err, "failed to create a placement resource snapshot", "manager", managerName)
-	}
-	return createdSnapshots, nil
 }
 
 // retrieveLatestSnapshot retrieves the latest placement resource snapshot(s) associated with a placement policy.
@@ -334,10 +302,10 @@ func (m *Manager) isSnapshotUpToDate(
 
 	// The hashes do match.
 	//
-	// Note that due to the check being carried out using a cached client, false positives can occur due to the
-	// situation where the user does an A -> B -> A type of resource change, and in this scenario the false positive
-	// might lead to side effects, e.g., empty rollouts, inconsistent status reporting. Here KubeFleet does a
-	// dry-run to verify that the snapshot is indeed up-to-date.
+	// Note that this check is being carried out using a cached client, and false positives can occur in the
+	// situation where the user does an A -> B -> A type of resource change; in this scenario the false positive
+	// might lead to side effects, e.g., empty rollouts and inconsistent status reporting. Here KubeFleet does a
+	// quorum read to verify that the snapshot is indeed up-to-date.
 
 	// Compute the index of the snapshot that would be created next.
 	currentIdxStr := primaryPlacementResourceSnapshot.GetLabels()[placementv1alpha1.PlacementResourceSnapshotIndexLabelKey]
@@ -347,49 +315,30 @@ func (m *Manager) isSnapshotUpToDate(
 	}
 	nextIdx := currentIdx + 1
 
-	nextName, err := uniqueNameForPrimaryPlacementResourceSnapshot(placementPolicy.GetName(), nextIdx)
+	found, err := m.primaryPlacementResourceSnapshotExistsAtIdx(ctx, placementPolicy, nextIdx)
 	if err != nil {
-		return false, errors.Wraps(err, "failed to generate the unique name for the next placement resource snapshot",
-			"nextSnapshotIndex", nextIdx)
+		return false, err
+	}
+	if found {
+		// A primary placement resource snapshot already exists at the given index; the currently observed primary
+		// resource snapshot is not up-to-date.
+		return false, errors.NewTransientError(nil, "a newer snapshot already exists (found via quorum reads); the client cache might be stale",
+			"primaryPlacementResourceSnapshotName", uniqueNameForPrimaryPlacementResourceSnapshot(placementPolicy.GetName(), nextIdx),
+			"snapshotIndex", nextIdx)
 	}
 
-	// Build the patch target for the next-index snapshot without fetching it.
-	var nextSnapshot client.Object
-	if placementPolicy.GetNamespace() == "" {
-		nextSnapshot = &placementv1alpha1.ClusterPlacementResourceSnapshot{
-			ObjectMeta: metav1.ObjectMeta{Name: nextName},
-		}
-	} else {
-		nextSnapshot = &placementv1alpha1.PlacementResourceSnapshot{
-			ObjectMeta: metav1.ObjectMeta{Name: nextName, Namespace: placementPolicy.GetNamespace()},
-		}
-	}
-
-	// Send a dry-run JSON merge patch that adds the dry-run annotation to the next-index snapshot.
-	patchData := fmt.Appendf(nil, `{"metadata":{"annotations":{%q:%q}}}`, dryRunAnnotationKey, "true")
-	err = m.hubClient.Patch(ctx, nextSnapshot, client.RawPatch(types.MergePatchType, patchData), client.DryRunAll)
-	switch {
-	case err == nil:
-		// The dry-run patch succeeded; a newer snapshot already exists. Report this as an error; the caller
-		// should requeue and wait until the cache catches up.
-		return false, errors.NewTransientError(nil, "a newer snapshot already exists (found via dry-run ops); the client cache might be stale", "nextSnapshotName", nextName)
-	case apierrors.IsNotFound(err):
-		// The dry-run patch failed with a NotFound error; no newer snapshot exists.
-		return true, nil
-	default:
-		// The dry-run patch failed with an unexpected error; report it.
-		return false, errors.NewAPIServerError(err, "failed to perform dry-run patch on the next placement resource snapshot", false,
-			"nextSnapshotName", nextName)
-	}
+	// No newer snapshot exists at the next index.
+	return true, nil
 }
 
 // createResourceSnapshotAnyway creates a new placement resource snapshot for the given placement policy.
 //
 // Snapshot creation spans multiple objects (secondaries then the primary) and is not transactional; it relies on
 // the mutex plus the hub controller manager's leader election for serialization. Because the listing/cleanup steps
-// read from a cached client, a stale cache can lead to `AlreadyExists` (on create) or `NotFound` (on the up-to-date
-// dry-run) errors. These are expected and surfaced to the caller so that it requeues; each retry re-runs the orphan
-// cleanup from a clean slate, and the operation converges once the cache catches up.
+// read from a cached client, a stale cache can lead to `AlreadyExists` errors on create, or to a quorum read finding
+// a primary snapshot that the cache has yet to observe. These are expected and surfaced to the caller so that it
+// requeues; each retry re-runs the orphan cleanup from a clean slate, and the operation converges once the cache
+// catches up.
 //
 // Note that this method assumes that the corresponding mutex for the placement policy has been acquired before
 // calling this method.
@@ -444,12 +393,7 @@ func (m *Manager) createResourceSnapshotAnyway(
 		// Create the secondary placement resource snapshots first. Start with the last resource group and work
 		// backwards, so that the primary snapshot (which carries the count label) is created last.
 		for subIdx := len(resGroups) - 1; subIdx >= 1; subIdx-- {
-			secondaryName, err := uniqueNameForSecondaryPlacementResourceSnapshot(placementPolicy.GetName(), nextSnapshotIdx, subIdx)
-			if err != nil {
-				return nil, errors.Wraps(err, "failed to generate the unique name for a secondary placement resource snapshot",
-					"snapshotIndex", nextSnapshotIdx, "snapshotSubIndex", subIdx)
-			}
-
+			secondaryName := uniqueNameForSecondaryPlacementResourceSnapshot(placementPolicy.GetName(), nextSnapshotIdx, subIdx)
 			secondarySnapshot, err := secondaryPlacementResourceSnapshot(
 				placementPolicy.GetNamespace(), secondaryName, placementPolicy, nextSnapshotIdx, subIdx, resGroups[subIdx], currentHash, m.hubClient.Scheme())
 			if err != nil {
@@ -469,12 +413,7 @@ func (m *Manager) createResourceSnapshotAnyway(
 	}
 
 	// Create the primary placement resource snapshot last, with the count label.
-	primaryName, err := uniqueNameForPrimaryPlacementResourceSnapshot(placementPolicy.GetName(), nextSnapshotIdx)
-	if err != nil {
-		return nil, errors.Wraps(err, "failed to generate the unique name for the primary placement resource snapshot",
-			"snapshotIndex", nextSnapshotIdx)
-	}
-
+	primaryName := uniqueNameForPrimaryPlacementResourceSnapshot(placementPolicy.GetName(), nextSnapshotIdx)
 	primarySnapshot, err := primaryPlacementResourceSnapshot(
 		placementPolicy.GetNamespace(), primaryName, placementPolicy, nextSnapshotIdx, resGroups[0], currentHash, len(resGroups), m.hubClient.Scheme())
 	if err != nil {
@@ -531,6 +470,11 @@ func (m *Manager) cleanUpOrphanedSecondarySnapshots(
 		}
 	}
 
+	if len(snapshots) == 0 {
+		// No placement resource snapshots are found at the index.
+		return false, nil
+	}
+
 	// Do a sanity check; verify that there is no primary placement resource snapshot at the given index.
 	for idx := range snapshots {
 		snapshot := snapshots[idx]
@@ -543,15 +487,33 @@ func (m *Manager) cleanUpOrphanedSecondarySnapshots(
 		}
 	}
 
+	// There exists a corner case, where, due to the staleness of cache, a primary placement resource snapshot has been created
+	// at the given (next) index yet has not been registered in the cache. Do a quorum read to confirm this.
+	found, err := m.primaryPlacementResourceSnapshotExistsAtIdx(ctx, placementPolicy, nextSnapshotIdx)
+	if err != nil {
+		return false, errors.Wraps(err, "failed to perform a quorum read for the primary placement resource snapshot at the given index",
+			"snapshotIdx", nextSnapshotIdx)
+	}
+	if found {
+		// A primary placement resource snapshot already exists at the given index; the secondary snapshots found
+		// here are not orphans. Report this as an error; the caller should requeue and wait for the cache to catch up.
+		return false, errors.NewTransientError(nil, "a primary placement resource snapshot already exists at the given index (found via quorum read); the client cache might be stale",
+			"primaryPlacementResourceSnapshotName", uniqueNameForPrimaryPlacementResourceSnapshot(placementPolicy.GetName(), nextSnapshotIdx),
+			"snapshotIndex", nextSnapshotIdx)
+	}
+
 	// Delete all the secondary placement resource snapshots at the given index.
-	acted := false
 	for idx := range snapshots {
 		snapshot := snapshots[idx]
+		if !snapshot.GetDeletionTimestamp().IsZero() {
+			// The secondary placement resource snapshot has been marked for deletion; wait for it to complete.
+			continue
+		}
+
 		if err := m.hubClient.Delete(ctx, snapshot); err != nil {
 			return false, errors.NewAPIServerError(err, "failed to delete an orphaned secondary placement resource snapshot",
 				false, "secondaryPlacementResourceSnapshot", klog.KObj(snapshot))
 		}
-		acted = true
 	}
-	return acted, nil
+	return true, nil
 }

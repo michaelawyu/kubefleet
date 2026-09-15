@@ -63,16 +63,16 @@ const (
 	// `[PLACEMENT-POLICY-NAME-TRUNCATED]-resource-snapshot-[INDEX-TRUNCATED]-[HASH]`,
 	//
 	// where `[HASH]` is the first few characters of the hash of the value
-	// `[PLACEMENT-POLICY-NAME-TRUNCATED]-resource-snapshot-[SNAPSHOT-INDEX]-[SNAPSHOT-SUB-INDEX]`.
+	// `[PLACEMENT-POLICY-NAME]-resource-snapshot-[SNAPSHOT-INDEX]-[SNAPSHOT-SUB-INDEX]`.
 	SecondaryPlacementResourceSnapshotNameFmt         = "%s-resource-snapshot-%d-%d"
 	SecondaryPlacementResourceSnapshotNameWithHashFmt = "%s-resource-snapshot-%s-%s"
 )
 
 // uniqueNameForPrimaryPlacementResourceSnapshot generates a unique name for a primary placement resource snapshot.
-func uniqueNameForPrimaryPlacementResourceSnapshot(placementPolicyName string, idx int) (string, error) {
+func uniqueNameForPrimaryPlacementResourceSnapshot(placementPolicyName string, idx int) string {
 	name := fmt.Sprintf(PrimaryPlacementResourceSnapshotNameFmt, placementPolicyName, idx)
 	if len(name) <= nameLenLimit && !strings.Contains(name, ".") {
-		return name, nil
+		return name
 	}
 
 	// The name is too long or contains dots; sanitize and truncate the placement policy name segment and append a hash suffix.
@@ -84,34 +84,36 @@ func uniqueNameForPrimaryPlacementResourceSnapshot(placementPolicyName string, i
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(name)))[:hashSegLen]
 
 	// Compute how many characters are left for the two variable segments (the placement policy name and the
-	// snapshot index), then split the available space evenly between them.
+	// snapshot index); the index segment gets the space it needs, and the placement policy name segment takes
+	// whatever remains.
 	//
 	// reservedLen accounts for the static decoration and the hash suffix only.
 	//
 	// The offset 1 is the length of placeholder index (0).
 	reservedLen := len(fmt.Sprintf(PrimaryPlacementResourceSnapshotNameWithHashFmt, "", "0", hash)) - 1
 	availableLen := nameLenLimit - reservedLen
-	availablePerSeg := availableLen / 2
+	availableLenForIdxSeg := 10 // The maximum number of digits for an int32 value.
+	availableLenForNameSeg := availableLen - availableLenForIdxSeg
 
 	// Remove all dots from the placement policy name segment so that truncation cannot leave a trailing dot,
 	// which would produce an invalid DNS subdomain label.
 	truncatedPlacementPolicyName := strings.ReplaceAll(placementPolicyName, ".", "")
-	if len(truncatedPlacementPolicyName) > availablePerSeg {
-		truncatedPlacementPolicyName = truncatedPlacementPolicyName[:availablePerSeg]
+	if len(truncatedPlacementPolicyName) > availableLenForNameSeg {
+		truncatedPlacementPolicyName = truncatedPlacementPolicyName[:availableLenForNameSeg]
 	}
 
 	truncatedIdxStr := strconv.Itoa(idx)
-	if len(truncatedIdxStr) > availablePerSeg {
-		truncatedIdxStr = truncatedIdxStr[:availablePerSeg]
+	if len(truncatedIdxStr) > availableLenForIdxSeg {
+		truncatedIdxStr = truncatedIdxStr[:availableLenForIdxSeg]
 	}
 
-	return fmt.Sprintf(PrimaryPlacementResourceSnapshotNameWithHashFmt, truncatedPlacementPolicyName, truncatedIdxStr, hash), nil
+	return fmt.Sprintf(PrimaryPlacementResourceSnapshotNameWithHashFmt, truncatedPlacementPolicyName, truncatedIdxStr, hash)
 }
 
-func uniqueNameForSecondaryPlacementResourceSnapshot(placementPolicyName string, idx int, subIdx int) (string, error) {
+func uniqueNameForSecondaryPlacementResourceSnapshot(placementPolicyName string, idx int, subIdx int) string {
 	name := fmt.Sprintf(SecondaryPlacementResourceSnapshotNameFmt, placementPolicyName, idx, subIdx)
 	if len(name) <= nameLenLimit && !strings.Contains(name, ".") {
-		return name, nil
+		return name
 	}
 
 	// The name is too long or contains dots; sanitize and truncate the placement policy name segment and append a hash suffix.
@@ -123,24 +125,26 @@ func uniqueNameForSecondaryPlacementResourceSnapshot(placementPolicyName string,
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(name)))[:hashSegLen]
 
 	// Compute how many characters are left for the two variable segments (the placement policy name and the
-	// combined snapshot index/sub-index segment), then split the available space evenly between them.
+	// combined snapshot index/sub-index segment); the index segment gets the space it needs, and the placement
+	// policy name segment takes whatever remains.
 	//
 	// reservedLen accounts for the static decoration and the hash suffix only.
 	reservedLen := len(fmt.Sprintf(SecondaryPlacementResourceSnapshotNameWithHashFmt, "", "", hash))
 	availableLen := nameLenLimit - reservedLen
-	availablePerSeg := availableLen / 2
+	availableLenForIdxSeg := 12 // The maximum number of characters for an int32 value, plus the room for a dash and a single-digit sub-index.
+	availableLenForNameSeg := availableLen - availableLenForIdxSeg
 
 	// Remove all dots from the placement policy name segment so that truncation cannot leave a trailing dot,
 	// which would produce an invalid DNS subdomain label.
 	truncatedPlacementPolicyName := strings.ReplaceAll(placementPolicyName, ".", "")
-	if len(truncatedPlacementPolicyName) > availablePerSeg {
-		truncatedPlacementPolicyName = truncatedPlacementPolicyName[:availablePerSeg]
+	if len(truncatedPlacementPolicyName) > availableLenForNameSeg {
+		truncatedPlacementPolicyName = truncatedPlacementPolicyName[:availableLenForNameSeg]
 	}
 
 	truncatedIdxStr := fmt.Sprintf("%d-%d", idx, subIdx)
-	if len(truncatedIdxStr) > availablePerSeg {
-		truncatedIdxStr = truncatedIdxStr[:availablePerSeg]
+	if len(truncatedIdxStr) > availableLenForIdxSeg {
+		truncatedIdxStr = truncatedIdxStr[:availableLenForIdxSeg]
 	}
 
-	return fmt.Sprintf(SecondaryPlacementResourceSnapshotNameWithHashFmt, truncatedPlacementPolicyName, truncatedIdxStr, hash), nil
+	return fmt.Sprintf(SecondaryPlacementResourceSnapshotNameWithHashFmt, truncatedPlacementPolicyName, truncatedIdxStr, hash)
 }

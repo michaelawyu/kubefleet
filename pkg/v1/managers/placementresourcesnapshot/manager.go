@@ -41,11 +41,12 @@ const (
 	// Note that slashes are used to avoid unexpected collisions.
 	placementPolicyKeyFmt = "%s/%s"
 
-	minSlotCnt = 16
+	minSlotCnt = 256
 )
 
 type Manager struct {
 	hubClient                 client.Client
+	hubUncachedReader         client.Reader
 	hubDynamicClient          dynamic.Interface
 	hubDynamicInformerManager informer.Manager
 
@@ -69,6 +70,7 @@ func New(mgr ctrl.Manager,
 
 	return &Manager{
 		hubClient:                 mgr.GetClient(),
+		hubUncachedReader:         mgr.GetAPIReader(),
 		hubDynamicClient:          hubDynamicClient,
 		hubDynamicInformerManager: hubDynamicInformerManager,
 		restMapper:                restMapper,
@@ -77,6 +79,13 @@ func New(mgr ctrl.Manager,
 	}, nil
 }
 
+// acquireLock acquires a mutex for a given placement policy.
+//
+// The placement resource snapshot manager features a slot-based locking mechanism to ensure that KubeFleet always
+// snapshots resources for one placement policy at a time. A fixed number of slots are assigned when the manager
+// is initialized. There might be a small chance where two placement policies need to contend for the same slot.
+//
+// Slots are used to avoid GC complications.
 func (m *Manager) acquireLock(placementPolicy placementv1alpha1.PlacementPolicyAccessor) {
 	placementPolicyKey := fmt.Sprintf(placementPolicyKeyFmt, placementPolicy.GetNamespace(), placementPolicy.GetName())
 
@@ -87,6 +96,7 @@ func (m *Manager) acquireLock(placementPolicy placementv1alpha1.PlacementPolicyA
 	m.mus[slot].Lock()
 }
 
+// releaseLock releases the mutex for a given placement policy.
 func (m *Manager) releaseLock(placementPolicy placementv1alpha1.PlacementPolicyAccessor) {
 	placementPolicyKey := fmt.Sprintf(placementPolicyKeyFmt, placementPolicy.GetNamespace(), placementPolicy.GetName())
 

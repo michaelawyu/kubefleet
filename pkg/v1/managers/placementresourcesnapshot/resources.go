@@ -22,6 +22,7 @@ import (
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -50,13 +51,16 @@ const (
 const (
 	// The format in use to generate a unique identifier for each selected resource.
 	//
-	// The format is `[API-GROUP]/[API-VERSION]/[KIND]/[NAMESPACE]/[NAME]`, where
-	// `[API-GROUP]` is the API group of the resource, `[API-VERSION]` is the API version of the resource,
-	// `[KIND]` is the kind of the resource, `[NAMESPACE]` is the namespace of the resource,
+	// The format is `[API-GROUP]/[KIND]/[NAMESPACE]/[NAME]`, where
+	// `[API-GROUP]` is the API group of the resource, `[KIND]` is the kind of the resource, `[NAMESPACE]` is the namespace of the resource,
 	// and `[NAME]` is the name of the resource.
 	//
-	// Note that for cluster-scoped resources, the `[NAMESPACE]` segment will be empty.
-	resourceUniqueIdStrFmt = "%s/%s/%s/%s/%s"
+	// The API version value is omitted from the unique identifier as for the same resource, only one version is picked as the Kubernetes
+	// storage version. It would not make sense to select the same resources twice using different API versions in the same placement policy.
+	// When this happens, KubeFleet will pick the resource as selected by the resource selector that appears first.
+	//
+	// Also note that for cluster-scoped resources, the `[NAMESPACE]` segment will be empty.
+	resourceUniqueIdStrFmt = "%s/%s/%s/%s"
 )
 
 func (m *Manager) retrieveAndHashSelectedResources(
@@ -81,57 +85,54 @@ func (m *Manager) retrieveAndHashSelectedResources(
 	for idx := range placementPolicySpec.ResourceSelectors {
 		selector := placementPolicySpec.ResourceSelectors[idx]
 
+		resourcesAsSelected := make([]*placementv1alpha1.SnapshottedResource, 0, 5)
 		switch {
 		case len(selector.Name) != 0:
 			// Retrieve the resource by name.
-			resourceFromSelector, err := m.retrieveResourceByName(ctx, placementPolicyAccessor, selector)
+			res, err := m.retrieveResourceByName(ctx, placementPolicyAccessor, selector)
 			if err != nil {
 				return nil, "", errors.Wraps(err, "failed to retrieve a selected resource (name-based selector)",
 					"resourceSelectorIndex", idx)
 			}
-			resourceId := resourceUniqueId(resourceFromSelector)
+			resourcesAsSelected = append(resourcesAsSelected, &res)
+		case selector.LabelSelector != nil:
+			// Retrieve the resources by label selector.
+			resList, err := m.retrieveResourcesByLabelSelector(ctx, placementPolicyAccessor, selector)
+			if err != nil {
+				return nil, "", errors.Wraps(err, "failed to retrieve selected resources (label selector-based selector)",
+					"resourceSelectorIndex", idx)
+			}
+			for ridx := range resList {
+				resourcesAsSelected = append(resourcesAsSelected, &resList[ridx])
+			}
+		default:
+			return nil, "", errors.NewUserError(nil, "invalid resource selector: neither name nor label selector is specified",
+				"resourceSelectorIndex", idx)
+		}
+
+		// Make sure that no resources are selected more than once. Duplicates are skipped.
+		for ridx := range resourcesAsSelected {
+			resource := resourcesAsSelected[ridx]
+			resourceId := resourceUniqueId(resource)
 			if !seen.Has(resourceId) {
 				// The resource has not been seen before; add it to the list of selected resources.
 				seen.Insert(resourceId)
-				resources = append(resources, resourceFromSelector)
+				resources = append(resources, *resource)
 			} else {
 				// The resource has already been seen; skip it and log a message.
 				klog.V(2).InfoS("Found duplicate selected resource; skipping it", "resourceId", resourceId, "resourceSelectorIndex", idx)
 			}
-		case selector.LabelSelector != nil:
-			// Retrieve the resources by label selector.
-			resourcesFromSelector, err := m.retrieveResourcesByLabelSelector(ctx, placementPolicyAccessor, selector)
-			if err != nil {
-				return nil, "", errors.Wraps(err, "failed to retrieve selected resources (label selector-based selector)",
-					"manager", managerName, "resourceSelectorIndex", idx)
-			}
-			for idx := range resourcesFromSelector {
-				resourceFromSelector := resourcesFromSelector[idx]
-				resourceId := resourceUniqueId(resourceFromSelector)
-				if !seen.Has(resourceId) {
-					// The resource has not been seen before; add it to the list of selected resources.
-					seen.Insert(resourceId)
-					resources = append(resources, resourceFromSelector)
-				} else {
-					// The resource has already been seen; skip it and log a message.
-					klog.V(2).InfoS("Found duplicate selected resource; skipping it", "resourceId", resourceId, "resourceSelectorIndex", idx)
-				}
-			}
-		default:
-			return nil, "", errors.NewUserError(nil, "invalid resource selector: neither name nor label selector is specified",
-				"manager", managerName, "resourceSelectorIndex", idx)
 		}
 	}
 
 	// Sort the selected resources to ensure deterministic outcomes.
 	sort.Slice(resources, func(i, j int) bool {
-		return resourceUniqueId(resources[i]) < resourceUniqueId(resources[j])
+		return resourceUniqueId(&resources[i]) < resourceUniqueId(&resources[j])
 	})
 
 	hash, err = hasher.HashOf(resources)
 	if err != nil {
-		return nil, "", errors.Wraps(err, "failed to compute the hash of the selected resources",
-			"manager", managerName)
+		return nil, "", errors.Wraps(err, "failed to compute the hash of the selected resources")
 	}
 	return resources, hash, nil
 }
@@ -141,27 +142,10 @@ func (m *Manager) retrieveResourceByName(
 	placementPolicyAccessor placementv1alpha1.PlacementPolicyAccessor,
 	resourceSelector placementv1alpha1.ResourceSelector,
 ) (placementv1alpha1.SnapshottedResource, error) {
-	gvk := schema.GroupVersionKind{
-		Group:   resourceSelector.APIGroup,
-		Version: resourceSelector.APIVersion,
-		Kind:    resourceSelector.Kind,
-	}
-
-	// Convert the GVK to a GVR using the REST mapper.
-	mapping, err := m.restMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	gvk, gvr, namespace, err := m.lookUpGVKGVRAndNamespace(resourceSelector, placementPolicyAccessor.GetNamespace())
 	if err != nil {
-		return placementv1alpha1.SnapshottedResource{}, errors.NewUnexpectedError(err, "failed to map GVK to GVR",
-			"manager", managerName, "gvk", gvk)
-	}
-	gvr := mapping.Resource
-
-	// Determine the namespace of the selected resource.
-	//
-	// If the placement policy is namespace-scoped, the selected resource is assumed to be from the same namespace;
-	// if the placement policy is cluster-scoped, the namespace is taken from the resource selector.
-	namespace := resourceSelector.Namespace
-	if placementPolicyAccessor.GetNamespace() != "" {
-		namespace = placementPolicyAccessor.GetNamespace()
+		return placementv1alpha1.SnapshottedResource{}, errors.Wraps(err, "failed to look up GVK, GVR and namespace",
+			"resourceSelector", resourceSelector)
 	}
 
 	var resource *unstructured.Unstructured
@@ -176,20 +160,20 @@ func (m *Manager) retrieveResourceByName(
 		}
 		if err != nil {
 			return placementv1alpha1.SnapshottedResource{}, errors.NewAPIServerError(err, "failed to get selected resource", true,
-				"manager", managerName, "gvr", gvr, "namespace", namespace, "name", resourceSelector.Name)
+				"gvr", gvr, "namespace", namespace, "name", resourceSelector.Name)
 		}
 		var ok bool
 		resource, ok = obj.(*unstructured.Unstructured)
 		if !ok {
 			return placementv1alpha1.SnapshottedResource{}, errors.NewUnexpectedError(nil, "failed to convert the retrieved resource to unstructured",
-				"manager", managerName, "gvr", gvr, "namespace", namespace, "name", resourceSelector.Name)
+				"gvr", gvr, "namespace", namespace, "name", resourceSelector.Name)
 		}
 	} else {
 		// No informer is set up for the selected resource, or the informer has not been synced yet.
 		//
 		// As a fallback, retrieve the resource directly from the API server.
 		klog.V(2).InfoS("Informer for the selected resource is not set up or not synced; retrieving the resource directly from the API server",
-			"manager", managerName, "gvr", gvr)
+			"gvr", gvr)
 		if namespace == "" {
 			resource, err = m.hubDynamicClient.Resource(gvr).Get(ctx, resourceSelector.Name, metav1.GetOptions{})
 		} else {
@@ -197,14 +181,14 @@ func (m *Manager) retrieveResourceByName(
 		}
 		if err != nil {
 			return placementv1alpha1.SnapshottedResource{}, errors.NewAPIServerError(err, "failed to get selected resource directly from the API server", false,
-				"manager", managerName, "gvr", gvr, "namespace", namespace, "name", resourceSelector.Name)
+				"gvr", gvr, "namespace", namespace, "name", resourceSelector.Name)
 		}
 	}
 
 	snapshottedResource, err := snapshotResource(resource)
 	if err != nil {
 		return placementv1alpha1.SnapshottedResource{},
-			errors.Wraps(err, "failed to snapshot selected resource", "manager", managerName,
+			errors.Wraps(err, "failed to snapshot selected resource",
 				"gvr", gvr, "namespace", namespace, "name", resourceSelector.Name)
 	}
 	return snapshottedResource, nil
@@ -215,34 +199,15 @@ func (m *Manager) retrieveResourcesByLabelSelector(
 	placementPolicyAccessor placementv1alpha1.PlacementPolicyAccessor,
 	resourceSelector placementv1alpha1.ResourceSelector,
 ) ([]placementv1alpha1.SnapshottedResource, error) {
-	gvk := schema.GroupVersionKind{
-		Group:   resourceSelector.APIGroup,
-		Version: resourceSelector.APIVersion,
-		Kind:    resourceSelector.Kind,
-	}
-
-	// Convert the GVK to a GVR using the REST mapper.
-	mapping, err := m.restMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	gvk, gvr, namespace, err := m.lookUpGVKGVRAndNamespace(resourceSelector, placementPolicyAccessor.GetNamespace())
 	if err != nil {
-		return nil, errors.NewUnexpectedError(err, "failed to map GVK to GVR",
-			"manager", managerName, "gvk", gvk)
+		return nil, errors.Wraps(err, "failed to look up GVK, GVR and namespace", "resourceSelector", resourceSelector)
 	}
-	gvr := mapping.Resource
 
 	// Convert the label selector into a selector string.
 	selector, err := metav1.LabelSelectorAsSelector(resourceSelector.LabelSelector)
 	if err != nil {
-		return nil, errors.NewUserError(err, "invalid label selector",
-			"manager", managerName, "gvk", gvk, "labelSelector", resourceSelector.LabelSelector)
-	}
-
-	// Determine the namespace of the selected resources.
-	//
-	// If the placement policy is namespace-scoped, the selected resources are assumed to be from the same namespace;
-	// if the placement policy is cluster-scoped, the namespace is taken from the resource selector.
-	namespace := resourceSelector.Namespace
-	if placementPolicyAccessor.GetNamespace() != "" {
-		namespace = placementPolicyAccessor.GetNamespace()
+		return nil, errors.NewUserError(err, "invalid label selector", "gvk", gvk, "labelSelector", resourceSelector.LabelSelector)
 	}
 
 	var resources []*unstructured.Unstructured
@@ -256,7 +221,7 @@ func (m *Manager) retrieveResourcesByLabelSelector(
 		}
 		if err != nil {
 			return nil, errors.NewAPIServerError(err, "failed to list the selected resources", true,
-				"manager", managerName, "gvr", gvr, "namespace", namespace, "labelSelector", selector.String())
+				"gvr", gvr, "namespace", namespace, "labelSelector", selector.String())
 		}
 
 		for idx := range objList {
@@ -264,7 +229,7 @@ func (m *Manager) retrieveResourcesByLabelSelector(
 			resource, ok := obj.(*unstructured.Unstructured)
 			if !ok {
 				return nil, errors.NewUnexpectedError(nil, "failed to convert the retrieved resource to unstructured",
-					"manager", managerName, "gvr", gvr, "namespace", namespace)
+					"gvr", gvr, "namespace", namespace)
 			}
 			resources = append(resources, resource)
 		}
@@ -273,7 +238,7 @@ func (m *Manager) retrieveResourcesByLabelSelector(
 		//
 		// As a fallback, retrieve the resources directly from the API server.
 		klog.V(2).InfoS("Informer for the selected resources is not set up or not synced; retrieving the resources directly from the API server",
-			"manager", managerName, "gvr", gvr)
+			"gvr", gvr)
 		var resourceList *unstructured.UnstructuredList
 		if namespace == "" {
 			resourceList, err = m.hubDynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{
@@ -286,7 +251,7 @@ func (m *Manager) retrieveResourcesByLabelSelector(
 		}
 		if err != nil {
 			return nil, errors.NewAPIServerError(err, "failed to list the selected resources", false,
-				"manager", managerName, "gvr", gvr, "namespace", namespace, "labelSelector", selector.String())
+				"gvr", gvr, "namespace", namespace, "labelSelector", selector.String())
 		}
 
 		for idx := range resourceList.Items {
@@ -300,11 +265,53 @@ func (m *Manager) retrieveResourcesByLabelSelector(
 		resource := resources[idx]
 		snapshottedResources[idx], err = snapshotResource(resource)
 		if err != nil {
-			return nil, errors.Wraps(err, "failed to snapshot selected resource", "manager", managerName,
+			return nil, errors.Wraps(err, "failed to snapshot selected resource",
 				"gvr", gvr, "namespace", namespace, "name", resource.GetName())
 		}
 	}
 	return snapshottedResources, nil
+}
+
+func (m *Manager) lookUpGVKGVRAndNamespace(resourceSelector placementv1alpha1.ResourceSelector, placementPolicyNSName string) (
+	schema.GroupVersionKind, schema.GroupVersionResource, string, error) {
+	gvk := schema.GroupVersionKind{
+		Group:   resourceSelector.APIGroup,
+		Version: resourceSelector.APIVersion,
+		Kind:    resourceSelector.Kind,
+	}
+
+	// Convert the GVK to a GVR using the REST mapper.
+	mapping, err := m.restMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		return schema.GroupVersionKind{}, schema.GroupVersionResource{}, "", errors.NewUnexpectedError(err, "failed to map GVK to GVR", "gvk", gvk)
+	}
+	gvr := mapping.Resource
+	scope := mapping.Scope.Name()
+
+	// Determine the namespace of the selected resources.
+	//
+	// If the placement policy is namespace-scoped, the selected resources are assumed to be from the same namespace as the placement policy;
+	// if the placement policy is cluster-scoped, the namespace is taken from the resource selector.
+	namespace := resourceSelector.Namespace
+	if placementPolicyNSName != "" {
+		namespace = placementPolicyNSName
+	}
+
+	// Check if the resolved scope matches with the placement policy, i.e., PlacementPolicy can only select namespaced resources, while
+	// ClusterPlacementPolicy can select any resource.
+	if scope == meta.RESTScopeNameRoot && placementPolicyNSName != "" {
+		return schema.GroupVersionKind{}, schema.GroupVersionResource{}, "",
+			errors.NewUserError(nil, "cluster-scoped resource cannot be selected by a placement policy; use cluster placement policy instead",
+				"resourceSelector", resourceSelector)
+	}
+	// Check if the resolved scope matches with the resource selector, i.e., when selecting a cluster-scoped resource, no namespace can
+	// be specified.
+	if scope == meta.RESTScopeNameRoot && namespace != "" {
+		return schema.GroupVersionKind{}, schema.GroupVersionResource{}, "",
+			errors.NewUserError(nil, "namespace must not be specified for cluster-scoped resources", "resourceSelector", resourceSelector)
+	}
+
+	return gvk, gvr, namespace, nil
 }
 
 // snapshotResource removes fields that are not needed in a snapshot from an unstructured resource and converts it
@@ -347,7 +354,7 @@ func snapshotResource(resource *unstructured.Unstructured) (placementv1alpha1.Sn
 	resourceCopyRawData, err := resourceCopy.MarshalJSON()
 	if err != nil {
 		return placementv1alpha1.SnapshottedResource{}, errors.NewUnexpectedError(err, "failed to marshal the resource copy to JSON",
-			"manager", managerName, "resource", klog.KObj(resourceCopy))
+			"resource", klog.KObj(resourceCopy))
 	}
 
 	gvk := resource.GroupVersionKind()
@@ -365,10 +372,9 @@ func snapshotResource(resource *unstructured.Unstructured) (placementv1alpha1.Sn
 	}, nil
 }
 
-func resourceUniqueId(resource placementv1alpha1.SnapshottedResource) string {
+func resourceUniqueId(resource *placementv1alpha1.SnapshottedResource) string {
 	return fmt.Sprintf(resourceUniqueIdStrFmt,
 		resource.Identifier.APIGroup,
-		resource.Identifier.APIVersion,
 		resource.Identifier.Kind,
 		resource.Identifier.Namespace,
 		resource.Identifier.Name)
@@ -395,7 +401,7 @@ func splitResourcesIntoSizeControlledGroups(resources []placementv1alpha1.Snapsh
 		if resourceSize > maxPerSnapshotResourceDataSizeBytes {
 			// A single resource exceeds the per-snapshot size limit; it can never fit into any group.
 			return nil, errors.NewUserError(nil, "a single selected resource is too large to fit in a placement resource snapshot",
-				"manager", managerName, "resource", resource.Identifier,
+				"resource", resource.Identifier,
 				"resourceSizeBytes", resourceSize, "maxPerSnapshotResourceDataSizeBytes", maxPerSnapshotResourceDataSizeBytes)
 		}
 
