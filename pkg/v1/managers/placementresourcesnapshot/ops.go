@@ -92,7 +92,7 @@ func (m *Manager) snapshotResources(ctx context.Context,
 
 	switch {
 	case createOnlyWhenMissing && len(snapshots) > 0:
-		// A placement resource snapshot already exists, and the requestor dictates that a new snapshot can only be created if none exists.
+		// A placement resource snapshot already exists, and the requester dictates that a new snapshot can only be created if none exists.
 		// Return the retrieved snapshots and their freshness state.
 		return snapshots, isUpToDate, nil
 	case len(snapshots) == 0:
