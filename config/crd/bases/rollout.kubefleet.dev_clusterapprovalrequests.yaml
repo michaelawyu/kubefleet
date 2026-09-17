@@ -47,6 +47,8 @@ spec:
               stageName:
                 description: The name of the stage that the approval request is associated
                   with in the staged update run.
+                maxLength: 63
+                pattern: ^[a-z0-9]+$
                 type: string
                 x-kubernetes-validations:
                 - message: stageName is immutable
@@ -122,6 +124,9 @@ spec:
                   - type
                   type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
             type: object
         required:
         - spec

@@ -29,7 +29,7 @@ const (
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Namespaced,categories={kubefleet, kubefleet-rollout}
+// +kubebuilder:resource:scope=Namespaced,categories={kubefleet,kubefleet-rollout}
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:storageversion
 type ApprovalRequest struct {
@@ -52,7 +52,7 @@ type ApprovalRequest struct {
 //
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,categories={kubefleet, kubefleet-rollout}
+// +kubebuilder:resource:scope=Cluster,categories={kubefleet,kubefleet-rollout}
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:storageversion
 type ClusterApprovalRequest struct {
@@ -80,6 +80,8 @@ type ApprovalRequestSpec struct {
 	// The name of the stage that the approval request is associated with in the staged update run.
 	//
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern="^[a-z0-9]+$"
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="stageName is immutable"
 	StageName string `json:"stageName"`
 }
@@ -88,6 +90,10 @@ type ApprovalRequestStatus struct {
 	// A list of observed conditions about the approval request.
 	//
 	// +kubebuilder:validation:Optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 

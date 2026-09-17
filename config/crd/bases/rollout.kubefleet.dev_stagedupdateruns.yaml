@@ -48,7 +48,7 @@ spec:
               failurePolicy:
                 description: |-
                   The failure policy of the staged update run. It helps KubeFleet determine when to stop the staged update run
-                  when there are too many failures, so as to keep the impact radius within control.
+                  when there are too many failures, so as to keep the impact radius under control.
                 properties:
                   maxFailureCount:
                     default: 1
@@ -59,9 +59,6 @@ spec:
                     format: int32
                     minimum: 1
                     type: integer
-                    x-kubernetes-validations:
-                    - message: maxFailureCount is immutable
-                      rule: self == oldSelf
                   maxWaitTimePerClusterMinutes:
                     default: 30
                     description: |-
@@ -72,9 +69,6 @@ spec:
                     format: int32
                     minimum: 1
                     type: integer
-                    x-kubernetes-validations:
-                    - message: maxWaitTimePerClusterMinutes is immutable
-                      rule: self == oldSelf
                 type: object
                 x-kubernetes-validations:
                 - message: failurePolicy is immutable
@@ -82,7 +76,7 @@ spec:
               placementPolicyName:
                 description: |-
                   The name of the placement policy that the StagedUpdateRun API object is associated with, i.e.,
-                  the name of placement policy where resource changes are rolled out.
+                  the name of the placement policy where resource changes are rolled out.
                 type: string
                 x-kubernetes-validations:
                 - message: placementPolicyName is immutable
@@ -94,6 +88,7 @@ spec:
 
                   If left empty, KubeFleet will request a new resource snapshot to be created based on the current state
                   of selected resources in the placement policy (if applicable).
+                maxLength: 253
                 type: string
                 x-kubernetes-validations:
                 - message: resourceSnapshotName is immutable
@@ -112,13 +107,18 @@ spec:
                   Whether the staged update run is suspended. If set to true, KubeFleet will pause the rollout.
 
                   If the staged update run is created with this field set to true, KubeFleet will initialize the staged update run,
-                  i.e., confirm on the resource snapshot to rollout and determine the stages and the clusters in each stage,
+                  i.e., decide on the resource snapshot to roll out and determine the stages and the clusters in each stage,
                   but will not start rolling out resource changes until the field is set back to false.
                 type: boolean
             required:
             - placementPolicyName
             - stagedUpdateStrategyName
             type: object
+            x-kubernetes-validations:
+            - message: resourceSnapshotName cannot be added or removed after creation
+              rule: has(self.resourceSnapshotName) == has(oldSelf.resourceSnapshotName)
+            - message: failurePolicy cannot be added or removed after creation
+              rule: has(self.failurePolicy) == has(oldSelf.failurePolicy)
           status:
             description: The observed status of the StagedUpdateRun API object.
             properties:
@@ -179,6 +179,9 @@ spec:
                   - type
                   type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               resourceSnapshotNameToRollout:
                 description: |-
                   The name of the resource snapshot that is being rolled out in the staged update run.
@@ -263,7 +266,10 @@ spec:
                               - type
                               type: object
                             type: array
-                          taskType:
+                            x-kubernetes-list-map-keys:
+                            - type
+                            x-kubernetes-list-type: map
+                          type:
                             description: The type of the stage task.
                             enum:
                             - TimedWait
@@ -273,7 +279,7 @@ spec:
                             description: The time to wait in a TimedWait task.
                             type: string
                         required:
-                        - taskType
+                        - type
                         type: object
                       maxItems: 2
                       type: array
@@ -348,7 +354,10 @@ spec:
                               - type
                               type: object
                             type: array
-                          taskType:
+                            x-kubernetes-list-map-keys:
+                            - type
+                            x-kubernetes-list-type: map
+                          type:
                             description: The type of the stage task.
                             enum:
                             - TimedWait
@@ -358,7 +367,7 @@ spec:
                             description: The time to wait in a TimedWait task.
                             type: string
                         required:
-                        - taskType
+                        - type
                         type: object
                       maxItems: 1
                       type: array
@@ -430,6 +439,9 @@ spec:
                               - type
                               type: object
                             type: array
+                            x-kubernetes-list-map-keys:
+                            - type
+                            x-kubernetes-list-type: map
                           placementBindingName:
                             description: The name of the placement binding.
                             type: string
@@ -502,6 +514,9 @@ spec:
                         - type
                         type: object
                       type: array
+                      x-kubernetes-list-map-keys:
+                      - type
+                      x-kubernetes-list-type: map
                     maxConcurrency:
                       description: The (resolved) maximum number of clusters that
                         can be updated concurrently within this stage.
@@ -509,6 +524,8 @@ spec:
                       type: integer
                     stageName:
                       description: The name of the stage.
+                      maxLength: 63
+                      pattern: ^[a-z0-9]+$
                       type: string
                     startedTimestamp:
                       description: The timestamp when the rollout in the stage started.

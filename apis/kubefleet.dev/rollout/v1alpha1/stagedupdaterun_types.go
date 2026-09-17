@@ -21,30 +21,35 @@ import (
 )
 
 const (
+	// The condition types of StagedUpdateRun and ClusterStagedUpdateRun API objects.
 	StagedUpdateRunCondTypeInitialized = "Initialized"
 	StagedUpdateRunCondTypeStarted     = "Started"
 	StagedUpdateRunCondTypeCompleted   = "Completed"
 
+	// The condition type of stages to run in StagedUpdateRun and ClusterStagedUpdateRun API objects.
 	StagedUpdateRunPerStageCondTypeStarted   = "Started"
 	StagedUpdateRunPerStageCondTypeCompleted = "Completed"
 
+	// The condition type of clusters to roll out to in StagedUpdateRun and ClusterStagedUpdateRun API objects.
 	StagedUpdateRunPerClusterCondTypeStarted   = "Started"
 	StagedUpdateRunPerClusterCondTypeCompleted = "Completed"
 
+	// The condition type of stage tasks to execute in StagedUpdateRun and ClusterStagedUpdateRun API objects.
 	StagedUpdateRunTaskCondTypeApprovalRequestCreated  = "ApprovalRequestCreated"
 	StagedUpdateRunTaskCondTypeApprovalRequestApproved = "ApprovalRequestApproved"
 	StagedUpdateRunTaskCondTypeTimedWaitStarted        = "TimedWaitStarted"
 	StagedUpdateRunTaskCondTypeWaitTimeElapsed         = "WaitTimeElapsed"
 )
 
+// The reasons for the respective condition types.
 const (
-	StagedUpdateRunInitializedCondTypeReasonPreppedResSnapshotAndAllStages = "PreppedResSnapshotAndAllStages"
+	StagedUpdateRunInitializedCondReasonPreppedResourceSnapshotAndAllStages = "PreppedResourceSnapshotAndAllStages"
 
-	StagedUpdateRunTaskCondTypeApprovalRequestCreatedCondTypeReasonCreated   = "RequestCreated"
-	StagedUpdateRunTaskCondTypeApprovalRequestApprovedCondTypeReasonApproved = "RequestApproved"
+	StagedUpdateRunTaskApprovalRequestCreatedCondReasonCreated   = "RequestCreated"
+	StagedUpdateRunTaskApprovalRequestApprovedCondReasonApproved = "RequestApproved"
 
-	StagedUpdateRunTaskCondTypeTimedWaitStartedCondTypeReasonTimerStarted = "TimerStarted"
-	StagedUpdateRunTaskCondTypeWaitTimeElapsedCondTypeReasonTimerElapsed  = "TimerElapsed"
+	StagedUpdateRunTaskTimedWaitStartedCondReasonTimerStarted = "TimerStarted"
+	StagedUpdateRunTaskWaitTimeElapsedCondReasonTimerElapsed  = "TimerElapsed"
 )
 
 // StagedUpdateRun is the KubeFleet API that enables users to roll out resource changes for a placement policy
@@ -95,9 +100,13 @@ type ClusterStagedUpdateRun struct {
 	Status StagedUpdateRunStatus `json:"status,omitempty"`
 }
 
+// StagedUpdateRunSpec is the spec of the StagedUpdateRun API object.
+//
+// +kubebuilder:validation:XValidation:rule="has(self.resourceSnapshotName) == has(oldSelf.resourceSnapshotName)",message="resourceSnapshotName cannot be added or removed after creation"
+// +kubebuilder:validation:XValidation:rule="has(self.failurePolicy) == has(oldSelf.failurePolicy)",message="failurePolicy cannot be added or removed after creation"
 type StagedUpdateRunSpec struct {
 	// The name of the placement policy that the StagedUpdateRun API object is associated with, i.e.,
-	// the name of placement policy where resource changes are rolled out.
+	// the name of the placement policy where resource changes are rolled out.
 	//
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="placementPolicyName is immutable"
@@ -111,7 +120,8 @@ type StagedUpdateRunSpec struct {
 	//
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="resourceSnapshotName is immutable"
-	ResourceSnapshotName string `json:"resourceSnapshotName"`
+	// +kubebuilder:validation:MaxLength=253
+	ResourceSnapshotName string `json:"resourceSnapshotName,omitempty"`
 
 	// The name of the staged update strategy that the StagedUpdateRun API object is associated with, i.e.,
 	// the name of the staged update strategy that organizes clusters into stages and defines how the rollout is executed.
@@ -123,7 +133,7 @@ type StagedUpdateRunSpec struct {
 	// Whether the staged update run is suspended. If set to true, KubeFleet will pause the rollout.
 	//
 	// If the staged update run is created with this field set to true, KubeFleet will initialize the staged update run,
-	// i.e., confirm on the resource snapshot to rollout and determine the stages and the clusters in each stage,
+	// i.e., decide on the resource snapshot to roll out and determine the stages and the clusters in each stage,
 	// but will not start rolling out resource changes until the field is set back to false.
 	//
 	// +kubebuilder:validation:Optional
@@ -131,7 +141,7 @@ type StagedUpdateRunSpec struct {
 	Suspended bool `json:"suspended,omitempty"`
 
 	// The failure policy of the staged update run. It helps KubeFleet determine when to stop the staged update run
-	// when there are too many failures, so as to keep the impact radius within control.
+	// when there are too many failures, so as to keep the impact radius under control.
 	//
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="failurePolicy is immutable"
@@ -146,7 +156,6 @@ type StagedUpdateRunFailurePolicy struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=1
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="maxFailureCount is immutable"
 	MaxFailureCount int32 `json:"maxFailureCount,omitempty"`
 
 	// The maximum time to wait for a rollout to a cluster to complete before KubeFleet considers the rollout to have
@@ -157,7 +166,6 @@ type StagedUpdateRunFailurePolicy struct {
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=30
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="maxWaitTimePerClusterMinutes is immutable"
 	MaxWaitTimePerClusterMinutes int32 `json:"maxWaitTimePerClusterMinutes,omitempty"`
 }
 
@@ -165,6 +173,10 @@ type StagedUpdateRunStatus struct {
 	// A list of observed conditions of the staged update run.
 	//
 	// +kubebuilder:validation:Optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// The name of the resource snapshot that is being rolled out in the staged update run.
@@ -186,6 +198,8 @@ type PerStageStatus struct {
 	// The name of the stage.
 	//
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern="^[a-z0-9]+$"
 	StageName string `json:"stageName"`
 
 	// The list of clusters featured in the stage, and their individual rollout status.
@@ -208,6 +222,10 @@ type PerStageStatus struct {
 	// A list of observed conditions about the rollout progress in the stage.
 	//
 	// +kubebuilder:validation:Optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// The timestamp when the rollout in the stage started. If unset, the rollout has not started in the stage yet.
@@ -244,6 +262,10 @@ type PerClusterStatus struct {
 	// A list of observed conditions about the rollout progress of the cluster.
 	//
 	// +kubebuilder:validation:Optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
@@ -252,7 +274,7 @@ type PerStageTaskStatus struct {
 	//
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=TimedWait;Approval
-	TaskType StageTaskType `json:"taskType"`
+	Type StageTaskType `json:"type"`
 
 	// The name of the approval request that is created for the stage task.
 	//
@@ -269,6 +291,10 @@ type PerStageTaskStatus struct {
 	// A list of observed conditions about the progress of the stage task.
 	//
 	// +kubebuilder:validation:Optional
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 

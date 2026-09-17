@@ -94,12 +94,12 @@ type StagedUpdateRunAccessor interface {
 	SetStatus(StagedUpdateRunStatus)
 }
 
-// Spec returns the spec of the StagedUpdateRun.
+// GetSpec returns the spec of the StagedUpdateRun.
 func (s *StagedUpdateRun) GetSpec() *StagedUpdateRunSpec {
 	return &s.Spec
 }
 
-// Status returns the status of the StagedUpdateRun.
+// GetStatus returns the status of the StagedUpdateRun.
 func (s *StagedUpdateRun) GetStatus() *StagedUpdateRunStatus {
 	return &s.Status
 }

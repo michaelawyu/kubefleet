@@ -29,11 +29,10 @@ const (
 )
 
 // StagedUpdateStrategy is the KubeFleet API that defines how to perform a staged rollout of resource changes
-// for a placement policy; the API dictates on how clusters are grouped into stages, and how rollout is
-// performed within each stage, and the tasks to execute before and after each stage.
+// for a placement policy; the API dictates how clusters are grouped into stages, how the rollout is performed
+// within each stage, and which tasks to execute before and after each stage.
 //
 // +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,categories={kubefleet,kubefleet-rollout}
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:storageversion
@@ -48,11 +47,10 @@ type StagedUpdateStrategy struct {
 }
 
 // ClusterStagedUpdateStrategy is the KubeFleet API that defines how to perform a staged rollout of resource changes
-// for a cluster placement policy; the API dictates on how clusters are grouped into stages, and how rollout is
-// performed within each stage, and the tasks to execute before and after each stage.
+// for a cluster placement policy; the API dictates how clusters are grouped into stages, how the rollout is performed
+// within each stage, and which tasks to execute before and after each stage.
 //
 // +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,categories={kubefleet,kubefleet-rollout}
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:storageversion
@@ -67,13 +65,22 @@ type ClusterStagedUpdateStrategy struct {
 }
 
 type StagedUpdateStrategySpec struct {
+	// The stages that KubeFleet rolls out resource changes to, in the order they are listed.
+	//
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=31
+	// +kubebuilder:validation:XValidation:rule="self.all(s, self.exists_one(t, t.name == s.name))",message="stage names must be unique"
 	Stages []Stage `json:"stages"`
 }
 
 type Stage struct {
-	// The name of the stage.
+	// The name of the stage. It must be unique within the staged update strategy and may only consist of
+	// lowercase alphanumeric characters.
 	//
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern="^[a-z0-9]+$"
 	Name string `json:"name"`
 
 	// The label selector that selects clusters to be included in the stage.
@@ -96,12 +103,12 @@ type Stage struct {
 	// +kubebuilder:validation:Optional
 	SortingLabelKey *string `json:"sortingLabelKey,omitempty"`
 
-	// MaxConcurrency controls the maximum number of clusters that can be rolled out concurrently within this stage.
+	// The maximum number of clusters that can be rolled out concurrently within this stage.
 	//
 	// This field accepts either an integer value (e.g., 5), or a percentage value (e.g., "50%"). For percentage values,
 	// the concurrency number is calculated based on the total number of clusters in the stage, with fractional results rounded down.
 	//
-	// The minimum value for this field is 1.
+	// A minimum concurrency of 1 is enforced.
 	//
 	// Defaults to 1.
 	//
@@ -117,10 +124,10 @@ type Stage struct {
 	//
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=2
-	// +kubebuilder:validation:XValidation:rule="self.filter(e, e.type == 'Approval').size() <= 1",message="AfterStageTasks cannot have more than one Approval task"
-	// +kubebuilder:validation:XValidation:rule="self.filter(e, e.type == 'TimedWait').size() <= 1",message="AfterStageTasks cannot have more than one TimedWait task"
-	// +kubebuilder:validation:XValidation:rule="!self.exists(e, e.type == 'Approval' && has(e.waitTime))",message="waitTime does not apply for an Approval AfterStageTask"
-	// +kubebuilder:validation:XValidation:rule="!self.exists(e, e.type == 'TimedWait' && !has(e.waitTime))",message="waitTime is required for a TimedWait AfterStageTask"
+	// +kubebuilder:validation:XValidation:rule="self.filter(e, e.type == 'Approval').size() <= 1",message="afterStageTasks cannot have more than one Approval task"
+	// +kubebuilder:validation:XValidation:rule="self.filter(e, e.type == 'TimedWait').size() <= 1",message="afterStageTasks cannot have more than one TimedWait task"
+	// +kubebuilder:validation:XValidation:rule="!self.exists(e, e.type == 'Approval' && has(e.waitTime))",message="waitTime does not apply to an Approval task in afterStageTasks"
+	// +kubebuilder:validation:XValidation:rule="!self.exists(e, e.type == 'TimedWait' && !has(e.waitTime))",message="waitTime is required for a TimedWait task in afterStageTasks"
 	AfterStageTasks []StageTask `json:"afterStageTasks,omitempty"`
 
 	// A list of tasks to execute before the stage rollout starts. The tasks run in parallel; the current stage will only start
@@ -128,8 +135,8 @@ type Stage struct {
 	//
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=1
-	// +kubebuilder:validation:XValidation:rule="!self.exists(e, e.type == 'Approval' && has(e.waitTime))",message="waitTime does not apply for an Approval BeforeStageTask"
-	// +kubebuilder:validation:XValidation:rule="!self.exists(e, e.type == 'TimedWait')",message="BeforeStageTaskType cannot be TimedWait"
+	// +kubebuilder:validation:XValidation:rule="!self.exists(e, e.type == 'Approval' && has(e.waitTime))",message="waitTime does not apply to an Approval task in beforeStageTasks"
+	// +kubebuilder:validation:XValidation:rule="!self.exists(e, e.type == 'TimedWait')",message="beforeStageTasks cannot include a TimedWait task"
 	BeforeStageTasks []StageTask `json:"beforeStageTasks,omitempty"`
 }
 
