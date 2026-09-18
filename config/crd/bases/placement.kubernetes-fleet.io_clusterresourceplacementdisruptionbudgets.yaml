@@ -78,8 +78,8 @@ spec:
                   One may use a value of 0 for this field; in this case, no voluntary disruption would be
                   allowed.
 
-                  This field is mutually exclusive with the MinAvailable field in the spec; exactly one
-                  of them can be set at a time.
+                  This field is mutually exclusive with the MinAvailable field in the spec; set only one of them
+                  at a time. If none is set, no disruption is allowed for the target placement.
                 x-kubernetes-int-or-string: true
                 x-kubernetes-validations:
                 - message: If supplied value is String should match regex '^(100|[0-9]{1,2})%$'
@@ -113,8 +113,8 @@ spec:
                   One may use a value of 0 for this field; in this case, voluntary disruption would be
                   allowed at any time.
 
-                  This field is mutually exclusive with the MaxUnavailable field in the spec; exactly one
-                  of them can be set at a time.
+                  This field is mutually exclusive with the MaxUnavailable field in the spec; set only one of them
+                  at a time. If none is set, no disruption is allowed for the target placement.
                 x-kubernetes-int-or-string: true
                 x-kubernetes-validations:
                 - message: If supplied value is String should match regex '^(100|[0-9]{1,2})%$'
@@ -302,8 +302,8 @@ spec:
                   One may use a value of 0 for this field; in this case, no voluntary disruption would be
                   allowed.
 
-                  This field is mutually exclusive with the MinAvailable field in the spec; exactly one
-                  of them can be set at a time.
+                  This field is mutually exclusive with the MinAvailable field in the spec; set only one of them
+                  at a time. If none is set, no disruption is allowed for the target placement.
                 x-kubernetes-int-or-string: true
                 x-kubernetes-validations:
                 - message: If supplied value is String should match regex '^(100|[0-9]{1,2})%$'
@@ -337,8 +337,8 @@ spec:
                   One may use a value of 0 for this field; in this case, voluntary disruption would be
                   allowed at any time.
 
-                  This field is mutually exclusive with the MaxUnavailable field in the spec; exactly one
-                  of them can be set at a time.
+                  This field is mutually exclusive with the MaxUnavailable field in the spec; set only one of them
+                  at a time. If none is set, no disruption is allowed for the target placement.
                 x-kubernetes-int-or-string: true
                 x-kubernetes-validations:
                 - message: If supplied value is String should match regex '^(100|[0-9]{1,2})%$'
