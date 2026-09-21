@@ -50,22 +50,25 @@ spec:
                   The failure policy of the staged update run. It helps KubeFleet determine when to stop the staged update run
                   when there are too many failures, so as to keep the impact radius under control.
                 properties:
-                  maxFailureCount:
+                  maxAllowedClusterFailures:
                     default: 1
                     description: |-
-                      The maximum number of failures (e.g., clusters where the rollout fails) before KubeFleet stops the staged update run.
+                      The maximum number of clusters that can fail the rollout before KubeFleet stops the staged
+                      update run. The count is tracked across all stages and clusters. A cluster is considered to have
+                      failed the rollout if the new (updated) placement does not become available within the maximum
+                      wait time.
 
                       The default value is 1.
                     format: int32
                     minimum: 1
                     type: integer
                   maxWaitTimePerClusterMinutes:
-                    default: 30
+                    default: 5
                     description: |-
                       The maximum time to wait for a rollout to a cluster to complete before KubeFleet considers the rollout to have
                       failed for the cluster.
 
-                      The default value is 30 minutes.
+                      The default value is 5 minutes.
                     format: int32
                     minimum: 1
                     type: integer

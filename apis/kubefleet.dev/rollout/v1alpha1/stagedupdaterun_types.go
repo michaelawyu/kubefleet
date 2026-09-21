@@ -149,22 +149,25 @@ type StagedUpdateRunSpec struct {
 }
 
 type StagedUpdateRunFailurePolicy struct {
-	// The maximum number of failures (e.g., clusters where the rollout fails) before KubeFleet stops the staged update run.
+	// The maximum number of clusters that can fail the rollout before KubeFleet stops the staged
+	// update run. The count is tracked across all stages and clusters. A cluster is considered to have
+	// failed the rollout if the new (updated) placement does not become available within the maximum
+	// wait time.
 	//
 	// The default value is 1.
 	//
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=1
 	// +kubebuilder:validation:Minimum=1
-	MaxFailureCount int32 `json:"maxFailureCount,omitempty"`
+	MaxAllowedClusterFailures int32 `json:"maxAllowedClusterFailures,omitempty"`
 
 	// The maximum time to wait for a rollout to a cluster to complete before KubeFleet considers the rollout to have
 	// failed for the cluster.
 	//
-	// The default value is 30 minutes.
+	// The default value is 5 minutes.
 	//
 	// +kubebuilder:validation:Optional
-	// +kubebuilder:default=30
+	// +kubebuilder:default=5
 	// +kubebuilder:validation:Minimum=1
 	MaxWaitTimePerClusterMinutes int32 `json:"maxWaitTimePerClusterMinutes,omitempty"`
 }
