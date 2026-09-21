@@ -50,12 +50,6 @@ func (t *gvkMatcherTrie) Register(gvk schema.GroupVersionKind) error {
 
 	node := (*gvkMatcherTrieNode)(t)
 	for _, edge := range []string{group, version, kind} {
-		// Check if a wildcard has already covers the given GVK.
-		if _, found := node.children[wildcard]; found {
-			node = node.children[wildcard]
-			continue
-		}
-
 		if node.children == nil {
 			node.children = make(map[string]*gvkMatcherTrieNode)
 		}
@@ -67,6 +61,24 @@ func (t *gvkMatcherTrie) Register(gvk schema.GroupVersionKind) error {
 		node = child
 	}
 	return nil
+}
+
+// DeepCopy returns a deep copy of the matcher trie.
+func (t *gvkMatcherTrie) DeepCopy() gvkMatcherTrie {
+	return gvkMatcherTrie(*(*gvkMatcherTrieNode)(t).deepCopy())
+}
+
+func (n *gvkMatcherTrieNode) deepCopy() *gvkMatcherTrieNode {
+	cp := &gvkMatcherTrieNode{}
+	if n.children == nil {
+		return cp
+	}
+
+	cp.children = make(map[string]*gvkMatcherTrieNode, len(n.children))
+	for edge, child := range n.children {
+		cp.children[edge] = child.deepCopy()
+	}
+	return cp
 }
 
 // Match reports whether the given GVK is covered by an entry registered in the trie.
