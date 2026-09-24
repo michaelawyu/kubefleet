@@ -1,0 +1,5 @@
+controlPlane:
+  # For simplicity reasons, do NOT expose the API server via an Ingress.
+  ingress:
+    enabled: false
+    host: ""

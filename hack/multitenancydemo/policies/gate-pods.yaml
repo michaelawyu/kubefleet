@@ -1,0 +1,46 @@
+# Sets schedulerName to "kubefleet" on every Pod created outside the "kueue-system" namespace,
+# so those Pods are scheduled by KubeFleet's own scheduler instead of the default one.
+#
+# Requires the "MutatingAdmissionPolicy" API (alpha in Kubernetes 1.32, beta in 1.34, GA as
+# "admissionregistration.k8s.io/v1" from 1.36 onward). On alpha/beta releases, the
+# "MutatingAdmissionPolicy" feature gate must also be enabled on the API server.
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: set-scheduler-outside-kueue-system
+spec:
+  failurePolicy: Fail
+  # Required by the API server (no default): only one mutation is defined here, so reinvocation
+  # never applies in practice, but the field must still be set explicitly.
+  reinvocationPolicy: IfNeeded
+  matchConstraints:
+    resourceRules:
+    # spec.schedulerName is immutable after creation, so this only ever needs to (and only ever
+    # can) apply on CREATE; matching UPDATE as well would make the API server reject every
+    # subsequent update to a Pod whose schedulerName isn't already "kubefleet".
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      operations: ["CREATE", "UPDATE"]
+      resources: ["pods"]
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: NotIn
+        values:
+        - kueue-system
+  mutations:
+  - patchType: ApplyConfiguration
+    applyConfiguration:
+      expression: >
+        Object{
+          spec: Object.spec{
+            schedulerName: "kubefleet"
+          }
+        }
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicyBinding
+metadata:
+  name: set-scheduler-outside-kueue-system-binding
+spec:
+  policyName: set-scheduler-outside-kueue-system
