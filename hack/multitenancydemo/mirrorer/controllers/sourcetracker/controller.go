@@ -47,6 +47,14 @@ const (
 
 	sourceObjectAnnotationKey = "kubefleet.dev/source-object"
 	sourceHashLabelKey        = "kubefleet.dev/source-hash"
+
+	// requeueInterval is the fixed interval at which a successful reconcile is requeued. This
+	// controller only watches Pods, so a change made solely to a Pod's owner (e.g. the
+	// cluster-selectors annotation being added, removed, or updated on the root of the
+	// ownership chain) would otherwise never trigger a new reconcile; periodic requeuing lets
+	// such changes still get picked up, at the cost of some steady-state polling. This is
+	// acceptable for demo purposes.
+	requeueInterval = 5 * time.Second
 )
 
 // podGVK is the GroupVersionKind for the core Pod type; it is used to build Requests out of the
@@ -76,7 +84,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 	if err := r.vclusterClient.Get(ctx, req.namespacedName, obj); err != nil {
 		if apierrors.IsNotFound(err) {
 			klog.V(2).InfoS("Object not found in the vcluster; skipping", "request", req, "controller", controllerName)
-			return ctrl.Result{}, nil
+			return ctrl.Result{RequeueAfter: requeueInterval}, nil
 		}
 		klog.ErrorS(err, "Failed to retrieve the object from the vcluster", "request", req, "controller", controllerName)
 		return ctrl.Result{}, err
@@ -96,8 +104,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 			err := fmt.Errorf("object %s/%s (%s) has %d owner references; only a single owner reference is supported",
 				rootObj.GetNamespace(), rootObj.GetName(), rootObj.GroupVersionKind(), len(ownerRefs))
 			klog.ErrorS(err, "Rejecting an object with multiple owner references", "request", req, "controller", controllerName)
-			// No need to requeue; this is considered as an user error.
-			return ctrl.Result{}, nil
+			// This is considered a user error rather than a transient failure; still requeue
+			// after the usual interval (rather than not at all) so that the object is picked up
+			// again automatically once the user fixes the owner references.
+			return ctrl.Result{RequeueAfter: requeueInterval}, nil
 		}
 
 		ownerRef := ownerRefs[0]
@@ -153,26 +163,36 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 				"request", req, "controller", controllerName)
 		}
 
-		return ctrl.Result{}, nil
+		return ctrl.Result{RequeueAfter: requeueInterval}, nil
 	}
 
 	// Add the source object, cluster selectors, and cluster selectors last fetched annotation to the leaf object.
 	sourceObjectRef := fmt.Sprintf("%s/%s/%s/%s/%s", req.gvk.Group, req.gvk.Version, req.gvk.Kind, obj.GetNamespace(), obj.GetName())
 	newClusterSelectors := rootObj.GetAnnotations()[clusterSelectorsAnnotationKey]
 
+	// Track whether anything actually needs to change on the object; the annotations/labels
+	// below are already at their intended values on most reconciles (e.g. ones triggered by an
+	// unrelated field update), and issuing an Update call in that case would just re-trigger
+	// this very reconcile loop via the resulting Pod update event, forever, without ever making
+	// progress.
+	changed := false
+
 	annotations := obj.GetAnnotations()
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
-	oldClusterSelectors := annotations[clusterSelectorsAnnotationKey]
-	annotations[sourceObjectAnnotationKey] = sourceObjectRef
-	annotations[clusterSelectorsAnnotationKey] = newClusterSelectors
-	// Only refresh the last-fetched timestamp when the cluster selectors value actually
-	// changes; otherwise, an unrelated reconcile (e.g. one triggered by an unrelated field
-	// update) would keep bumping the timestamp even though nothing about the placement policy
-	// changed.
-	if oldClusterSelectors != newClusterSelectors {
+	if annotations[sourceObjectAnnotationKey] != sourceObjectRef {
+		annotations[sourceObjectAnnotationKey] = sourceObjectRef
+		changed = true
+	}
+	// Only refresh the cluster selectors (and the last-fetched timestamp) when the cluster
+	// selectors value actually changes; otherwise, an unrelated reconcile (e.g. one triggered by
+	// an unrelated field update) would keep bumping the timestamp even though nothing about the
+	// placement policy changed.
+	if oldClusterSelectors := annotations[clusterSelectorsAnnotationKey]; oldClusterSelectors != newClusterSelectors {
+		annotations[clusterSelectorsAnnotationKey] = newClusterSelectors
 		annotations[clusterSelectorsLastFetchedTimestampAnnotationKey] = time.Now().UTC().Format(time.RFC3339)
+		changed = true
 	}
 	obj.SetAnnotations(annotations)
 
@@ -187,8 +207,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 	if labels == nil {
 		labels = map[string]string{}
 	}
-	labels[sourceHashLabelKey] = sourceHashLabelValue
+	if labels[sourceHashLabelKey] != sourceHashLabelValue {
+		labels[sourceHashLabelKey] = sourceHashLabelValue
+		changed = true
+	}
 	obj.SetLabels(labels)
+
+	if !changed {
+		klog.V(2).InfoS("The object already carries up-to-date source object, cluster selectors, and source hash annotations/label; skipping update",
+			"request", req, "controller", controllerName)
+		return ctrl.Result{RequeueAfter: requeueInterval}, nil
+	}
 
 	if err := r.vclusterClient.Update(ctx, obj); err != nil {
 		klog.ErrorS(err, "Failed to update the object with the source object, cluster selectors, and cluster selectors last fetched annotations",
@@ -198,7 +227,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 	klog.V(2).InfoS("Updated the object with the source object, cluster selectors, and cluster selectors last fetched annotations",
 		"request", req, "controller", controllerName)
 
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: requeueInterval}, nil
 }
 
 // podEventHandler is a custom handler.TypedEventHandler that, for every Pod create, update,

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -54,44 +53,30 @@ const (
 	WorkOwnedByPlacementBindingCustomFieldValFormat = "%s/%s"
 )
 
-// IndexWorkOwnedByPlacementBindingField indexes work objects by their
-// owner placement binding.
-func IndexWorkOwnedByPlacementBindingField(ctx context.Context, fieldIdxer client.FieldIndexer) error {
-	if err := fieldIdxer.IndexField(ctx, &placementv1alpha1.Work{}, WorkOwnedByPlacementBindingCustomFieldName, func(rawObj client.Object) []string {
-		work, ok := rawObj.(*placementv1alpha1.Work)
-		if !ok {
-			wrappedErr := errors.NewUnexpectedError(nil, "failed to convert object to work",
-				"object", klog.KObj(rawObj))
-			klog.ErrorS(wrappedErr, "failed to index work by owner placement binding", errors.Args(wrappedErr)...)
-			return nil
-		}
-
+var (
+	workOwnedByPlacementBindingFieldExtractor fieldValueExtractor = func(obj client.Object) ([]string, error) {
 		// The value might have been truncated with a hash appended; lookups should be keyed on the label
 		// value rather than the raw owner name.
-		ownedBy := work.GetLabels()[placementv1alpha1.WorkOwnedByPlacementBindingLabelKey]
+		ownedBy := obj.GetLabels()[placementv1alpha1.WorkOwnedByPlacementBindingLabelKey]
 		if ownedBy == "" {
-			wrappedErr := errors.NewUnexpectedError(nil, "work is missing the owner placement binding label",
-				"work", klog.KObj(work))
-			klog.ErrorS(wrappedErr, "failed to index work by owner placement binding", errors.Args(wrappedErr)...)
-			return nil
+			return nil, errors.NewUnexpectedError(nil, "work is missing the owner placement binding label")
 		}
-		// An empty owner namespace signals a cluster-scoped placement binding.
-		ownerNS := work.GetLabels()[placementv1alpha1.WorkOwnerNamespaceLabelKey]
 
-		v := fmt.Sprintf(WorkOwnedByPlacementBindingCustomFieldValFormat, ownerNS, ownedBy)
-		return []string{v}
-	}); err != nil {
-		return errors.NewUnexpectedError(err, "failed to index work objects by owner placement binding")
+		// An empty owner namespace signals a cluster-scoped placement binding.
+		ownerNS := obj.GetLabels()[placementv1alpha1.WorkOwnerNamespaceLabelKey]
+		return []string{fmt.Sprintf(WorkOwnedByPlacementBindingCustomFieldValFormat, ownerNS, ownedBy)}, nil
 	}
-	return nil
-}
+)
 
 // SetupWithMemberAgentManager sets up the field indices the KubeFleet member agent needs to run properly.
 // It must be called before the manager starts.
 func SetupWithMemberAgentManager(ctx context.Context, mgr ctrl.Manager) error {
 	fieldIdxer := mgr.GetFieldIndexer()
 
-	if err := IndexWorkOwnedByPlacementBindingField(ctx, fieldIdxer); err != nil {
+	if err := indexCompositeField(ctx, fieldIdxer,
+		&placementv1alpha1.Work{},
+		WorkOwnedByPlacementBindingCustomFieldName, workOwnedByPlacementBindingFieldExtractor,
+	); err != nil {
 		return errors.Wraps(err, "failed to set up work placement binding owner field index")
 	}
 	return nil

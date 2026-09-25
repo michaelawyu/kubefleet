@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
@@ -37,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
-	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
+	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 )
 
 const (
@@ -74,19 +75,25 @@ type Reconciler struct {
 	hostClusterClient client.Client
 }
 
-// resourcePlacementNameFor derives the name of the ResourcePlacement corresponding to obj, using
-// the same recipe used when the ResourcePlacement is first created: the source object reference
-// (with slashes and dots stripped) plus the first 12 characters of the source hash. It reports
-// ok as false if obj does not (or no longer) carries the annotation/label needed to derive the
-// name, in which case name is meaningless.
-func resourcePlacementNameFor(obj *unstructured.Unstructured) (name string, ok bool) {
+// placementPolicyNameFor derives the name of the PlacementPolicy corresponding to obj, using
+// the same recipe used when the PlacementPolicy is first created: the source object reference
+// (with slashes and dots replaced with dashes, and lower-cased so that a GVK's typically
+// PascalCase Kind does not yield an invalid, uppercase Kubernetes object name) plus the first 12
+// characters of the source hash. It reports ok as false if obj does not (or no longer) carries
+// the annotation/label needed to derive the name, in which case name is meaningless.
+func placementPolicyNameFor(obj *unstructured.Unstructured) (name string, ok bool) {
 	sourceObjectRef, hasSourceObjectRef := obj.GetAnnotations()[sourceObjectAnnotationKey]
 	sourceHash, hasSourceHash := obj.GetLabels()[sourceHashLabelKey]
 	if !hasSourceObjectRef || !hasSourceHash || len(sourceHash) < 12 {
 		return "", false
 	}
 
-	strippedSourceObjectRef := strings.NewReplacer("/", "", ".", "").Replace(sourceObjectRef)
+	strippedSourceObjectRef := strings.ToLower(strings.NewReplacer("/", "-", ".", "-").Replace(sourceObjectRef))
+	// The source object reference may start (e.g. a core API group's empty Group segment) or
+	// end with a separator; trim any leading/trailing dashes left behind so that the derived
+	// name always begins and ends with an alphanumeric character, as required of Kubernetes
+	// object names.
+	strippedSourceObjectRef = strings.Trim(strippedSourceObjectRef, "-")
 	return fmt.Sprintf("%s-%s", strippedSourceObjectRef, sourceHash[:12]), true
 }
 
@@ -115,17 +122,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 		return r.cleanup(ctx, obj)
 	}
 
-	// Add a finalizer to the object if it doesn't already have one.
-	if controllerutil.AddFinalizer(obj, placementPolicyMakerCleanupFinalizer) {
-		if err := r.hostClusterClient.Update(ctx, obj); err != nil {
-			klog.ErrorS(err, "Failed to add the cleanup finalizer to the object",
-				"request", req, "controller", controllerName)
-			return ctrl.Result{}, err
-		}
-		klog.V(2).InfoS("Added the cleanup finalizer to the object", "request", req, "controller", controllerName)
-	}
-
-	// Check if the required annotations and labels are present on the object.
+	// Check if the required annotations and labels are present on the object. This is done
+	// before the object is mutated (e.g. by adding the cleanup finalizer below) so that objects
+	// which do not participate in multi-cluster placement (e.g. Pods with none of these
+	// annotations/labels) are left untouched.
 	annotations := obj.GetAnnotations()
 	requiredAnnotationKeys := []string{sourceObjectAnnotationKey, clusterSelectorsAnnotationKey, clusterSelectorsLastFetchedTimestampAnnotationKey}
 	for _, k := range requiredAnnotationKeys {
@@ -141,42 +141,64 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 		return ctrl.Result{}, nil
 	}
 
+	// Add a finalizer to the object if it doesn't already have one.
+	if controllerutil.AddFinalizer(obj, placementPolicyMakerCleanupFinalizer) {
+		if err := r.hostClusterClient.Update(ctx, obj); err != nil {
+			klog.ErrorS(err, "Failed to add the cleanup finalizer to the object",
+				"request", req, "controller", controllerName)
+			return ctrl.Result{}, err
+		}
+		klog.V(2).InfoS("Added the cleanup finalizer to the object", "request", req, "controller", controllerName)
+	}
+
 	// Parse the cluster selectors from the annotation.
 	clusterSelectors := annotations[clusterSelectorsAnnotationKey]
-	// For this demo, the cluster selectors annotation is always in the "region=X" format; parse
-	// out the region (X) value.
-	region := strings.TrimPrefix(clusterSelectors, "region=")
+	// For this demo, the cluster selectors annotation is always expected to be in the
+	// "region=X" format; validate this before parsing out the region (X) value, so that a
+	// malformed annotation does not silently produce a nonsensical cluster selector.
+	const regionSelectorPrefix = "region="
+	if !strings.HasPrefix(clusterSelectors, regionSelectorPrefix) {
+		klog.ErrorS(nil, "The cluster selectors annotation is not in the expected \"region=X\" format; skipping",
+			"request", req, "controller", controllerName, "clusterSelectors", clusterSelectors)
+		return ctrl.Result{}, nil
+	}
+	region := strings.TrimPrefix(clusterSelectors, regionSelectorPrefix)
+	if region == "" {
+		klog.ErrorS(nil, "The cluster selectors annotation has an empty region value; skipping",
+			"request", req, "controller", controllerName, "clusterSelectors", clusterSelectors)
+		return ctrl.Result{}, nil
+	}
 	klog.V(2).InfoS("Parsed the cluster selectors annotation",
 		"request", req, "controller", controllerName, "clusterSelectors", clusterSelectors, "region", region)
 
 	// Create or update the corresponding placement policy.
-	rpName, _ := resourcePlacementNameFor(obj)
+	ppName, _ := placementPolicyNameFor(obj)
 
-	rp := &placementv1beta1.ResourcePlacement{
+	pp := &placementv1alpha1.PlacementPolicy{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: obj.GetNamespace(),
-			Name:      rpName,
+			Name:      ppName,
 		},
 	}
-	if _, err := controllerutil.CreateOrUpdate(ctx, r.hostClusterClient, rp, func() error {
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.hostClusterClient, pp, func() error {
 		// Ensure a resource selector exists for the object's Group/Kind/Name (Version is
 		// ignored: the same logical resource type observed at a different served version
 		// should still map to the same selector). The object is selected directly by name
 		// rather than via a label selector.
 		found := false
-		for i := range rp.Spec.ResourceSelectors {
-			sel := rp.Spec.ResourceSelectors[i]
-			if sel.Group == req.gvk.Group && sel.Kind == req.gvk.Kind && sel.Name == obj.GetName() {
+		for i := range pp.Spec.ResourceSelectors {
+			sel := pp.Spec.ResourceSelectors[i]
+			if sel.APIGroup == req.gvk.Group && sel.Kind == req.gvk.Kind && sel.Name == obj.GetName() {
 				found = true
 				break
 			}
 		}
 		if !found {
-			rp.Spec.ResourceSelectors = append(rp.Spec.ResourceSelectors, placementv1beta1.ResourceSelectorTerm{
-				Group:   req.gvk.Group,
-				Version: req.gvk.Version,
-				Kind:    req.gvk.Kind,
-				Name:    obj.GetName(),
+			pp.Spec.ResourceSelectors = append(pp.Spec.ResourceSelectors, placementv1alpha1.ResourceSelector{
+				APIGroup:   req.gvk.Group,
+				APIVersion: req.gvk.Version,
+				Kind:       req.gvk.Kind,
+				Name:       obj.GetName(),
 			})
 		}
 
@@ -190,7 +212,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 		// needs updating) if it has never been updated before, or if it was last updated using
 		// an older cluster selectors value than the one just fetched from the source object.
 		needsUpdate := true
-		if lastUpdatedStr, ok := rp.GetAnnotations()[placementPolicyClusterSelectorsLastUpdatedTimestampAnnotationKey]; ok {
+		if lastUpdatedStr, ok := pp.GetAnnotations()[placementPolicyClusterSelectorsLastUpdatedTimestampAnnotationKey]; ok {
 			lastUpdated, err := time.Parse(time.RFC3339, lastUpdatedStr)
 			if err != nil {
 				return fmt.Errorf("failed to parse the placement policy's cluster selectors last updated timestamp %q: %w", lastUpdatedStr, err)
@@ -199,48 +221,41 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 		}
 		if !needsUpdate {
 			klog.V(2).InfoS("The placement policy's cluster selectors are already up to date; skipping the update",
-				"request", req, "controller", controllerName, "resourcePlacement", client.ObjectKeyFromObject(rp))
+				"request", req, "controller", controllerName, "placementPolicy", client.ObjectKeyFromObject(pp))
 			return nil
 		}
 
-		rp.Spec.Policy = &placementv1beta1.PlacementPolicy{
-			PlacementType:    placementv1beta1.PickNPlacementType,
-			NumberOfClusters: ptr.To(int32(1)),
-			Affinity: &placementv1beta1.Affinity{
-				ClusterAffinity: &placementv1beta1.ClusterAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: &placementv1beta1.ClusterSelector{
-						ClusterSelectorTerms: []placementv1beta1.ClusterSelectorTerm{
-							{
-								LabelSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{
-										regionLabelKey: region,
-									},
-								},
-							},
+		pp.Spec.ClusterSelectors = []placementv1alpha1.ClusterSelector{
+			{
+				Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
+					{
+						MatchLabels: map[string]string{
+							regionLabelKey: region,
 						},
 					},
 				},
+				Count: ptr.To(intstr.FromInt32(1)),
 			},
 		}
 
 		// Record the source timestamp that this update was based on (rather than the current
 		// wall-clock time), so that the comparison above remains a proper high-water mark even
 		// if this reconcile runs well after the source object was actually last fetched.
-		rpAnnotations := rp.GetAnnotations()
-		if rpAnnotations == nil {
-			rpAnnotations = map[string]string{}
+		ppAnnotations := pp.GetAnnotations()
+		if ppAnnotations == nil {
+			ppAnnotations = map[string]string{}
 		}
-		rpAnnotations[placementPolicyClusterSelectorsLastUpdatedTimestampAnnotationKey] = sourceFetchedStr
-		rp.SetAnnotations(rpAnnotations)
+		ppAnnotations[placementPolicyClusterSelectorsLastUpdatedTimestampAnnotationKey] = sourceFetchedStr
+		pp.SetAnnotations(ppAnnotations)
 
 		return nil
 	}); err != nil {
-		klog.ErrorS(err, "Failed to create or update the ResourcePlacement",
-			"request", req, "controller", controllerName, "resourcePlacement", client.ObjectKeyFromObject(rp))
+		klog.ErrorS(err, "Failed to create or update the PlacementPolicy",
+			"request", req, "controller", controllerName, "placementPolicy", client.ObjectKeyFromObject(pp))
 		return ctrl.Result{}, err
 	}
-	klog.V(2).InfoS("Created or updated the ResourcePlacement",
-		"request", req, "controller", controllerName, "resourcePlacement", client.ObjectKeyFromObject(rp))
+	klog.V(2).InfoS("Created or updated the PlacementPolicy",
+		"request", req, "controller", controllerName, "placementPolicy", client.ObjectKeyFromObject(pp))
 
 	return ctrl.Result{}, nil
 }
