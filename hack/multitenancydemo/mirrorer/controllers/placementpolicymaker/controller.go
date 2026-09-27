@@ -75,6 +75,13 @@ type Reconciler struct {
 	hostClusterClient client.Client
 }
 
+// New creates a new Reconciler that talks to the host cluster via hostClusterClient.
+func New(hostClusterClient client.Client) *Reconciler {
+	return &Reconciler{
+		hostClusterClient: hostClusterClient,
+	}
+}
+
 // placementPolicyNameFor derives the name of the PlacementPolicy corresponding to obj, using
 // the same recipe used when the PlacementPolicy is first created: the source object reference
 // (with slashes and dots replaced with dashes, and lower-cased so that a GVK's typically

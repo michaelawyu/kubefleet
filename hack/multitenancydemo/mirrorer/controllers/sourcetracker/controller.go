@@ -71,6 +71,15 @@ type Reconciler struct {
 	hostClusterClient client.Client
 }
 
+// New creates a new Reconciler that talks to the vcluster via vclusterClient and to
+// the host cluster via hostClusterClient.
+func New(vclusterClient, hostClusterClient client.Client) *Reconciler {
+	return &Reconciler{
+		vclusterClient:    vclusterClient,
+		hostClusterClient: hostClusterClient,
+	}
+}
+
 func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, error) {
 	startTime := time.Now()
 	klog.V(2).InfoS("Reconciliation starts", "request", req, "controller", controllerName)

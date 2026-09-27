@@ -16,8 +16,8 @@ limitations under the License.
 
 // Package main implements a small standalone binary for the KubeFleet multi-tenancy demo. It
 // starts two separate controller-runtime managers: one connected to the tenant cluster (the
-// vcluster), and one connected to the host cluster. No controllers are registered with either
-// manager yet; this only wires up and starts the managers themselves.
+// vcluster), and one connected to the host cluster. The sourcetracker controller runs on the
+// vcluster manager, and the placementpolicymaker controller runs on the host cluster manager.
 package main
 
 import (
@@ -33,9 +33,14 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
+	"github.com/kubefleet-dev/kubefleet/hack/multitenancydemo/mirrorer/controllers/placementpolicymaker"
+	"github.com/kubefleet-dev/kubefleet/hack/multitenancydemo/mirrorer/controllers/sourcetracker"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -43,9 +48,6 @@ const (
 	// vclusterKubeConfigEnvVar is the environment variable that holds the path to the
 	// kubeconfig file for the tenant cluster (the vcluster).
 	vclusterKubeConfigEnvVar = "VCLUSTER_KUBECONFIG"
-	// hostKubeConfigEnvVar is the environment variable that holds the path to the kubeconfig
-	// file for the host cluster.
-	hostKubeConfigEnvVar = "HOST_KUBECONFIG"
 
 	// The name of the vcluster. It is also the name of the namespace where the vcluster is hosted.
 	vclusterNameEnvVar = "VCLUSTER_NAME"
@@ -59,6 +61,7 @@ func init() {
 	klog.InitFlags(nil)
 
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(placementv1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -75,9 +78,22 @@ func main() {
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
-	hostConfig, err := buildConfigFromEnv(hostKubeConfigEnvVar)
+	// Unlike the vcluster (a separate cluster reachable only via an explicit kubeconfig), the
+	// mirrorer runs as a Pod on the host cluster itself, so its credentials for the host cluster
+	// are discovered the standard in-cluster way, via the Pod's own ServiceAccount token and the
+	// KUBERNETES_SERVICE_HOST/PORT environment variables Kubernetes injects automatically; no
+	// kubeconfig file (and so no ConfigMap/Secret to mount) is needed for it.
+	hostConfig, err := rest.InClusterConfig()
 	if err != nil {
-		klog.ErrorS(err, "Failed to build Kubernetes client configuration for the host cluster")
+		klog.ErrorS(err, "Failed to build in-cluster Kubernetes client configuration for the host cluster")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
+
+	// The vcluster's namespaced resources are synced into a single namespace in the host cluster,
+	// named after the vcluster itself, so the host manager's cache is scoped to that namespace.
+	vclusterName := os.Getenv(vclusterNameEnvVar)
+	if vclusterName == "" {
+		klog.ErrorS(nil, "Environment variable is not set or is empty", "envVar", vclusterNameEnvVar)
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
@@ -95,13 +111,7 @@ func main() {
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
-	hostMgr, err := ctrl.NewManager(hostConfig, ctrl.Options{
-		Scheme: scheme,
-		Metrics: metricsserver.Options{
-			BindAddress: ":8090",
-		},
-		HealthProbeBindAddress: ":8091",
-	})
+	hostMgr, err := ctrl.NewManager(hostConfig, hostManagerOptions(vclusterName))
 	if err != nil {
 		klog.ErrorS(err, "Failed to create the controller manager for the host cluster")
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
@@ -113,6 +123,21 @@ func main() {
 	}
 	if err := hostMgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		klog.ErrorS(err, "Failed to set up health check for the host cluster controller manager")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
+
+	// The sourcetracker controller watches Pods in the vcluster, so it runs on the vcluster
+	// manager; it also talks to the host cluster (via hostClusterClient) for future use.
+	if err := sourcetracker.New(vclusterMgr.GetClient(), hostMgr.GetClient()).SetupWithManager(vclusterMgr); err != nil {
+		klog.ErrorS(err, "Failed to set up the sourcetracker controller")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
+
+	// The placementpolicymaker controller only talks to the host cluster, where it watches Pods
+	// (scoped to the vcluster's namespace, per the cache configuration above) and manages
+	// PlacementPolicy objects.
+	if err := placementpolicymaker.New(hostMgr.GetClient()).SetupWithManager(hostMgr); err != nil {
+		klog.ErrorS(err, "Failed to set up the placementpolicymaker controller")
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
 
@@ -151,6 +176,21 @@ func main() {
 
 	// Wait for both controller managers to exit.
 	wg.Wait()
+}
+
+func hostManagerOptions(namespace string) ctrl.Options {
+	return ctrl.Options{
+		Scheme: scheme,
+		Metrics: metricsserver.Options{
+			BindAddress: ":8090",
+		},
+		HealthProbeBindAddress: ":8091",
+		Cache: cache.Options{
+			DefaultNamespaces: map[string]cache.Config{
+				namespace: {},
+			},
+		},
+	}
 }
 
 // buildConfigFromEnv builds a Kubernetes REST client configuration from the kubeconfig file

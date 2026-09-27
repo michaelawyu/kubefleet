@@ -1,0 +1,75 @@
+# Deploys the mirrorer binary (see the sibling Dockerfile) onto the host cluster as a
+# Deployment, wiring up the tenant cluster (vcluster) kubeconfig it needs (see cmd/main.go) as
+# a mounted ConfigMap. Credentials for the host cluster itself are discovered the standard
+# in-cluster way (via the Pod's own ServiceAccount), so no kubeconfig/ConfigMap is needed for
+# it; the ServiceAccount used here must be granted the RBAC permissions the
+# placementpolicymaker/sourcetracker controllers need on the host cluster (not included below).
+#
+# This file is a template, meant to be rendered with `envsubst` (or an equivalent tool) before
+# being applied. It expects the following shell variables to be set:
+#   MIRRORER_IMAGE           - the mirrorer image reference to run, e.g.
+#                              "fleetdemo.azurecr.io/mirrorer:experimental"
+#   MIRRORER_SERVICE_ACCOUNT - the name of the ServiceAccount, already granted the RBAC
+#                              permissions the placementpolicymaker/sourcetracker controllers
+#                              need on the host cluster (not included below), that the mirrorer
+#                              Pod should run as
+#   VCLUSTER_NAME            - the name of the vcluster (see ../setup-vcluster.sh); also the
+#                              namespace, in the host cluster, that the vcluster's own
+#                              resources are synced into
+#   VCLUSTER_KUBECONFIG      - the base64-encoded content of the vcluster's kubeconfig file
+#                              (e.g. "base64 -w0 < <vcluster-name>.kubeconfig"); base64, rather
+#                              than the raw multi-line kubeconfig, is used here so that
+#                              envsubst does not have to re-indent an embedded YAML block
+#                              scalar
+#
+# Example:
+#   export MIRRORER_IMAGE=fleetdemo.azurecr.io/mirrorer:experimental
+#   export MIRRORER_SERVICE_ACCOUNT=mirrorer
+#   export VCLUSTER_NAME=multitenancy-demo
+#   export VCLUSTER_KUBECONFIG="$(base64 -w0 < multitenancy-demo.kubeconfig)"
+#   envsubst < k8s.yaml | kubectl apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mirrorer-vcluster-kubeconfig
+binaryData:
+  # Mounted as a file and referenced by the VCLUSTER_KUBECONFIG environment variable below.
+  config: "${VCLUSTER_KUBECONFIG}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mirrorer
+  namespace: "${VCLUSTER_NAME}"
+  labels:
+    app: mirrorer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mirrorer
+  template:
+    metadata:
+      labels:
+        app: mirrorer
+    spec:
+      serviceAccountName: "${MIRRORER_SERVICE_ACCOUNT}"
+      containers:
+        - name: mirrorer
+          image: "${MIRRORER_IMAGE}"
+          env:
+            # Point at the vcluster kubeconfig mounted below, matching the recipe expected by
+            # cmd/main.go. The host cluster credentials need no such entry; cmd/main.go
+            # discovers them in-cluster instead.
+            - name: VCLUSTER_KUBECONFIG
+              value: /etc/mirrorer/vcluster-kubeconfig/config
+            - name: VCLUSTER_NAME
+              value: "${VCLUSTER_NAME}"
+          volumeMounts:
+            - name: vcluster-kubeconfig
+              mountPath: /etc/mirrorer/vcluster-kubeconfig
+              readOnly: true
+      volumes:
+        - name: vcluster-kubeconfig
+          configMap:
+            name: mirrorer-vcluster-kubeconfig
