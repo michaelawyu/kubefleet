@@ -33,6 +33,7 @@ import (
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 	rolloutv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/rollout/v1alpha1"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils/condition"
 	errors "github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
 )
 
@@ -618,6 +619,14 @@ func (r *Reconciler) refreshOneCluster(
 		}
 	}
 
+	// Capture the generation the binding is expected to have been bumped to once the resource snapshot
+	// update above (if any) has been applied. This is used, rather than re-reading the generation off of
+	// each poll below, because the cached client used by the polling loop may for a short while still
+	// return the pre-update version of the binding (same generation and conditions together, both stale);
+	// comparing a freshly re-fetched condition's ObservedGeneration against an equally stale generation
+	// would otherwise spuriously look up-to-date.
+	wantGeneration := binding.GetGeneration()
+
 	// Wait for the placement binding to report that the rollout has been synchronized to, and is available
 	// on, the target cluster, polling periodically until either that happens or the context is cancelled
 	// (e.g., the per-run processing time budget has been exhausted, in which case the caller will pick up
@@ -643,8 +652,9 @@ func (r *Reconciler) refreshOneCluster(
 		bindingStatus := binding.GetStatus()
 		synchronizedCond := meta.FindStatusCondition(bindingStatus.Conditions, placementv1alpha1.PlacementBindingCondTypeSynchronized)
 		availableCond := meta.FindStatusCondition(bindingStatus.Conditions, placementv1alpha1.PlacementBindingCondTypeAvailable)
-		if synchronizedCond != nil && synchronizedCond.Status == metav1.ConditionTrue &&
-			availableCond != nil && availableCond.Status == metav1.ConditionTrue {
+		if binding.GetGeneration() >= wantGeneration &&
+			condition.IsConditionStatusTrue(synchronizedCond, binding.GetGeneration()) &&
+			condition.IsConditionStatusTrue(availableCond, binding.GetGeneration()) {
 			// The rollout has been synchronized to, and is available on, the target cluster.
 			break
 		}

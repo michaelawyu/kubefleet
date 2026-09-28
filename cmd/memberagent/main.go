@@ -50,6 +50,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
+	kfplacementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/cmd/memberagent/options"
 	imcv1beta1 "github.com/kubefleet-dev/kubefleet/pkg/controllers/internalmembercluster/v1beta1"
@@ -77,6 +78,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(clusterv1beta1.AddToScheme(scheme))
 	utilruntime.Must(placementv1beta1.AddToScheme(scheme))
+	utilruntime.Must(kfplacementv1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
@@ -440,6 +442,11 @@ func Start(ctx context.Context, hubCfg, memberConfig *rest.Config, hubOpts, memb
 
 	if err = workApplier.SetupWithManager(hubMgr); err != nil {
 		klog.ErrorS(err, "Failed to create v1beta1 controller", "controller", "work")
+		return err
+	}
+
+	if err := SetupV1Controllers(ctx, hubMgr, memberMgr, memberConfig, targetNS, restMapper, spokeDynamicClient, globalOpts); err != nil {
+		klog.ErrorS(err, "Failed to set up v1 controllers")
 		return err
 	}
 

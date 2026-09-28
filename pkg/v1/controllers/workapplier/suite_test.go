@@ -186,7 +186,7 @@ var _ = BeforeSuite(func() {
 		periodicRequeueAfter,
 		cleanupWaitTime,
 	)
-	Expect(reconciler.SetupWithManager(hubMgr)).To(Succeed())
+	Expect(reconciler.SetupWithManager(hubMgr, controllerName)).To(Succeed())
 
 	wg = sync.WaitGroup{}
 	wg.Add(1)

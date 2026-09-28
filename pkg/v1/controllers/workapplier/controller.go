@@ -364,8 +364,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	return ctrl.Result{RequeueAfter: r.periodicRequeueAfter}, nil
 }
 
-func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *Reconciler) SetupWithManager(mgr ctrl.Manager, name string) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		Named(name).
 		WithOptions(ctrloption.Options{
 			MaxConcurrentReconciles: r.concurrentReconciles,
 		}).

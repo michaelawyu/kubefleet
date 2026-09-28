@@ -34,6 +34,7 @@ import (
 	"oras.land/oras-go/v2"
 	orasfile "oras.land/oras-go/v2/content/file"
 	"sigs.k8s.io/kustomize/api/krusty"
+	ktypes "sigs.k8s.io/kustomize/api/types"
 
 	kerrors "github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
 	"github.com/kubefleet-dev/kubefleet/pkg/v1/utils/ociartifactconnector"
@@ -255,7 +256,15 @@ func NewStore(workDir, digest string) (*Store, error) {
 	// Keep unnamed nodes (such as the image manifest itself, if not properly annotated) in the fallback memory store.
 	orasFileStore.IgnoreNoName = false
 
-	kustomizer := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	// Use MakeDefaultOptions as a base, then relax the loader's own root-only restriction: the real
+	// security boundary here is rootFS (an os.Root-sandboxed filesystem), which already prevents the
+	// kustomizer from ever reading outside the pulled artifact's own extracted directory, regardless of
+	// this setting. Kustomize's own path-traversal check is therefore redundant on top of that
+	// sandboxing, and, left at its default (RootOnly), incorrectly rejects the common and legitimate
+	// pattern of an overlay referencing a sibling base directory (e.g., `../../base/foo.yaml`).
+	kustomizeOptions := krusty.MakeDefaultOptions()
+	kustomizeOptions.LoadRestrictions = ktypes.LoadRestrictionsNone
+	kustomizer := krusty.MakeKustomizer(kustomizeOptions)
 
 	return &Store{
 		digest:            digest,

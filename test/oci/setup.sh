@@ -14,9 +14,11 @@ HTPASSWD_FILE="${AUTH_DIR}/htpasswd"
 OUTPUT_DIR="${SCRIPT_DIR}/output/."
 RAW_MANIFESTS_DIR="${SCRIPT_DIR}/testdata/raw"
 KUSTOMIZE_DIR="${SCRIPT_DIR}/testdata/kustomize"
+KUEUE_DIR="${SCRIPT_DIR}/testdata/kueue"
 REGISTRY_HOST="localhost:${PORT}"
 RAW_ORAS_REF="${REGISTRY_HOST}/testdata/manifests:latest"
 KUSTOMIZE_ORAS_REF="${REGISTRY_HOST}/testdata/kustomize:latest"
+KUEUE_ORAS_REF="${REGISTRY_HOST}/testdata/kueue:latest"
 ORAS_ARTIFACT_TYPE="kubernetes/objects"
 
 mkdir -p "${AUTH_DIR}"
@@ -83,9 +85,18 @@ oras push --plain-http \
 	"README.md"
 popd >/dev/null
 
+pushd "${KUEUE_DIR}" >/dev/null
+oras push --plain-http \
+	--artifact-type "${ORAS_ARTIFACT_TYPE}" \
+	"${KUEUE_ORAS_REF}" \
+	"base" \
+	"overlays"
+popd >/dev/null
+
 echo "Local registry is running at http://localhost:${PORT}"
 echo "Username: ${USERNAME}"
 echo "Password: ${PASSWORD}"
 echo "Pushed OCI artifact: ${RAW_ORAS_REF}"
 echo "Pushed OCI artifact: ${KUSTOMIZE_ORAS_REF}"
+echo "Pushed OCI artifact: ${KUEUE_ORAS_REF}"
 

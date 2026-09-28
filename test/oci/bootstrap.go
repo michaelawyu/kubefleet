@@ -35,6 +35,9 @@ const (
 
 	KustomizeArtifactURL = "localhost:9000/testdata/kustomize"
 	KustomizeArtifactTag = "latest"
+
+	KueueArtifactURL = "localhost:9000/testdata/kueue"
+	KueueArtifactTag = "latest"
 )
 
 func BootstrapLocalRegistry() error {
@@ -63,6 +66,21 @@ func TearDownLocalRegistry() error {
 
 	if err := runScript(stopScript); err != nil {
 		return fmt.Errorf("failed to run stop script %s: %v", stopScript, err)
+	}
+	return nil
+}
+
+func Refresh() error {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		return fmt.Errorf("failed to resolve current test file path")
+	}
+
+	scriptDir := filepath.Dir(currentFile)
+	refreshScript := filepath.Join(scriptDir, "refresh.sh")
+
+	if err := runScript(refreshScript); err != nil {
+		return fmt.Errorf("failed to run refresh script %s: %v", refreshScript, err)
 	}
 	return nil
 }

@@ -133,7 +133,7 @@ var _ = Describe("staged update run rollout", func() {
 			}
 			Expect(hubClient.Create(ctx, snapshot)).To(Succeed())
 
-			By("creating 3 placement bindings, one per member cluster")
+			By("creating 3 placement bindings, one per member cluster, already synchronized and available")
 			for _, name := range clusterNames {
 				binding := &placementv1alpha1.PlacementBinding{
 					ObjectMeta: metav1.ObjectMeta{
@@ -152,6 +152,32 @@ var _ = Describe("staged update run rollout", func() {
 					},
 				}
 				Expect(hubClient.Create(ctx, binding)).To(Succeed())
+
+				// Mark the binding as already synchronized and available under the legacy resource
+				// snapshot, simulating a placement that has been running steadily before this rollout
+				// begins. The condition's observed generation is pinned to the binding's current
+				// generation, so once the staged update run bumps the spec (and the generation) to roll
+				// out resourceSnapshotName, these conditions become stale and the run must wait for them
+				// to be refreshed (see the "should mark all 3 placement bindings as synchronized and
+				// available" spec below) rather than treating the rollout as already complete.
+				updatedBinding := binding.DeepCopy()
+				updatedBinding.Status.Conditions = []metav1.Condition{
+					{
+						Type:               placementv1alpha1.PlacementBindingCondTypeSynchronized,
+						Status:             metav1.ConditionTrue,
+						Reason:             placementv1alpha1.PlacementBindingSynchronizedCondReasonAllResourcesSynchronized,
+						ObservedGeneration: binding.Generation,
+						LastTransitionTime: metav1.Now(),
+					},
+					{
+						Type:               placementv1alpha1.PlacementBindingCondTypeAvailable,
+						Status:             metav1.ConditionTrue,
+						Reason:             placementv1alpha1.PlacementBindingAvailableCondReasonAllResourcesAvailable,
+						ObservedGeneration: binding.Generation,
+						LastTransitionTime: metav1.Now(),
+					},
+				}
+				Expect(hubClient.Status().Update(ctx, updatedBinding)).To(Succeed())
 			}
 
 			By("creating the staged update strategy with a single, unconstrained stage")

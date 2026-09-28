@@ -64,11 +64,12 @@ var _ = Describe("binding operations", func() {
 	Context("when a new binding is created (hub cluster manifests)", Ordered, func() {
 		bindingName := "test-binding-hub-manifests"
 		snapshotName := "test-snapshot-hub-manifests-rev-1"
+		snapshotNameRev2 := "test-snapshot-hub-manifests-rev-2"
 
 		var deploy *appsv1.Deployment
 		var cm *corev1.ConfigMap
 
-		var deployRawJSON, cmRawJSON runtime.RawExtension
+		var deployRawJSON, cmRawJSON, updatedCmRawJSON runtime.RawExtension
 
 		BeforeAll(func() {
 			// Create the PlacementResourceSnapshot that the binding will reference.
@@ -189,20 +190,22 @@ var _ = Describe("binding operations", func() {
 				return fmt.Errorf("binding still exists")
 			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "binding should be deleted by the controller")
 
-			// Remove the snapshot and wait for it to be fully deleted.
-			Eventually(func() error {
-				snapshot := &placementv1alpha1.PlacementResourceSnapshot{}
-				if err := hubClient.Get(ctx, types.NamespacedName{Namespace: workNSName, Name: snapshotName}, snapshot); err != nil {
-					if apierrors.IsNotFound(err) {
-						return nil
+			// Remove both snapshot revisions and wait for them to be fully deleted.
+			for _, name := range []string{snapshotName, snapshotNameRev2} {
+				Eventually(func() error {
+					snapshot := &placementv1alpha1.PlacementResourceSnapshot{}
+					if err := hubClient.Get(ctx, types.NamespacedName{Namespace: workNSName, Name: name}, snapshot); err != nil {
+						if apierrors.IsNotFound(err) {
+							return nil
+						}
+						return err
 					}
-					return err
-				}
-				if err := hubClient.Delete(ctx, snapshot); err != nil {
-					return err
-				}
-				return fmt.Errorf("snapshot still exists")
-			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "snapshot should be fully deleted")
+					if err := hubClient.Delete(ctx, snapshot); err != nil {
+						return err
+					}
+					return fmt.Errorf("snapshot still exists")
+				}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "snapshot should be fully deleted")
+			}
 
 			// The controller deletes owned Work objects as part of its cleanup before removing
 			// the binding finalizer, so by the time the binding is gone the Work objects should
@@ -352,6 +355,186 @@ var _ = Describe("binding operations", func() {
 			Expect(hubClient.Status().Update(ctx, updatedWork)).To(Succeed())
 
 			By("waiting for the binding status to reflect Synchronized=True and AllResourcesAvailable=True")
+			wantConditions := []metav1.Condition{
+				{
+					Type:   placementv1alpha1.PlacementBindingCondTypeAvailable,
+					Status: metav1.ConditionTrue,
+					Reason: placementv1alpha1.PlacementBindingAvailableCondReasonAllResourcesAvailable,
+				},
+				{
+					Type:   placementv1alpha1.PlacementBindingCondTypeSynchronized,
+					Status: metav1.ConditionTrue,
+					Reason: placementv1alpha1.PlacementBindingSynchronizedCondReasonAllResourcesSynchronized,
+				},
+			}
+			binding := &placementv1alpha1.PlacementBinding{}
+			Eventually(func() ([]metav1.Condition, error) {
+				if err := hubClient.Get(ctx, types.NamespacedName{Namespace: workNSName, Name: bindingName}, binding); err != nil {
+					return nil, err
+				}
+				return binding.Status.Conditions, nil
+			}, eventuallyDuration, eventuallyInterval).Should(SatisfyAll(
+				HaveLen(2),
+				ContainElement(HaveField("Status", metav1.ConditionTrue)),
+			), "binding should have two True status conditions")
+
+			if diff := cmp.Diff(binding.Status.Conditions, wantConditions,
+				cmpopts.IgnoreFields(metav1.Condition{}, "ObservedGeneration", "LastTransitionTime", "Message"),
+				cmpopts.SortSlices(func(a, b metav1.Condition) bool { return a.Type < b.Type }),
+			); diff != "" {
+				Fail(fmt.Sprintf("binding status conditions mismatch (-got, +want):\n%s", diff))
+			}
+		})
+
+		It("should update the ConfigMap and build a new PlacementResourceSnapshot for revision 2", func() {
+			updatedCM := cm.DeepCopy()
+			updatedCM.Data["key"] = "updated-value"
+			updatedCmRawJSON = rawJSON(updatedCM)
+
+			snapshot := &placementv1alpha1.PlacementResourceSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      snapshotNameRev2,
+					Namespace: workNSName,
+					Labels: map[string]string{
+						placementv1alpha1.PlacementResourceSnapshotOwnedByLabelKey:         placementName,
+						placementv1alpha1.PlacementResourceSnapshotIndexLabelKey:           "1",
+						placementv1alpha1.PlacementResourceSnapshotSubIndexLabelKey:        "0",
+						placementv1alpha1.SubIndexedPlacementResourceSnapshotCountLabelKey: "1",
+					},
+				},
+				Spec: placementv1alpha1.PlacementResourceSnapshotSpec{
+					Resources: []placementv1alpha1.SnapshottedResource{
+						{
+							Identifier: placementv1alpha1.ObjectReference{
+								Name:       "app",
+								APIGroup:   "apps",
+								APIVersion: "v1",
+								Kind:       "Deployment",
+							},
+							Manifest: deployRawJSON,
+						},
+						{
+							Identifier: placementv1alpha1.ObjectReference{
+								Name:       "app-config",
+								APIGroup:   "",
+								APIVersion: "v1",
+								Kind:       "ConfigMap",
+							},
+							Manifest: updatedCmRawJSON,
+						},
+					},
+				},
+			}
+			Expect(hubClient.Create(ctx, snapshot)).To(Succeed())
+		})
+
+		It("should set the binding to reference the new resource snapshot", func() {
+			binding := &placementv1alpha1.PlacementBinding{}
+			Expect(hubClient.Get(ctx, types.NamespacedName{Namespace: workNSName, Name: bindingName}, binding)).To(Succeed())
+			binding.Spec.ResourceSnapshotName = snapshotNameRev2
+			Expect(hubClient.Update(ctx, binding)).To(Succeed())
+		})
+
+		It("should update the Work object to reflect the new ConfigMap", func() {
+			namingBinding := &placementv1alpha1.PlacementBinding{
+				ObjectMeta: metav1.ObjectMeta{Namespace: workNSName, Name: bindingName},
+				Spec:       placementv1alpha1.PlacementBindingSpec{PlacementPolicyName: placementName},
+			}
+			wantWorkName := uniqueNameForWorkDerivedFromPlacementResourceSnapshot(
+				namingBinding, true, &placementResourceSnapshotDerivedFromSourceFormatter{snapshotSubIdx: "0"})
+
+			By("waiting for the Work object to be relinked to the new resource snapshot")
+			work := &placementv1alpha1.Work{}
+			Eventually(func() (string, error) {
+				if err := hubClient.Get(ctx, types.NamespacedName{
+					Namespace: memberClusterReservedNSName,
+					Name:      wantWorkName,
+				}, work); err != nil {
+					return "", err
+				}
+				return work.Annotations[placementv1alpha1.WorkLinkedToPrimaryPlacementResourceSnapshotAnnotationKey], nil
+			}, eventuallyDuration, eventuallyInterval).Should(Equal(snapshotNameRev2), "Work object should be relinked to the new resource snapshot")
+
+			By("verifying the Work object carries the updated ConfigMap")
+			Expect(work.Spec.Manifests).To(HaveLen(2), "Work object should still carry two manifests")
+			gotCM := &corev1.ConfigMap{}
+			Expect(json.Unmarshal(work.Spec.Manifests[1].Raw, gotCM)).To(Succeed(), "manifest 1 should decode into a ConfigMap")
+			Expect(gotCM.Data).To(Equal(map[string]string{"key": "updated-value"}), "ConfigMap data should reflect the update")
+		})
+
+		It("should reflect a waiting-for-synchronization and waiting-for-availability-check status on the binding once more", func() {
+			// The Work object's spec has changed (new ConfigMap manifest), so its generation has advanced
+			// past the one recorded on its stale Applied/Available conditions from the previous revision;
+			// the controller reports this transitional "waiting" status as soon as it relinks the Work object.
+			wantConditions := []metav1.Condition{
+				{
+					Type:   placementv1alpha1.PlacementBindingCondTypeAvailable,
+					Status: metav1.ConditionUnknown,
+					Reason: placementv1alpha1.PlacementBindingAvailableCondReasonWaitingForAvailabilityCheck,
+				},
+				{
+					Type:   placementv1alpha1.PlacementBindingCondTypeSynchronized,
+					Status: metav1.ConditionFalse,
+					Reason: placementv1alpha1.PlacementBindingSynchronizedCondReasonWaitingForSynchronization,
+				},
+			}
+
+			By("waiting for the binding status conditions to reflect the waiting state again")
+			binding := &placementv1alpha1.PlacementBinding{}
+			Eventually(func() ([]metav1.Condition, error) {
+				if err := hubClient.Get(ctx, types.NamespacedName{Namespace: workNSName, Name: bindingName}, binding); err != nil {
+					return nil, err
+				}
+				return binding.Status.Conditions, nil
+			}, eventuallyDuration, eventuallyInterval).Should(SatisfyAll(
+				HaveLen(2),
+				ContainElement(HaveField("Reason", placementv1alpha1.PlacementBindingSynchronizedCondReasonWaitingForSynchronization)),
+			), "binding should report the waiting-for-synchronization status again")
+
+			if diff := cmp.Diff(binding.Status.Conditions, wantConditions,
+				cmpopts.IgnoreFields(metav1.Condition{}, "ObservedGeneration", "LastTransitionTime", "Message"),
+				cmpopts.SortSlices(func(a, b metav1.Condition) bool { return a.Type < b.Type }),
+			); diff != "" {
+				Fail(fmt.Sprintf("binding status conditions mismatch (-got, +want):\n%s", diff))
+			}
+		})
+
+		It("should reflect Applied=True and Available=True on the binding after the Work status is updated again", func() {
+			namingBinding := &placementv1alpha1.PlacementBinding{
+				ObjectMeta: metav1.ObjectMeta{Namespace: workNSName, Name: bindingName},
+				Spec:       placementv1alpha1.PlacementBindingSpec{PlacementPolicyName: placementName},
+			}
+			wantWorkName := uniqueNameForWorkDerivedFromPlacementResourceSnapshot(
+				namingBinding, true, &placementResourceSnapshotDerivedFromSourceFormatter{snapshotSubIdx: "0"})
+
+			By("fetching the Work object")
+			work := &placementv1alpha1.Work{}
+			Expect(hubClient.Get(ctx, types.NamespacedName{
+				Namespace: memberClusterReservedNSName,
+				Name:      wantWorkName,
+			}, work)).To(Succeed())
+
+			By("patching the Work status with Applied=True and Available=True for the new generation")
+			updatedWork := work.DeepCopy()
+			updatedWork.Status.Conditions = []metav1.Condition{
+				{
+					Type:               placementv1alpha1.WorkCondTypeApplied,
+					Status:             metav1.ConditionTrue,
+					Reason:             "AllManifestsApplied",
+					ObservedGeneration: work.Generation,
+					LastTransitionTime: metav1.Now(),
+				},
+				{
+					Type:               placementv1alpha1.WorkCondTypeAvailable,
+					Status:             metav1.ConditionTrue,
+					Reason:             "AllManifestsAvailable",
+					ObservedGeneration: work.Generation,
+					LastTransitionTime: metav1.Now(),
+				},
+			}
+			Expect(hubClient.Status().Update(ctx, updatedWork)).To(Succeed())
+
+			By("waiting for the binding status to reflect Synchronized=True and AllResourcesAvailable=True once more")
 			wantConditions := []metav1.Condition{
 				{
 					Type:   placementv1alpha1.PlacementBindingCondTypeAvailable,

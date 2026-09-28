@@ -44,6 +44,9 @@ import (
 	fleetnetworkingv1alpha1 "go.goms.io/fleet-networking/api/v1alpha1"
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
+	kfplacementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
+	rolloutv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/rollout/v1alpha1"
+	kueuev1beta2 "github.com/kubefleet-dev/kubefleet/apis/kueue/v1beta2"
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1alpha1"
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/cmd/hubagent/options"
@@ -80,6 +83,9 @@ func init() {
 	utilruntime.Must(fleetnetworkingv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(placementv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(clusterinventory.AddToScheme(scheme))
+	utilruntime.Must(kfplacementv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(rolloutv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kueuev1beta2.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 	klog.InitFlags(nil)
 }
@@ -264,6 +270,11 @@ func main() {
 
 	if err := workload.SetupControllers(ctx, &wg, mgr, defaultCfg, opts); err != nil {
 		klog.ErrorS(err, "unable to set up controllers")
+		exitWithErrorFunc()
+	}
+
+	if err := workload.SetupV1Controllers(ctx, mgr, defaultCfg, opts); err != nil {
+		klog.ErrorS(err, "unable to set up v1 controllers")
 		exitWithErrorFunc()
 	}
 

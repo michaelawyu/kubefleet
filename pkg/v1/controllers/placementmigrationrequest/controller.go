@@ -40,9 +40,11 @@ const (
 	toClusterBindingNameFmt = "%s-%s-migrated"
 
 	// placementBindingOwnedByLabelKey is a label key applied to a to binding created during migration; it
-	// records the name of the placement policy that owns the binding, mirroring the naming convention used
-	// by placementv1alpha1.PlacementResourceSnapshotOwnedByLabelKey.
-	placementBindingOwnedByLabelKey = "placement.kubefleet.dev/placement-binding-owned-by"
+	// records the name of the placement policy that owns the binding. This mirrors (and is kept in sync
+	// with, rather than duplicating the value of) placementv1alpha1.PlacementBindingOwnedByLabelKey, the
+	// same label key the placementpolicy controller itself uses when creating bindings, so that bindings
+	// created via either path remain discoverable through the one, documented label.
+	placementBindingOwnedByLabelKey = placementv1alpha1.PlacementBindingOwnedByLabelKey
 	// placementBindingMigratedFromLabelKey is a label key applied to a to binding created during migration;
 	// it records the name of the from binding that the to binding was migrated from, so that the commit
 	// process can find and promote/drop the to binding as appropriate.

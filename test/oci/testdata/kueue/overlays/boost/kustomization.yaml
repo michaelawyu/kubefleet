@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../base/namespace.yaml
+- ../../base/resource-flavor.yaml
+- ../../base/cluster-queue.yaml
+- ../../base/local-queue.yaml
+patches:
+- target:
+    group: kueue.x-k8s.io
+    version: v1beta2
+    kind: ClusterQueue
+    name: global-default
+  patch: |-
+    - op: replace
+      path: /spec/resourceGroups/0/flavors/0/resources/0/nominalQuota
+      value: 20
+    - op: replace
+      path: /spec/resourceGroups/0/flavors/0/resources/1/nominalQuota
+      value: 20Gi

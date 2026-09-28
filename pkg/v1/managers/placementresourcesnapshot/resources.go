@@ -341,6 +341,12 @@ func snapshotResource(resource *unstructured.Unstructured) (placementv1alpha1.Sn
 	resourceCopy.SetOwnerReferences(nil)
 	resourceCopy.SetManagedFields(nil)
 
+	// Remove finalizers: they are bookkeeping added (and expected to be removed) by controllers running
+	// on the cluster the original resource lives on, e.g., the hub cluster. Carrying them over into a
+	// snapshot would apply them verbatim to the manifest placed on a member cluster, where no controller
+	// is ever going to remove them, permanently blocking the deletion of the placed copy.
+	resourceCopy.SetFinalizers(nil)
+
 	// Remove the read-only fields.
 	resourceCopy.SetCreationTimestamp(metav1.Time{})
 	resourceCopy.SetDeletionTimestamp(nil)
