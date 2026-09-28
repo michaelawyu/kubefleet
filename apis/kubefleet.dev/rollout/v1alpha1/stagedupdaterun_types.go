@@ -45,11 +45,26 @@ const (
 const (
 	StagedUpdateRunInitializedCondReasonPreppedResourceSnapshotAndAllStages = "PreppedResourceSnapshotAndAllStages"
 
+	StagedUpdateRunStartedCondReasonUpdateStarted = "UpdateStarted"
+
+	StagedUpdateRunPerStageStartedCondReasonUpdateStarted = "UpdateStarted"
+
+	StagedUpdateRunPerStageCompletedCondReasonSucceeded = "Succeeded"
+	StagedUpdateRunPerStageCompletedCondReasonFailed    = "Failed"
+
+	StagedUpdateRunPerClusterStartedCondReasonUpdateStarted = "UpdateStarted"
+
+	StagedUpdateRunPerClusterCompletedCondReasonSucceeded = "UpdateSucceeded"
+	StagedUpdateRunPerClusterCompletedCondReasonFailed    = "FailedToUpdate"
+
 	StagedUpdateRunTaskApprovalRequestCreatedCondReasonCreated   = "RequestCreated"
 	StagedUpdateRunTaskApprovalRequestApprovedCondReasonApproved = "RequestApproved"
 
 	StagedUpdateRunTaskTimedWaitStartedCondReasonTimerStarted = "TimerStarted"
 	StagedUpdateRunTaskWaitTimeElapsedCondReasonTimerElapsed  = "TimerElapsed"
+
+	StagedUpdateRunCompletedCondReasonSucceeded = "Succeeded"
+	StagedUpdateRunCompletedCondReasonFailed    = "Failed"
 )
 
 // StagedUpdateRun is the KubeFleet API that enables users to roll out resource changes for a placement policy

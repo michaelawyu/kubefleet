@@ -20,6 +20,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	PlacementBindingOwnedByLabelKey = "kubefleet.io/owned-by-placement-policy"
+)
+
 // The condition types for the PlacementBinding and ClusterPlacementBinding APIs.
 const (
 	PlacementBindingCondTypeSynchronized = "Synchronized"

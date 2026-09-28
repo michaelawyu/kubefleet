@@ -45,6 +45,9 @@ func (r *Reconciler) createBindingsFor(
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      fmt.Sprintf(placementBindingNameFmt, placementPolicy.Name, cluster.Name),
 				Namespace: placementPolicy.Namespace,
+				Labels: map[string]string{
+					placementv1alpha1.PlacementBindingOwnedByLabelKey: placementPolicy.Name,
+				},
 				Annotations: map[string]string{
 					clusterSelectorHashAnnotationKey: selectorHashForSelectedClusters[idx],
 				},

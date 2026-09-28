@@ -48,9 +48,8 @@ const (
 // listBindingsOwnedBy returns all placement bindings in the given namespace owned by the named placement
 // policy, sorted by name for deterministic comparisons.
 //
-// The current placement API has no label that tracks a binding's owner placement policy, so bindings are
-// filtered by their spec field instead of a label selector, mirroring the production reconciler's own
-// listing logic (see controller.go).
+// Bindings are filtered by their spec field rather than the PlacementBindingOwnedByLabelKey label,
+// mirroring the production reconciler's own listing logic (see controller.go).
 func listBindingsOwnedBy(namespace, placementPolicyName string) ([]placementv1alpha1.PlacementBinding, error) {
 	bindingList := &placementv1alpha1.PlacementBindingList{}
 	if err := hubClient.List(ctx, bindingList, client.InNamespace(namespace)); err != nil {
@@ -270,6 +269,9 @@ var _ = Describe("placement policy ops", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "my-placement-useast",
 						Namespace: workNSName,
+						Labels: map[string]string{
+							placementv1alpha1.PlacementBindingOwnedByLabelKey: "my-placement",
+						},
 						Annotations: map[string]string{
 							clusterSelectorHashAnnotationKey: useastHash,
 						},
@@ -285,6 +287,9 @@ var _ = Describe("placement policy ops", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "my-placement-chinanorth",
 						Namespace: workNSName,
+						Labels: map[string]string{
+							placementv1alpha1.PlacementBindingOwnedByLabelKey: "my-placement",
+						},
 						Annotations: map[string]string{
 							clusterSelectorHashAnnotationKey: chinanorthHash,
 						},
@@ -300,6 +305,9 @@ var _ = Describe("placement policy ops", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "my-placement-uksouth",
 						Namespace: workNSName,
+						Labels: map[string]string{
+							placementv1alpha1.PlacementBindingOwnedByLabelKey: "my-placement",
+						},
 						Annotations: map[string]string{
 							clusterSelectorHashAnnotationKey: uksouthHash,
 						},
@@ -750,6 +758,9 @@ var _ = Describe("placement policy ops", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "my-placement-2-australiaeast",
 					Namespace: workNSName,
+					Labels: map[string]string{
+						placementv1alpha1.PlacementBindingOwnedByLabelKey: "my-placement-2",
+					},
 					Annotations: map[string]string{
 						clusterSelectorHashAnnotationKey: australiaeastHash,
 					},
@@ -1053,6 +1064,9 @@ var _ = Describe("placement policy ops", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "my-placement-3-useast2",
 						Namespace: workNSName,
+						Labels: map[string]string{
+							placementv1alpha1.PlacementBindingOwnedByLabelKey: "my-placement-3",
+						},
 						Annotations: map[string]string{
 							clusterSelectorHashAnnotationKey: useastHash,
 						},
@@ -1068,6 +1082,9 @@ var _ = Describe("placement policy ops", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "my-placement-3-uswest",
 						Namespace: workNSName,
+						Labels: map[string]string{
+							placementv1alpha1.PlacementBindingOwnedByLabelKey: "my-placement-3",
+						},
 						Annotations: map[string]string{
 							clusterSelectorHashAnnotationKey: uswestHash,
 						},
@@ -1154,6 +1171,9 @@ var _ = Describe("placement policy ops", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "my-placement-3-uswest",
 						Namespace: workNSName,
+						Labels: map[string]string{
+							placementv1alpha1.PlacementBindingOwnedByLabelKey: "my-placement-3",
+						},
 						Annotations: map[string]string{
 							clusterSelectorHashAnnotationKey: uswestHash,
 						},
