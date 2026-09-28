@@ -24,10 +24,12 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
@@ -55,18 +57,39 @@ type Reconciler struct {
 	PlacementResourceSnapshotManager *placementresourcesnapshot.Manager
 }
 
+// retrievePlacementPolicy retrieves the placement policy identified by namespacedName, as either a
+// namespace-scoped PlacementPolicy or a cluster-scoped ClusterPlacementPolicy depending on whether a
+// namespace is present.
+func (r *Reconciler) retrievePlacementPolicy(ctx context.Context, namespacedName types.NamespacedName) (placementv1alpha1.PlacementPolicyAccessor, error) {
+	var placementPolicy placementv1alpha1.PlacementPolicyAccessor
+	if namespacedName.Namespace == "" {
+		placementPolicy = &placementv1alpha1.ClusterPlacementPolicy{}
+	} else {
+		placementPolicy = &placementv1alpha1.PlacementPolicy{}
+	}
+
+	if err := r.HubClient.Get(ctx, namespacedName, placementPolicy); err != nil {
+		return nil, err
+	}
+	return placementPolicy, nil
+}
+
 // placementPolicyObjectRef returns an ObjectReference that identifies the given placement policy itself.
 //
 // It is used to claim (and relinquish) the binding manager role for the placement policy: this
 // controller always manages the bindings of the policy it is reconciling, so the object reference it
 // claims the role with is always a reference to the placement policy itself.
-func placementPolicyObjectRef(placementPolicy *placementv1alpha1.PlacementPolicy) placementv1alpha1.ObjectReference {
+func placementPolicyObjectRef(placementPolicy placementv1alpha1.PlacementPolicyAccessor) placementv1alpha1.ObjectReference {
+	kind := placementv1alpha1.PlacementPolicyKind
+	if _, isClusterScoped := placementPolicy.(*placementv1alpha1.ClusterPlacementPolicy); isClusterScoped {
+		kind = placementv1alpha1.ClusterPlacementPolicyKind
+	}
 	return placementv1alpha1.ObjectReference{
-		Namespace:  placementPolicy.Namespace,
-		Name:       placementPolicy.Name,
+		Namespace:  placementPolicy.GetNamespace(),
+		Name:       placementPolicy.GetName(),
 		APIGroup:   placementv1alpha1.GroupVersion.Group,
 		APIVersion: placementv1alpha1.GroupVersion.Version,
-		Kind:       placementv1alpha1.PlacementPolicyKind,
+		Kind:       kind,
 	}
 }
 
@@ -78,9 +101,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		klog.V(2).InfoS("Reconciliation ends", "placementPolicy", req.NamespacedName, "controller", controllerName, "latency", latency)
 	}()
 
-	// Retrieve the PlacementPolicy object.
-	placement := &placementv1alpha1.PlacementPolicy{}
-	err := r.HubClient.Get(ctx, req.NamespacedName, placement)
+	// Retrieve the placement policy object (either a namespace-scoped PlacementPolicy or a
+	// cluster-scoped ClusterPlacementPolicy).
+	placement, err := r.retrievePlacementPolicy(ctx, req.NamespacedName)
 	switch {
 	case apierrors.IsNotFound(err):
 		// The placement cannot be found; it may have been deleted already. No need for
@@ -94,7 +117,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, wrappedErr
 	}
 
-	if !placement.DeletionTimestamp.IsZero() {
+	if !placement.GetDeletionTimestamp().IsZero() {
 		// Drop the finalizer if it exists.
 		if controllerutil.ContainsFinalizer(placement, placementPolicyCleanupFinalizer) {
 			controllerutil.RemoveFinalizer(placement, placementPolicyCleanupFinalizer)
@@ -131,7 +154,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Do some very basic scheduling.
 
 	// Prep the selectors.
-	selectors := placement.Spec.ClusterSelectors
+	selectors := placement.GetSpec().ClusterSelectors
 	_, selectorSetByHash, err := prepareClusterSelectorsForScheduling(selectors)
 	if err != nil {
 		klog.ErrorS(err, "Failed to prepare cluster selectors for scheduling",
@@ -143,26 +166,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	//
 	// The current placement API has no label that tracks a binding's owner placement policy (unlike, say,
 	// placement resource snapshots), so bindings are matched by their spec field instead of a label selector.
-	bindingList := &placementv1alpha1.PlacementBindingList{}
-	if err := r.HubClient.List(ctx, bindingList, client.InNamespace(placement.Namespace)); err != nil {
+	allBindings, err := r.listBindingsFor(ctx, placement)
+	if err != nil {
 		wrappedErr := errors.NewAPIServerError(err, "failed to list placement bindings for the placement policy", false, "placementPolicy", klog.KObj(placement))
 		klog.ErrorS(wrappedErr, "Failed to list placement bindings for the placement policy", errors.Args(wrappedErr)...)
 		return ctrl.Result{}, wrappedErr
-	}
-	allBindings := make([]placementv1alpha1.PlacementBinding, 0, len(bindingList.Items))
-	for idx := range bindingList.Items {
-		if bindingList.Items[idx].Spec.PlacementPolicyName == placement.Name {
-			allBindings = append(allBindings, bindingList.Items[idx])
-		}
 	}
 
 	// If there are bindings that are marked for deletion but not deleted yet, wait until
 	// they disappear.
 	for idx := range allBindings {
 		binding := allBindings[idx]
-		if !binding.DeletionTimestamp.IsZero() {
+		if !binding.GetDeletionTimestamp().IsZero() {
 			klog.V(2).InfoS("There are bindings that are marked for deletion but not deleted yet; requeue until they are fully removed",
-				"placementPolicy", req.NamespacedName, "binding", klog.KObj(&binding))
+				"placementPolicy", req.NamespacedName, "binding", klog.KObj(binding))
 			return ctrl.Result{RequeueAfter: time.Second * 10}, nil
 		}
 	}
@@ -217,10 +234,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// ClusterPlacementPolicy is cluster-scoped, so its owned objects (ClusterPlacementResourceSnapshot
+	// and ClusterPlacementBinding) cannot be picked up via Owns(), which ties its watch to the type
+	// passed to For(); they are watched explicitly instead, using the same owner-reference-based
+	// mapping Owns() would otherwise set up (see the builder's own implementation of Owns()).
+	clusterScopedOwnerEnqueueHandler := handler.EnqueueRequestForOwner(
+		mgr.GetScheme(), mgr.GetRESTMapper(), &placementv1alpha1.ClusterPlacementPolicy{}, handler.OnlyControllerOwner(),
+	)
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&placementv1alpha1.PlacementPolicy{}).
+		Watches(&placementv1alpha1.ClusterPlacementPolicy{}, &handler.EnqueueRequestForObject{}).
 		Owns(&placementv1alpha1.PlacementResourceSnapshot{}).
 		Owns(&placementv1alpha1.PlacementBinding{}).
+		Watches(&placementv1alpha1.ClusterPlacementResourceSnapshot{}, clusterScopedOwnerEnqueueHandler).
+		Watches(&placementv1alpha1.ClusterPlacementBinding{}, clusterScopedOwnerEnqueueHandler).
 		// Note: cluster claims are cluster-scoped and cannot carry an owner reference back to a
 		// namespaced placement policy, so they cannot be watched via Owns(); also watch for member
 		// cluster creation. For the demo, ignore both as the controller auto-requeues when there is

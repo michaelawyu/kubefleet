@@ -18,6 +18,7 @@ package placementresourcesnapshot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -32,6 +33,7 @@ import (
 	"k8s.io/kubectl/pkg/util/deployment"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils/condition"
 	errors "github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
 	hasher "github.com/kubefleet-dev/kubefleet/pkg/utils/resource"
 )
@@ -359,6 +361,18 @@ func snapshotResource(resource *unstructured.Unstructured) (placementv1alpha1.Sn
 
 	gvk := resource.GroupVersionKind()
 
+	var additionalInfo map[string][]byte
+	switch {
+	case gvk.Kind == "ORASManifests":
+		additionalInfo, err = extractAdditionalInfoFromORASManifests(resource)
+		if err != nil {
+			wrappedErr := errors.NewUnexpectedError(err,
+				"failed to extract additional info from ORASManifests object",
+				"source", klog.KObj(resource))
+			return placementv1alpha1.SnapshottedResource{}, wrappedErr
+		}
+	}
+
 	// Note that for regular Kubernetes resources, the additional information field is always left empty.
 	return placementv1alpha1.SnapshottedResource{
 		Identifier: placementv1alpha1.ObjectReference{
@@ -368,7 +382,8 @@ func snapshotResource(resource *unstructured.Unstructured) (placementv1alpha1.Sn
 			APIVersion: gvk.Version,
 			Kind:       gvk.Kind,
 		},
-		Manifest: runtime.RawExtension{Raw: resourceCopyRawData},
+		Manifest:       runtime.RawExtension{Raw: resourceCopyRawData},
+		AdditionalInfo: additionalInfo,
 	}, nil
 }
 
@@ -422,4 +437,29 @@ func splitResourcesIntoSizeControlledGroups(resources []placementv1alpha1.Snapsh
 	}
 
 	return groups, nil
+}
+
+func extractAdditionalInfoFromORASManifests(unstructuredORASManifests *unstructured.Unstructured) (map[string][]byte, error) {
+	// Convert the unstructured object to an ORASManifests object.
+	orasManifests := &placementv1alpha1.ORASManifests{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredORASManifests.Object, orasManifests); err != nil {
+		return nil, errors.NewUnexpectedError(err, "failed to convert unstructured object to an ORASManifests object")
+	}
+
+	resolvedCond := meta.FindStatusCondition(orasManifests.Status.Conditions, placementv1alpha1.ORASManifestCondTypeResolved)
+	if !condition.IsConditionStatusTrue(resolvedCond, orasManifests.Generation) || orasManifests.Status.OCIArtifactDetails == nil {
+		return nil, errors.Wraps(nil, "the ORASManifests object is not fully processed yet; no details are available in the status")
+	}
+	additionalInfo := make(map[string][]byte)
+	orasManifestAdditionalInfo := &placementv1alpha1.ORASManifestsAdditionalInfoForSnapshots{
+		OCIArtifactDigest: orasManifests.Status.OCIArtifactDetails.Digest,
+	}
+
+	orasManifestAdditionalInfoBytes, err := json.Marshal(orasManifestAdditionalInfo)
+	if err != nil {
+		return nil, errors.NewUnexpectedError(err, "failed to marshal ORAS manifests additional info for snapshots into JSON",
+			"additionalInfo", orasManifestAdditionalInfo)
+	}
+	additionalInfo[placementv1alpha1.ResourceSnapshotAdditionalInfoKeyORASManifests] = orasManifestAdditionalInfoBytes
+	return additionalInfo, nil
 }

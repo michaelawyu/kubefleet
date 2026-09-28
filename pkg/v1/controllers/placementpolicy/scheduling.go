@@ -69,13 +69,13 @@ func prepareClusterSelectorsForScheduling(selectors []placementv1alpha1.ClusterS
 
 func crossReferenceClusterSelectorsAndBindings(
 	selectorSetByHash map[string]sets.Set[int],
-	bindings []placementv1alpha1.PlacementBinding,
-) []placementv1alpha1.PlacementBinding {
-	danglingBindings := make([]placementv1alpha1.PlacementBinding, 0)
+	bindings []placementv1alpha1.PlacementBindingAccessor,
+) []placementv1alpha1.PlacementBindingAccessor {
+	danglingBindings := make([]placementv1alpha1.PlacementBindingAccessor, 0)
 	for idx := range bindings {
 		binding := bindings[idx]
 
-		bindingClusterSelectorHash := binding.Annotations[clusterSelectorHashAnnotationKey]
+		bindingClusterSelectorHash := binding.GetAnnotations()[clusterSelectorHashAnnotationKey]
 		selectorSet, found := selectorSetByHash[bindingClusterSelectorHash]
 		if !found {
 			danglingBindings = append(danglingBindings, binding)
@@ -94,7 +94,7 @@ func crossReferenceClusterSelectorsAndBindings(
 	return danglingBindings
 }
 
-func needsScheduling(selectorSetByHash map[string]sets.Set[int], danglingBindings []placementv1alpha1.PlacementBinding) bool {
+func needsScheduling(selectorSetByHash map[string]sets.Set[int], danglingBindings []placementv1alpha1.PlacementBindingAccessor) bool {
 	if len(danglingBindings) > 0 {
 		return true
 	}
@@ -109,11 +109,11 @@ func needsScheduling(selectorSetByHash map[string]sets.Set[int], danglingBinding
 
 func (r *Reconciler) scheduleOnce(
 	ctx context.Context,
-	placement *placementv1alpha1.PlacementPolicy,
+	placement placementv1alpha1.PlacementPolicyAccessor,
 	latestResourceSnapshot placementv1alpha1.PlacementResourceSnapshotAccessor,
 	selectors []placementv1alpha1.ClusterSelector,
 	selectorSetByHash map[string]sets.Set[int],
-	allBindings, danglingBindings []placementv1alpha1.PlacementBinding,
+	allBindings, danglingBindings []placementv1alpha1.PlacementBindingAccessor,
 ) (bool, error) {
 	// Scheduling is needed; claim the role of binding manager on the placement.
 	claimed, err := bindingmanager.ClaimRoleAs(ctx, r.HubClient, placement, controllerName, placementPolicyObjectRef(placement))
@@ -126,16 +126,16 @@ func (r *Reconciler) scheduleOnce(
 	if !claimed {
 		// Another controller has already claimed the binding manager role; requeue after some time.
 		klog.V(2).InfoS("A different binding manager has claimed the placement",
-			"bindingManager", placement.Status.BindingManager, "placementPolicy", klog.KObj(placement))
+			"bindingManager", placement.GetStatus().BindingManager, "placementPolicy", klog.KObj(placement))
 		return true, nil
 	}
 
 	// Delete all the dangling bindings.
 	for idx := range danglingBindings {
 		danglingBinding := danglingBindings[idx]
-		if err := r.HubClient.Delete(ctx, &danglingBinding); err != nil && !apierrors.IsNotFound(err) {
+		if err := r.HubClient.Delete(ctx, danglingBinding); err != nil && !apierrors.IsNotFound(err) {
 			wrappedErr := errors.NewAPIServerError(err, "", false,
-				"placementBinding", klog.KObj(&danglingBinding), "placementPolicy", klog.KObj(placement))
+				"placementBinding", klog.KObj(danglingBinding), "placementPolicy", klog.KObj(placement))
 			klog.ErrorS(wrappedErr, "Failed to delete a dangling placement binding", errors.Args(wrappedErr)...)
 			return false, wrappedErr
 		}
@@ -149,7 +149,7 @@ func (r *Reconciler) scheduleOnce(
 	alreadySelectedClusters := sets.New[string]()
 	for idx := range allBindings {
 		binding := allBindings[idx]
-		alreadySelectedClusters.Insert(binding.Spec.ClusterName)
+		alreadySelectedClusters.Insert(binding.GetSpec().ClusterName)
 	}
 
 	// List all member clusters.

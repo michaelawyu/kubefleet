@@ -33,7 +33,7 @@ import (
 // resources do not fit in a single one; the first entry is always the primary snapshot.
 func (r *Reconciler) retrieveLatestResourceSnapshot(
 	ctx context.Context,
-	placementPolicy *placementv1alpha1.PlacementPolicy,
+	placementPolicy placementv1alpha1.PlacementPolicyAccessor,
 ) (placementv1alpha1.PlacementResourceSnapshotAccessor, bool, error) {
 	snapshots, isUpToDate, err := r.PlacementResourceSnapshotManager.SnapshotResourcesIfNoSnapshotExists(ctx, placementPolicy)
 	if err != nil {

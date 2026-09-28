@@ -148,7 +148,7 @@ func (r *Reconciler) refreshWorks(ctx context.Context,
 	// different namespaces, and cross-namespace ownership is not allowed in K8s. The list-then-delete loop has
 	// limitations as well, as stale cache might leave some work objects behind.
 	primaryPlacementResourceSnapshot := sortedPlacementResourceSnapshots[0]
-	primaryWorkToCreateOrUpdate, err := buildWorkObjectFor(primaryPlacementResourceSnapshot, placementBinding, primaryPlacementResourceSnapshot.GetName())
+	primaryWorkToCreateOrUpdate, err := r.buildWorkObjectFor(ctx, primaryPlacementResourceSnapshot, placementBinding, primaryPlacementResourceSnapshot.GetName())
 	if err != nil {
 		return nil, false, errors.Wraps(err, "failed to build work object for primary placement resource snapshot",
 			"primaryPlacementResourceSnapshot", klog.KObj(primaryPlacementResourceSnapshot))
@@ -160,7 +160,7 @@ func (r *Reconciler) refreshWorks(ctx context.Context,
 	var additionalWorksToCreateOrUpdate []*placementv1alpha1.Work
 	for idx := 1; idx < len(sortedPlacementResourceSnapshots); idx++ {
 		snapshot := sortedPlacementResourceSnapshots[idx]
-		work, err := buildWorkObjectFor(snapshot, placementBinding, primaryPlacementResourceSnapshot.GetName())
+		work, err := r.buildWorkObjectFor(ctx, snapshot, placementBinding, primaryPlacementResourceSnapshot.GetName())
 		if err != nil {
 			return nil, false, errors.Wraps(err, "failed to build work object for placement resource snapshot",
 				"placementResourceSnapshot", klog.KObj(snapshot))
@@ -224,7 +224,8 @@ func (r *Reconciler) refreshWorks(ctx context.Context,
 	return createdOrUpdatedWorks, writtenToStorage, nil
 }
 
-func buildWorkObjectFor(
+func (r *Reconciler) buildWorkObjectFor(
+	ctx context.Context,
 	placementResourceSnapshot placementv1alpha1.PlacementResourceSnapshotAccessor,
 	placementBinding placementv1alpha1.PlacementBindingAccessor,
 	primaryPlacementResourceSnapshotName string,
@@ -247,7 +248,8 @@ func buildWorkObjectFor(
 			Name:      workName,
 		},
 	}
-	updateWorkObjectMetadataAndSpec(
+	if err := r.updateWorkObjectMetadataAndSpec(
+		ctx,
 		work,
 		placementBinding.GetNamespace(),
 		placementBindingSpec.PlacementPolicyName,
@@ -256,18 +258,21 @@ func buildWorkObjectFor(
 		derivedFromSnapshotSrcFormatter,
 		placementResourceSnapshotSpec.Resources,
 		placementBindingSpec.SyncStrategy.DeepCopy(),
-	)
+	); err != nil {
+		return nil, err
+	}
 	return work, nil
 }
 
-func updateWorkObjectMetadataAndSpec(
+func (r *Reconciler) updateWorkObjectMetadataAndSpec(
+	ctx context.Context,
 	work *placementv1alpha1.Work,
 	ownerNSName, ownerPlacementPolicyName, ownerPlacementBindingName string,
 	primaryPlacementResourceSnapshotName string,
 	derivedFromSrcFormatter derivedFromSourceFormatter,
 	resources []placementv1alpha1.SnapshottedResource,
 	syncStrategy *placementv1alpha1.SyncStrategy,
-) {
+) error {
 	// Set annotations on the work object.
 	annotations := work.GetAnnotations()
 	if annotations == nil {
@@ -301,14 +306,42 @@ func updateWorkObjectMetadataAndSpec(
 	work.SetLabels(labels)
 
 	// Set the snapshotted resources on the work object.
-	manifests := make([]placementv1alpha1.Manifest, len(resources))
+	//
+	// Note that a single snapshotted ORAS resource can expand into zero or more manifests, so the resulting
+	// manifest count may differ from len(resources); pre-sizing the slice to len(resources) would leave
+	// stray zero-value (null) entries behind for such resources. Appending avoids this.
+	manifests := make([]placementv1alpha1.Manifest, 0, len(resources))
 	for i := range resources {
-		manifests[i] = placementv1alpha1.Manifest{RawExtension: resources[i].Manifest}
+		resource := resources[i]
+		switch {
+		case isSnapshottedResourceORASManifests(&resource):
+			embeddedRawExts, err := r.extractORASManifestsFrom(ctx, primaryPlacementResourceSnapshotName, resource)
+			if err != nil {
+				return errors.Wraps(err, "failed to extract manifests from the ORAS resource in the snapshot")
+			}
+			for idx := range embeddedRawExts {
+				manifests = append(manifests, placementv1alpha1.Manifest{
+					RawExtension: embeddedRawExts[idx],
+				})
+			}
+			klog.V(2).InfoS("Found an ORAS resource in the snapshot; extracted its manifests",
+				"resourceIdentifier", resource.Identifier, "manifestCount", len(embeddedRawExts))
+		default:
+			manifests = append(manifests, placementv1alpha1.Manifest{RawExtension: resource.Manifest})
+		}
 	}
 	work.Spec.Manifests = manifests
 
 	// Set the sync strategy on the work object.
 	work.Spec.SyncStrategy = syncStrategy
+
+	return nil
+}
+
+func isSnapshottedResourceORASManifests(resource *placementv1alpha1.SnapshottedResource) bool {
+	return resource != nil &&
+		resource.Identifier.APIGroup == placementv1alpha1.GroupVersion.Group &&
+		resource.Identifier.Kind == "ORASManifests"
 }
 
 func (r *Reconciler) createOrUpdateWorkObjects(

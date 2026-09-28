@@ -19,6 +19,7 @@ package workgenerator
 import (
 	"context"
 	"flag"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -38,6 +39,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
+	"github.com/kubefleet-dev/kubefleet/pkg/v1/managers/ociartifactcachedlocalfsstore"
+	localregistry "github.com/kubefleet-dev/kubefleet/test/oci"
 )
 
 // workerCnt and maxConcurrentReconciles are kept small and deterministic; the test suite here does not
@@ -53,6 +56,8 @@ var (
 	hubClient  client.Client
 	hubMgr     manager.Manager
 	reconciler *Reconciler
+
+	outputDir string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -97,6 +102,9 @@ var _ = BeforeSuite(func() {
 	klog.SetLogger(logger)
 	ctrl.SetLogger(logger)
 
+	By("Bootstrapping the local OCI registry")
+	Expect(localregistry.BootstrapLocalRegistry()).To(Succeed())
+
 	By("Bootstrapping the test environment")
 	hubEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
@@ -129,7 +137,13 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).ToNot(HaveOccurred())
 
+	By("Setting up the OCI artifact cached store manager")
+	outputDir, err = os.MkdirTemp("", "placementbinding-oci-store-*")
+	Expect(err).ToNot(HaveOccurred())
+
 	reconciler = New(hubMgr.GetClient(), workerCnt)
+	reconciler.OCIArtifactCachedStoreManager = ociartifactcachedlocalfsstore.NewManager(outputDir)
+	reconciler.UseHTTPToConnectToOCIRegistry = true
 	Expect(reconciler.SetupWithManager(hubMgr, maxConcurrentReconciles)).To(Succeed())
 
 	wg = sync.WaitGroup{}
@@ -146,6 +160,10 @@ var _ = AfterSuite(func() {
 
 	cancel()
 	wg.Wait()
+	By("Tearing down the local OCI registry")
+	Expect(localregistry.TearDownLocalRegistry()).To(Succeed())
+	By("Cleaning up the OCI artifact cached store work directory")
+	Expect(os.RemoveAll(outputDir)).To(Succeed())
 	By("Tearing down the test environment")
 	Expect(hubEnv.Stop()).To(Succeed())
 })

@@ -32,15 +32,15 @@ import (
 
 func (r *Reconciler) refreshStatus(
 	ctx context.Context,
-	placement *placementv1alpha1.PlacementPolicy,
+	placement placementv1alpha1.PlacementPolicyAccessor,
 	latestResourceSnapshot placementv1alpha1.PlacementResourceSnapshotAccessor,
 	isLatestResourceSnapshotPresentAndUpToDate bool,
 	isSchedulingNeeded bool,
 	selectors []placementv1alpha1.ClusterSelector,
-	allBindings []placementv1alpha1.PlacementBinding,
-	danglingBindings []placementv1alpha1.PlacementBinding,
+	allBindings []placementv1alpha1.PlacementBindingAccessor,
+	danglingBindings []placementv1alpha1.PlacementBindingAccessor,
 ) error {
-	updatedStatus := placement.Status.DeepCopy()
+	updatedStatus := placement.GetStatus().DeepCopy()
 	updatedStatus.LatestResourceRevisionName = ptr.To(latestResourceSnapshot.GetName())
 
 	// Set the Scheduled condition.
@@ -57,7 +57,7 @@ func (r *Reconciler) refreshStatus(
 			Status:             metav1.ConditionTrue,
 			Reason:             "FoundClustersForAllSelectors",
 			Message:            fmt.Sprintf("%d of %d clusters selected for placement", len(allBindings), len(selectors)),
-			ObservedGeneration: placement.Generation,
+			ObservedGeneration: placement.GetGeneration(),
 		})
 	default:
 		// The placement still needs further processing (or some processing has been done and the status
@@ -67,7 +67,7 @@ func (r *Reconciler) refreshStatus(
 			Status:             metav1.ConditionFalse,
 			Reason:             "FailedToFindClustersForAllSelectors",
 			Message:            fmt.Sprintf("%d of %d clusters selected (%d clusters no longer matches)", len(allBindings), len(selectors), len(danglingBindings)),
-			ObservedGeneration: placement.Generation,
+			ObservedGeneration: placement.GetGeneration(),
 		})
 	}
 
@@ -77,7 +77,7 @@ func (r *Reconciler) refreshStatus(
 	for idx := range allBindings {
 		binding := allBindings[idx]
 
-		if binding.Spec.ResourceSnapshotName != latestResourceSnapshot.GetName() {
+		if binding.GetSpec().ResourceSnapshotName != latestResourceSnapshot.GetName() {
 			allBindingsHaveUpToDateSnapshot = false
 			bindingWithStaleSnapshotCnt++
 		}
@@ -88,8 +88,8 @@ func (r *Reconciler) refreshStatus(
 	for idx := range allBindings {
 		binding := allBindings[idx]
 
-		syncCond := meta.FindStatusCondition(binding.Status.Conditions, placementv1alpha1.PlacementBindingCondTypeSynchronized)
-		if !condition.IsConditionStatusTrue(syncCond, binding.Generation) {
+		syncCond := meta.FindStatusCondition(binding.GetStatus().Conditions, placementv1alpha1.PlacementBindingCondTypeSynchronized)
+		if !condition.IsConditionStatusTrue(syncCond, binding.GetGeneration()) {
 			allBindingsHaveResourcesSynchronized = false
 			bindingsOutOfSyncCnt++
 		}
@@ -101,7 +101,7 @@ func (r *Reconciler) refreshStatus(
 			Status:             metav1.ConditionFalse,
 			Reason:             "StaleLatestResourceSnapshot",
 			Message:            "The latest resource snapshot does not match with the current state of resources on the hub cluster; snapshot the resources again",
-			ObservedGeneration: placement.Generation,
+			ObservedGeneration: placement.GetGeneration(),
 		})
 	case !allBindingsHaveUpToDateSnapshot:
 		meta.SetStatusCondition(&updatedStatus.Conditions, metav1.Condition{
@@ -109,7 +109,7 @@ func (r *Reconciler) refreshStatus(
 			Status:             metav1.ConditionFalse,
 			Reason:             "NotAllBindingsHaveUpToDateSnapshot",
 			Message:            fmt.Sprintf("%d of %d clusters have a stale resource snapshot; %d of %d failed to have resources synchronized", bindingWithStaleSnapshotCnt, len(allBindings), bindingsOutOfSyncCnt, len(allBindings)),
-			ObservedGeneration: placement.Generation,
+			ObservedGeneration: placement.GetGeneration(),
 		})
 	case !allBindingsHaveResourcesSynchronized:
 		meta.SetStatusCondition(&updatedStatus.Conditions, metav1.Condition{
@@ -117,7 +117,7 @@ func (r *Reconciler) refreshStatus(
 			Status:             metav1.ConditionFalse,
 			Reason:             "NotAllBindingsHaveSynchronizedResources",
 			Message:            fmt.Sprintf("%d of %d clusters failed to have resources synchronized", bindingsOutOfSyncCnt, len(allBindings)),
-			ObservedGeneration: placement.Generation,
+			ObservedGeneration: placement.GetGeneration(),
 		})
 	default:
 		meta.SetStatusCondition(&updatedStatus.Conditions, metav1.Condition{
@@ -125,7 +125,7 @@ func (r *Reconciler) refreshStatus(
 			Status:             metav1.ConditionTrue,
 			Reason:             "AllBindingsHaveUpToDateSnapshot",
 			Message:            "All clusters have an up-to-date resource snapshot and have their resources synchronized",
-			ObservedGeneration: placement.Generation,
+			ObservedGeneration: placement.GetGeneration(),
 		})
 	}
 
@@ -135,8 +135,8 @@ func (r *Reconciler) refreshStatus(
 	for idx := range allBindings {
 		binding := allBindings[idx]
 
-		availableCond := meta.FindStatusCondition(binding.Status.Conditions, placementv1alpha1.PlacementBindingCondTypeAvailable)
-		if !condition.IsConditionStatusTrue(availableCond, binding.Generation) {
+		availableCond := meta.FindStatusCondition(binding.GetStatus().Conditions, placementv1alpha1.PlacementBindingCondTypeAvailable)
+		if !condition.IsConditionStatusTrue(availableCond, binding.GetGeneration()) {
 			allBindingsHaveResourcesAvailable = false
 			bindingsWithUnavailableResourcesCnt++
 		}
@@ -147,7 +147,7 @@ func (r *Reconciler) refreshStatus(
 			Status:             metav1.ConditionFalse,
 			Reason:             "NotAllBindingsHaveResourcesAvailable",
 			Message:            fmt.Sprintf("%d of %d clusters have unavailable resources", bindingsWithUnavailableResourcesCnt, len(allBindings)),
-			ObservedGeneration: placement.Generation,
+			ObservedGeneration: placement.GetGeneration(),
 		})
 	} else {
 		meta.SetStatusCondition(&updatedStatus.Conditions, metav1.Condition{
@@ -155,11 +155,11 @@ func (r *Reconciler) refreshStatus(
 			Status:             metav1.ConditionTrue,
 			Reason:             "AllBindingsHaveResourcesAvailable",
 			Message:            "All clusters have their resources available",
-			ObservedGeneration: placement.Generation,
+			ObservedGeneration: placement.GetGeneration(),
 		})
 	}
 
-	placement.Status = *updatedStatus
+	placement.SetStatus(*updatedStatus)
 	// Write the placement status.
 	if err := r.HubClient.Status().Update(ctx, placement); err != nil {
 		wrappedErr := errors.NewAPIServerError(err, "", false,

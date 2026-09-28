@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
+	kueuev1beta2 "github.com/kubefleet-dev/kubefleet/apis/kueue/v1beta2"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
 	kferrors "github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
@@ -105,7 +106,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 	}
 
 	// Parse the environment-based cluster selectors from the annotation.
-	regions, err := parseRegionBasedClusterSelectors(envBasedClusterSelectorsRawStr)
+	regions, err := parseEnvBasedClusterSelectors(envBasedClusterSelectorsRawStr)
 	if err != nil {
 		return ctrl.Result{}, kferrors.NewUserError(err, "failed to parse the environment-based cluster selectors", false, "obj", req)
 	}
@@ -117,62 +118,114 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 		return ctrl.Result{}, wrappedErr
 	}
 
-	placementPolicy := &placementv1alpha1.PlacementPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      derivedPlacementPolicyName(object.GetKind(), object.GetName()),
-			Namespace: object.GetNamespace(),
-		},
-	}
-	resOp, err := ctrl.CreateOrUpdate(ctx, r.HubClient, placementPolicy, func() error {
-		// Add the cluster by region selector.
-		clusterByRegionSelectors := make([]placementv1alpha1.ClusterSelector, 0, len(regions))
-		for _, placeTo := range regions {
-			clusterByRegionSelectors = append(clusterByRegionSelectors, placementv1alpha1.ClusterSelector{
-				Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
-					{
-						MatchLabels: map[string]string{
-							"topology.kubernetes.io/region": placeTo,
-						},
-					},
-				},
-			})
+	spec := buildPlacementPolicySpec(req, object, regions, additionalResRefs)
+	placementPolicyName := derivedPlacementPolicyName(object.GetKind(), object.GetName())
+	var placementPolicyKey client.ObjectKey
+	var resOp controllerutil.OperationResult
+	if isClusterScopedAnnotatedObject(object) {
+		// Cluster-scoped annotated objects (e.g., Kueue's ResourceFlavor and ClusterQueue) cannot
+		// be placed via a namespaced PlacementPolicy; use its cluster-scoped counterpart instead.
+		clusterPlacementPolicy := &placementv1alpha1.ClusterPlacementPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: placementPolicyName,
+			},
 		}
-		placementPolicy.Spec.ClusterSelectors = clusterByRegionSelectors
-
-		// Add the resource selectors, starting with the workload (the Deployment itself) followed by
-		// any additional resources it references.
-		resourceSelectors := make([]placementv1alpha1.ResourceSelector, 0, len(additionalResRefs)+1)
-		resourceSelectors = append(resourceSelectors, placementv1alpha1.ResourceSelector{
-			Kind:       req.Kind,
-			APIGroup:   req.Group,
-			APIVersion: req.Version,
-			Name:       object.GetName(),
+		resOp, err = ctrl.CreateOrUpdate(ctx, r.HubClient, clusterPlacementPolicy, func() error {
+			clusterPlacementPolicy.Spec = spec
+			return nil
 		})
-		resourceSelectors = append(resourceSelectors, additionalResRefs...)
-		placementPolicy.Spec.ResourceSelectors = resourceSelectors
-		return nil
-	})
+		placementPolicyKey = client.ObjectKeyFromObject(clusterPlacementPolicy)
+	} else {
+		placementPolicy := &placementv1alpha1.PlacementPolicy{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      placementPolicyName,
+				Namespace: object.GetNamespace(),
+			},
+		}
+		resOp, err = ctrl.CreateOrUpdate(ctx, r.HubClient, placementPolicy, func() error {
+			placementPolicy.Spec = spec
+			return nil
+		})
+		placementPolicyKey = client.ObjectKeyFromObject(placementPolicy)
+	}
 	if err != nil {
 		wrappedErr := errors.NewAPIServerError(err, "", false,
-			"request", req, "placementPolicy", client.ObjectKeyFromObject(placementPolicy), "op", resOp, "controller", controllerName)
+			"request", req, "placementPolicy", placementPolicyKey, "op", resOp, "controller", controllerName)
 		klog.ErrorS(wrappedErr, "Failed to create or update placement policy for the annotated object", kferrors.Args(wrappedErr)...)
 		return ctrl.Result{}, wrappedErr
 	}
 	klog.V(2).InfoS("Created or updated placement policy for the annotated object",
-		"request", req, "placementPolicy", client.ObjectKeyFromObject(placementPolicy), "op", resOp, "controller", controllerName)
+		"request", req, "placementPolicy", placementPolicyKey, "op", resOp, "controller", controllerName)
 	return ctrl.Result{}, nil
+}
+
+// isClusterScopedAnnotatedObject reports whether the annotated object is cluster-scoped (e.g.,
+// Kueue's ResourceFlavor and ClusterQueue), as opposed to namespace-scoped (e.g., Deployment,
+// ORASManifests, and Kueue's LocalQueue). A cluster-scoped object always has an empty namespace
+// once fetched from the API server.
+func isClusterScopedAnnotatedObject(obj *unstructured.Unstructured) bool {
+	return obj.GetNamespace() == ""
+}
+
+// buildPlacementPolicySpec builds the PlacementPolicySpec shared by both PlacementPolicy and
+// ClusterPlacementPolicy, deriving the cluster selectors from the parsed envs and the resource
+// selectors from the annotated object plus any additional resources it references.
+func buildPlacementPolicySpec(
+	req Request, object *unstructured.Unstructured, envs []string, additionalResRefs []placementv1alpha1.ResourceSelector,
+) placementv1alpha1.PlacementPolicySpec {
+	// Add the cluster by region selector.
+	clusterByRegionSelectors := make([]placementv1alpha1.ClusterSelector, 0, len(envs))
+	for _, placeTo := range envs {
+		clusterByRegionSelectors = append(clusterByRegionSelectors, placementv1alpha1.ClusterSelector{
+			Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
+				{
+					MatchLabels: map[string]string{
+						"env": placeTo,
+					},
+				},
+			},
+		})
+	}
+
+	// Add the resource selectors, starting with the workload (the annotated object itself) followed
+	// by any additional resources it references.
+	resourceSelectors := make([]placementv1alpha1.ResourceSelector, 0, len(additionalResRefs)+1)
+	resourceSelectors = append(resourceSelectors, placementv1alpha1.ResourceSelector{
+		Kind:       req.Kind,
+		APIGroup:   req.Group,
+		APIVersion: req.Version,
+		Name:       object.GetName(),
+	})
+	resourceSelectors = append(resourceSelectors, additionalResRefs...)
+
+	return placementv1alpha1.PlacementPolicySpec{
+		ClusterSelectors:  clusterByRegionSelectors,
+		ResourceSelectors: resourceSelectors,
+	}
 }
 
 func (r *Reconciler) deletePlacementPolicyFor(ctx context.Context, obj *unstructured.Unstructured) error {
 	if controllerutil.ContainsFinalizer(obj, derivedPlacementPolicyCleanupFinalizer) {
-		// Delete the corresponding placement policy (if any).
-		placement := placementv1alpha1.PlacementPolicy{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      derivedPlacementPolicyName(obj.GetKind(), obj.GetName()),
-				Namespace: obj.GetNamespace(),
-			},
+		// Delete the corresponding placement policy (if any), using the cluster-scoped
+		// ClusterPlacementPolicy for cluster-scoped annotated objects and the namespaced
+		// PlacementPolicy otherwise.
+		placementPolicyName := derivedPlacementPolicyName(obj.GetKind(), obj.GetName())
+		var placement client.Object
+		if isClusterScopedAnnotatedObject(obj) {
+			placement = &placementv1alpha1.ClusterPlacementPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: placementPolicyName,
+				},
+			}
+		} else {
+			placement = &placementv1alpha1.PlacementPolicy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      placementPolicyName,
+					Namespace: obj.GetNamespace(),
+				},
+			}
 		}
-		if err := r.HubClient.Delete(ctx, &placement); err != nil && !apierrors.IsNotFound(err) {
+		if err := r.HubClient.Delete(ctx, placement); err != nil && !apierrors.IsNotFound(err) {
 			return errors.NewAPIServerError(err, "failed to delete the placement policy for the annotated object", false)
 		}
 
@@ -190,31 +243,31 @@ func (r *Reconciler) deletePlacementPolicyFor(ctx context.Context, obj *unstruct
 //
 // The value is a list of semicolon-separated segments, each in the env=REGION format, e.g.
 // "env=A;env=B".
-func parseRegionBasedClusterSelectors(raw string) ([]string, error) {
+func parseEnvBasedClusterSelectors(raw string) ([]string, error) {
 	segments := strings.Split(raw, ";")
-	regions := make([]string, 0, len(segments))
+	envs := make([]string, 0, len(segments))
 	for _, segment := range segments {
 		segment = strings.TrimSpace(segment)
 		if segment == "" {
 			continue
 		}
 
-		key, region, found := strings.Cut(segment, "=")
+		key, env, found := strings.Cut(segment, "=")
 		if !found || key != "env" {
 			return nil, fmt.Errorf("cluster selector segment %q is not in the env=REGION format", segment)
 		}
-		region = strings.TrimSpace(region)
-		if region == "" {
-			return nil, fmt.Errorf("cluster selector segment %q has an empty region", segment)
+		env = strings.TrimSpace(env)
+		if env == "" {
+			return nil, fmt.Errorf("cluster selector segment %q has an empty environment", segment)
 		}
-		regions = append(regions, region)
+		envs = append(envs, env)
 	}
-	if len(regions) == 0 {
+	if len(envs) == 0 {
 		return nil, fmt.Errorf("no cluster selectors found")
 	}
 
-	sort.Strings(regions)
-	return regions, nil
+	sort.Strings(envs)
+	return envs, nil
 }
 
 func (r *Reconciler) collectAdditionalResourceManifests(
@@ -262,10 +315,11 @@ func (r *Reconciler) collectAdditionalResourceManifests(
 
 // SetupWithManager registers the controller with the manager.
 //
-// The controller watches the two kinds this package knows how to place from an annotation --
-// Deployments and ORASManifests -- directly through the manager's cache; an event on either
-// enqueues a request for the object itself, tagged with its kind, since Reconcile reads that kind
-// off the request rather than off the watched object (whose TypeMeta the cache leaves empty).
+// The controller watches the kinds this package knows how to place from an annotation --
+// Deployments, ORASManifests, and Kueue's ResourceFlavors, LocalQueues, and ClusterQueues --
+// directly through the manager's cache; an event on any of them enqueues a request for the object
+// itself, tagged with its kind, since Reconcile reads that kind off the request rather than off
+// the watched object (whose TypeMeta the cache leaves empty).
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return builder.TypedControllerManagedBy[Request](mgr).
 		Named(controllerName).
@@ -277,11 +331,31 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&placementv1alpha1.ORASManifests{},
 			handler.TypedEnqueueRequestsFromMapFunc(mapObjectToRequest(orasManifestsGVK)),
 		).
+		Watches(
+			&kueuev1beta2.ResourceFlavor{},
+			handler.TypedEnqueueRequestsFromMapFunc(mapObjectToRequest(resourceFlavorGVK)),
+		).
+		Watches(
+			&kueuev1beta2.LocalQueue{},
+			handler.TypedEnqueueRequestsFromMapFunc(mapObjectToRequest(localQueueGVK)),
+		).
+		Watches(
+			&kueuev1beta2.ClusterQueue{},
+			handler.TypedEnqueueRequestsFromMapFunc(mapObjectToRequest(clusterQueueGVK)),
+		).
 		Complete(r)
 }
 
 // orasManifestsGVK is the GVK tagged onto requests enqueued for a watched ORASManifests object.
 var orasManifestsGVK = placementv1alpha1.GroupVersion.WithKind("ORASManifests")
+
+// resourceFlavorGVK, localQueueGVK, and clusterQueueGVK are the GVKs tagged onto requests enqueued
+// for watched Kueue ResourceFlavor, LocalQueue, and ClusterQueue objects, respectively.
+var (
+	resourceFlavorGVK = kueuev1beta2.SchemeGroupVersion.WithKind("ResourceFlavor")
+	localQueueGVK     = kueuev1beta2.SchemeGroupVersion.WithKind("LocalQueue")
+	clusterQueueGVK   = kueuev1beta2.SchemeGroupVersion.WithKind("ClusterQueue")
+)
 
 // mapObjectToRequest returns a map function that enqueues a request for the watched object, tagged
 // with the given kind. The kind is fixed per watch rather than read off the object because objects

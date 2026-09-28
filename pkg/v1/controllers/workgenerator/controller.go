@@ -39,6 +39,7 @@ import (
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
 	parallelizerutil "github.com/kubefleet-dev/kubefleet/pkg/utils/parallelizer"
+	"github.com/kubefleet-dev/kubefleet/pkg/v1/managers/ociartifactcachedlocalfsstore"
 )
 
 const (
@@ -51,6 +52,9 @@ type Reconciler struct {
 	hubClient client.Client
 
 	parallelizer parallelizerutil.Parallelizer
+
+	OCIArtifactCachedStoreManager *ociartifactcachedlocalfsstore.Manager
+	UseHTTPToConnectToOCIRegistry bool
 }
 
 func New(hubClient client.Client, workerCnt int) *Reconciler {

@@ -38,15 +38,15 @@ import (
 // Unlike the old (namespace-scoped) ClusterRequest API, ClusterClaim is cluster-scoped, so its name must be
 // unique across the whole cluster rather than just within a namespace; the namespace is folded into the name
 // via a hash to keep that uniqueness.
-func clusterClaimName(placementPolicy *placementv1alpha1.PlacementPolicy) string {
-	id := fmt.Sprintf("%s/%s", placementPolicy.Namespace, placementPolicy.Name)
-	nameSegment := naming.Truncate(naming.Sanitize(placementPolicy.Name), validation.DNS1123SubdomainMaxLength-naming.HashLength-1)
+func clusterClaimName(placementPolicy placementv1alpha1.PlacementPolicyAccessor) string {
+	id := fmt.Sprintf("%s/%s", placementPolicy.GetNamespace(), placementPolicy.GetName())
+	nameSegment := naming.Truncate(naming.Sanitize(placementPolicy.GetName()), validation.DNS1123SubdomainMaxLength-naming.HashLength-1)
 	return fmt.Sprintf("%s-%s", nameSegment, naming.Hash(id))
 }
 
 func (r *Reconciler) submitClusterClaimIfNeeded(
 	ctx context.Context,
-	placementPolicy *placementv1alpha1.PlacementPolicy,
+	placementPolicy placementv1alpha1.PlacementPolicyAccessor,
 	clusters []clusterv1beta1.MemberCluster,
 	unmatchedSelectors []placementv1alpha1.ClusterSelector,
 ) (bool, error) {

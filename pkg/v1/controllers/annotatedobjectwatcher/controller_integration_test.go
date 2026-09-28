@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
+	kueuev1beta2 "github.com/kubefleet-dev/kubefleet/apis/kueue/v1beta2"
 )
 
 const (
@@ -149,21 +150,21 @@ var _ = Describe("deployment operations", Ordered, func() {
 					ClusterSelectors: []placementv1alpha1.ClusterSelector{
 						{
 							Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
-								{MatchLabels: map[string]string{"topology.kubernetes.io/region": "eastasia"}},
+								{MatchLabels: map[string]string{"env": "eastasia"}},
 							},
 							Count:           ptr.To(intstr.FromInt(1)),
 							WhenUnfulfilled: placementv1alpha1.WhenUnfulfilledOptionAddClusterClaim,
 						},
 						{
 							Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
-								{MatchLabels: map[string]string{"topology.kubernetes.io/region": "uksouth"}},
+								{MatchLabels: map[string]string{"env": "uksouth"}},
 							},
 							Count:           ptr.To(intstr.FromInt(1)),
 							WhenUnfulfilled: placementv1alpha1.WhenUnfulfilledOptionAddClusterClaim,
 						},
 						{
 							Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
-								{MatchLabels: map[string]string{"topology.kubernetes.io/region": "useast"}},
+								{MatchLabels: map[string]string{"env": "useast"}},
 							},
 							Count:           ptr.To(intstr.FromInt(1)),
 							WhenUnfulfilled: placementv1alpha1.WhenUnfulfilledOptionAddClusterClaim,
@@ -208,14 +209,14 @@ var _ = Describe("deployment operations", Ordered, func() {
 					ClusterSelectors: []placementv1alpha1.ClusterSelector{
 						{
 							Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
-								{MatchLabels: map[string]string{"topology.kubernetes.io/region": "eastasia"}},
+								{MatchLabels: map[string]string{"env": "eastasia"}},
 							},
 							Count:           ptr.To(intstr.FromInt(1)),
 							WhenUnfulfilled: placementv1alpha1.WhenUnfulfilledOptionAddClusterClaim,
 						},
 						{
 							Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
-								{MatchLabels: map[string]string{"topology.kubernetes.io/region": "uscentral"}},
+								{MatchLabels: map[string]string{"env": "uscentral"}},
 							},
 							Count:           ptr.To(intstr.FromInt(1)),
 							WhenUnfulfilled: placementv1alpha1.WhenUnfulfilledOptionAddClusterClaim,
@@ -496,21 +497,21 @@ var _ = Describe("orasmanifests operations", Ordered, func() {
 					ClusterSelectors: []placementv1alpha1.ClusterSelector{
 						{
 							Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
-								{MatchLabels: map[string]string{"topology.kubernetes.io/region": "eastasia"}},
+								{MatchLabels: map[string]string{"env": "eastasia"}},
 							},
 							Count:           ptr.To(intstr.FromInt(1)),
 							WhenUnfulfilled: placementv1alpha1.WhenUnfulfilledOptionAddClusterClaim,
 						},
 						{
 							Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
-								{MatchLabels: map[string]string{"topology.kubernetes.io/region": "uksouth"}},
+								{MatchLabels: map[string]string{"env": "uksouth"}},
 							},
 							Count:           ptr.To(intstr.FromInt(1)),
 							WhenUnfulfilled: placementv1alpha1.WhenUnfulfilledOptionAddClusterClaim,
 						},
 						{
 							Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
-								{MatchLabels: map[string]string{"topology.kubernetes.io/region": "useast"}},
+								{MatchLabels: map[string]string{"env": "useast"}},
 							},
 							Count:           ptr.To(intstr.FromInt(1)),
 							WhenUnfulfilled: placementv1alpha1.WhenUnfulfilledOptionAddClusterClaim,
@@ -555,14 +556,14 @@ var _ = Describe("orasmanifests operations", Ordered, func() {
 					ClusterSelectors: []placementv1alpha1.ClusterSelector{
 						{
 							Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
-								{MatchLabels: map[string]string{"topology.kubernetes.io/region": "eastasia"}},
+								{MatchLabels: map[string]string{"env": "eastasia"}},
 							},
 							Count:           ptr.To(intstr.FromInt(1)),
 							WhenUnfulfilled: placementv1alpha1.WhenUnfulfilledOptionAddClusterClaim,
 						},
 						{
 							Terms: []placementv1alpha1.ClusterLabelAndPropertySelectorTerm{
-								{MatchLabels: map[string]string{"topology.kubernetes.io/region": "uscentral"}},
+								{MatchLabels: map[string]string{"env": "uscentral"}},
 							},
 							Count:           ptr.To(intstr.FromInt(1)),
 							WhenUnfulfilled: placementv1alpha1.WhenUnfulfilledOptionAddClusterClaim,
@@ -731,6 +732,379 @@ var _ = Describe("orasmanifests operations", Ordered, func() {
 				}
 				return fmt.Errorf("ORASManifests object still exists")
 			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "ORASManifests object should be fully deleted after the controller removes its finalizer")
+		})
+	})
+})
+
+var _ = Describe("localqueue operations", Ordered, func() {
+	// LocalQueue is namespace-scoped, so annotating it should derive a namespaced PlacementPolicy,
+	// same as Deployment and ORASManifests.
+	Context("creating a new LocalQueue object with annotation then deleting the object", Ordered, func() {
+		localQueueName := "my-local-queue"
+		placementPolicyName := derivedPlacementPolicyName("LocalQueue", localQueueName)
+
+		BeforeAll(func() {
+			localQueue := &kueuev1beta2.LocalQueue{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      localQueueName,
+					Namespace: workNameName,
+					Annotations: map[string]string{
+						placementv1alpha1.ClusterSelectorsAnnotation: "env=useast;env=eastasia",
+					},
+				},
+			}
+			Expect(hubClient.Create(ctx, localQueue)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			// Forcefully strip the finalizer and delete the LocalQueue object, in case the
+			// controller did not remove it (e.g., if an earlier It node failed before the deletion
+			// test ran).
+			Eventually(func() error {
+				localQueue := &kueuev1beta2.LocalQueue{}
+				if err := hubClient.Get(ctx, types.NamespacedName{Namespace: workNameName, Name: localQueueName}, localQueue); err != nil {
+					if apierrors.IsNotFound(err) {
+						return nil
+					}
+					return err
+				}
+				if controllerutil.ContainsFinalizer(localQueue, derivedPlacementPolicyCleanupFinalizer) {
+					controllerutil.RemoveFinalizer(localQueue, derivedPlacementPolicyCleanupFinalizer)
+					if err := hubClient.Update(ctx, localQueue); err != nil {
+						return err
+					}
+				}
+				if localQueue.DeletionTimestamp.IsZero() {
+					if err := hubClient.Delete(ctx, localQueue); err != nil {
+						return err
+					}
+				}
+				return fmt.Errorf("LocalQueue object still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "LocalQueue object should be fully deleted")
+
+			Eventually(func() error {
+				placement := &placementv1alpha1.PlacementPolicy{}
+				if err := hubClient.Get(ctx, types.NamespacedName{Namespace: workNameName, Name: placementPolicyName}, placement); err != nil {
+					if apierrors.IsNotFound(err) {
+						return nil
+					}
+					return err
+				}
+				if err := hubClient.Delete(ctx, placement); err != nil && !apierrors.IsNotFound(err) {
+					return err
+				}
+				return fmt.Errorf("PlacementPolicy still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "PlacementPolicy should be fully deleted")
+		})
+
+		It("should add the finalizer to the LocalQueue object and create a namespaced PlacementPolicy", func() {
+			By("waiting for the finalizer to be added to the LocalQueue object")
+			localQueue := &kueuev1beta2.LocalQueue{}
+			Eventually(func() ([]string, error) {
+				if err := hubClient.Get(ctx, types.NamespacedName{Namespace: workNameName, Name: localQueueName}, localQueue); err != nil {
+					return nil, err
+				}
+				return localQueue.Finalizers, nil
+			}, eventuallyDuration, eventuallyInterval).Should(ContainElement(derivedPlacementPolicyCleanupFinalizer), "LocalQueue object should have the cleanup finalizer")
+
+			By("waiting for the PlacementPolicy to be created with the expected resource selector")
+			wantResourceSelectors := []placementv1alpha1.ResourceSelector{
+				{
+					Kind:       "LocalQueue",
+					APIGroup:   "kueue.x-k8s.io",
+					APIVersion: "v1beta2",
+					Name:       localQueueName,
+				},
+			}
+			placement := &placementv1alpha1.PlacementPolicy{}
+			Eventually(func() ([]placementv1alpha1.ResourceSelector, error) {
+				if err := hubClient.Get(ctx, types.NamespacedName{Namespace: workNameName, Name: placementPolicyName}, placement); err != nil {
+					return nil, err
+				}
+				return placement.Spec.ResourceSelectors, nil
+			}, eventuallyDuration, eventuallyInterval).Should(Equal(wantResourceSelectors), "PlacementPolicy should have the expected resource selector")
+			Expect(placement.Namespace).To(Equal(workNameName), "PlacementPolicy should be namespaced to match the LocalQueue")
+		})
+
+		It("should delete the PlacementPolicy and remove the finalizer when the LocalQueue object is deleted", func() {
+			By("deleting the LocalQueue object")
+			localQueue := &kueuev1beta2.LocalQueue{}
+			Expect(hubClient.Get(ctx, types.NamespacedName{Namespace: workNameName, Name: localQueueName}, localQueue)).To(Succeed())
+			Expect(hubClient.Delete(ctx, localQueue)).To(Succeed())
+
+			By("waiting for the controller to delete the PlacementPolicy")
+			Eventually(func() error {
+				placement := &placementv1alpha1.PlacementPolicy{}
+				err := hubClient.Get(ctx, types.NamespacedName{Namespace: workNameName, Name: placementPolicyName}, placement)
+				if apierrors.IsNotFound(err) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("PlacementPolicy still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "PlacementPolicy should be deleted by the controller")
+
+			By("waiting for the controller to remove the finalizer and fully delete the LocalQueue object")
+			Eventually(func() error {
+				localQueue := &kueuev1beta2.LocalQueue{}
+				err := hubClient.Get(ctx, types.NamespacedName{Namespace: workNameName, Name: localQueueName}, localQueue)
+				if apierrors.IsNotFound(err) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("LocalQueue object still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "LocalQueue object should be fully deleted after the controller removes its finalizer")
+		})
+	})
+})
+
+var _ = Describe("resourceflavor operations", Ordered, func() {
+	// ResourceFlavor is cluster-scoped, so annotating it should derive a cluster-scoped
+	// ClusterPlacementPolicy rather than a namespaced PlacementPolicy.
+	Context("creating a new ResourceFlavor object with annotation then deleting the object", Ordered, func() {
+		resourceFlavorName := "my-resource-flavor"
+		placementPolicyName := derivedPlacementPolicyName("ResourceFlavor", resourceFlavorName)
+
+		BeforeAll(func() {
+			resourceFlavor := &kueuev1beta2.ResourceFlavor{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: resourceFlavorName,
+					Annotations: map[string]string{
+						placementv1alpha1.ClusterSelectorsAnnotation: "env=useast;env=eastasia",
+					},
+				},
+			}
+			Expect(hubClient.Create(ctx, resourceFlavor)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			// Forcefully strip the finalizer and delete the ResourceFlavor object, in case the
+			// controller did not remove it (e.g., if an earlier It node failed before the deletion
+			// test ran).
+			Eventually(func() error {
+				resourceFlavor := &kueuev1beta2.ResourceFlavor{}
+				if err := hubClient.Get(ctx, types.NamespacedName{Name: resourceFlavorName}, resourceFlavor); err != nil {
+					if apierrors.IsNotFound(err) {
+						return nil
+					}
+					return err
+				}
+				if controllerutil.ContainsFinalizer(resourceFlavor, derivedPlacementPolicyCleanupFinalizer) {
+					controllerutil.RemoveFinalizer(resourceFlavor, derivedPlacementPolicyCleanupFinalizer)
+					if err := hubClient.Update(ctx, resourceFlavor); err != nil {
+						return err
+					}
+				}
+				if resourceFlavor.DeletionTimestamp.IsZero() {
+					if err := hubClient.Delete(ctx, resourceFlavor); err != nil {
+						return err
+					}
+				}
+				return fmt.Errorf("ResourceFlavor object still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "ResourceFlavor object should be fully deleted")
+
+			Eventually(func() error {
+				placement := &placementv1alpha1.ClusterPlacementPolicy{}
+				if err := hubClient.Get(ctx, types.NamespacedName{Name: placementPolicyName}, placement); err != nil {
+					if apierrors.IsNotFound(err) {
+						return nil
+					}
+					return err
+				}
+				if err := hubClient.Delete(ctx, placement); err != nil && !apierrors.IsNotFound(err) {
+					return err
+				}
+				return fmt.Errorf("ClusterPlacementPolicy still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "ClusterPlacementPolicy should be fully deleted")
+		})
+
+		It("should add the finalizer to the ResourceFlavor object and create a ClusterPlacementPolicy", func() {
+			By("waiting for the finalizer to be added to the ResourceFlavor object")
+			resourceFlavor := &kueuev1beta2.ResourceFlavor{}
+			Eventually(func() ([]string, error) {
+				if err := hubClient.Get(ctx, types.NamespacedName{Name: resourceFlavorName}, resourceFlavor); err != nil {
+					return nil, err
+				}
+				return resourceFlavor.Finalizers, nil
+			}, eventuallyDuration, eventuallyInterval).Should(ContainElement(derivedPlacementPolicyCleanupFinalizer), "ResourceFlavor object should have the cleanup finalizer")
+
+			By("waiting for the ClusterPlacementPolicy to be created with the expected resource selector")
+			wantResourceSelectors := []placementv1alpha1.ResourceSelector{
+				{
+					Kind:       "ResourceFlavor",
+					APIGroup:   "kueue.x-k8s.io",
+					APIVersion: "v1beta2",
+					Name:       resourceFlavorName,
+				},
+			}
+			placement := &placementv1alpha1.ClusterPlacementPolicy{}
+			Eventually(func() ([]placementv1alpha1.ResourceSelector, error) {
+				if err := hubClient.Get(ctx, types.NamespacedName{Name: placementPolicyName}, placement); err != nil {
+					return nil, err
+				}
+				return placement.Spec.ResourceSelectors, nil
+			}, eventuallyDuration, eventuallyInterval).Should(Equal(wantResourceSelectors), "ClusterPlacementPolicy should have the expected resource selector")
+			Expect(placement.Namespace).To(BeEmpty(), "ClusterPlacementPolicy should be cluster-scoped")
+		})
+
+		It("should delete the ClusterPlacementPolicy and remove the finalizer when the ResourceFlavor object is deleted", func() {
+			By("deleting the ResourceFlavor object")
+			resourceFlavor := &kueuev1beta2.ResourceFlavor{}
+			Expect(hubClient.Get(ctx, types.NamespacedName{Name: resourceFlavorName}, resourceFlavor)).To(Succeed())
+			Expect(hubClient.Delete(ctx, resourceFlavor)).To(Succeed())
+
+			By("waiting for the controller to delete the ClusterPlacementPolicy")
+			Eventually(func() error {
+				placement := &placementv1alpha1.ClusterPlacementPolicy{}
+				err := hubClient.Get(ctx, types.NamespacedName{Name: placementPolicyName}, placement)
+				if apierrors.IsNotFound(err) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("ClusterPlacementPolicy still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "ClusterPlacementPolicy should be deleted by the controller")
+
+			By("waiting for the controller to remove the finalizer and fully delete the ResourceFlavor object")
+			Eventually(func() error {
+				resourceFlavor := &kueuev1beta2.ResourceFlavor{}
+				err := hubClient.Get(ctx, types.NamespacedName{Name: resourceFlavorName}, resourceFlavor)
+				if apierrors.IsNotFound(err) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("ResourceFlavor object still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "ResourceFlavor object should be fully deleted after the controller removes its finalizer")
+		})
+	})
+})
+
+var _ = Describe("clusterqueue operations", Ordered, func() {
+	// ClusterQueue is cluster-scoped, so annotating it should derive a cluster-scoped
+	// ClusterPlacementPolicy rather than a namespaced PlacementPolicy.
+	Context("creating a new ClusterQueue object with annotation then deleting the object", Ordered, func() {
+		clusterQueueName := "my-cluster-queue"
+		placementPolicyName := derivedPlacementPolicyName("ClusterQueue", clusterQueueName)
+
+		BeforeAll(func() {
+			clusterQueue := &kueuev1beta2.ClusterQueue{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: clusterQueueName,
+					Annotations: map[string]string{
+						placementv1alpha1.ClusterSelectorsAnnotation: "env=useast;env=eastasia",
+					},
+				},
+			}
+			Expect(hubClient.Create(ctx, clusterQueue)).To(Succeed())
+		})
+
+		AfterAll(func() {
+			// Forcefully strip the finalizer and delete the ClusterQueue object, in case the
+			// controller did not remove it (e.g., if an earlier It node failed before the deletion
+			// test ran).
+			Eventually(func() error {
+				clusterQueue := &kueuev1beta2.ClusterQueue{}
+				if err := hubClient.Get(ctx, types.NamespacedName{Name: clusterQueueName}, clusterQueue); err != nil {
+					if apierrors.IsNotFound(err) {
+						return nil
+					}
+					return err
+				}
+				if controllerutil.ContainsFinalizer(clusterQueue, derivedPlacementPolicyCleanupFinalizer) {
+					controllerutil.RemoveFinalizer(clusterQueue, derivedPlacementPolicyCleanupFinalizer)
+					if err := hubClient.Update(ctx, clusterQueue); err != nil {
+						return err
+					}
+				}
+				if clusterQueue.DeletionTimestamp.IsZero() {
+					if err := hubClient.Delete(ctx, clusterQueue); err != nil {
+						return err
+					}
+				}
+				return fmt.Errorf("ClusterQueue object still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "ClusterQueue object should be fully deleted")
+
+			Eventually(func() error {
+				placement := &placementv1alpha1.ClusterPlacementPolicy{}
+				if err := hubClient.Get(ctx, types.NamespacedName{Name: placementPolicyName}, placement); err != nil {
+					if apierrors.IsNotFound(err) {
+						return nil
+					}
+					return err
+				}
+				if err := hubClient.Delete(ctx, placement); err != nil && !apierrors.IsNotFound(err) {
+					return err
+				}
+				return fmt.Errorf("ClusterPlacementPolicy still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "ClusterPlacementPolicy should be fully deleted")
+		})
+
+		It("should add the finalizer to the ClusterQueue object and create a ClusterPlacementPolicy", func() {
+			By("waiting for the finalizer to be added to the ClusterQueue object")
+			clusterQueue := &kueuev1beta2.ClusterQueue{}
+			Eventually(func() ([]string, error) {
+				if err := hubClient.Get(ctx, types.NamespacedName{Name: clusterQueueName}, clusterQueue); err != nil {
+					return nil, err
+				}
+				return clusterQueue.Finalizers, nil
+			}, eventuallyDuration, eventuallyInterval).Should(ContainElement(derivedPlacementPolicyCleanupFinalizer), "ClusterQueue object should have the cleanup finalizer")
+
+			By("waiting for the ClusterPlacementPolicy to be created with the expected resource selector")
+			wantResourceSelectors := []placementv1alpha1.ResourceSelector{
+				{
+					Kind:       "ClusterQueue",
+					APIGroup:   "kueue.x-k8s.io",
+					APIVersion: "v1beta2",
+					Name:       clusterQueueName,
+				},
+			}
+			placement := &placementv1alpha1.ClusterPlacementPolicy{}
+			Eventually(func() ([]placementv1alpha1.ResourceSelector, error) {
+				if err := hubClient.Get(ctx, types.NamespacedName{Name: placementPolicyName}, placement); err != nil {
+					return nil, err
+				}
+				return placement.Spec.ResourceSelectors, nil
+			}, eventuallyDuration, eventuallyInterval).Should(Equal(wantResourceSelectors), "ClusterPlacementPolicy should have the expected resource selector")
+			Expect(placement.Namespace).To(BeEmpty(), "ClusterPlacementPolicy should be cluster-scoped")
+		})
+
+		It("should delete the ClusterPlacementPolicy and remove the finalizer when the ClusterQueue object is deleted", func() {
+			By("deleting the ClusterQueue object")
+			clusterQueue := &kueuev1beta2.ClusterQueue{}
+			Expect(hubClient.Get(ctx, types.NamespacedName{Name: clusterQueueName}, clusterQueue)).To(Succeed())
+			Expect(hubClient.Delete(ctx, clusterQueue)).To(Succeed())
+
+			By("waiting for the controller to delete the ClusterPlacementPolicy")
+			Eventually(func() error {
+				placement := &placementv1alpha1.ClusterPlacementPolicy{}
+				err := hubClient.Get(ctx, types.NamespacedName{Name: placementPolicyName}, placement)
+				if apierrors.IsNotFound(err) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("ClusterPlacementPolicy still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "ClusterPlacementPolicy should be deleted by the controller")
+
+			By("waiting for the controller to remove the finalizer and fully delete the ClusterQueue object")
+			Eventually(func() error {
+				clusterQueue := &kueuev1beta2.ClusterQueue{}
+				err := hubClient.Get(ctx, types.NamespacedName{Name: clusterQueueName}, clusterQueue)
+				if apierrors.IsNotFound(err) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("ClusterQueue object still exists")
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "ClusterQueue object should be fully deleted after the controller removes its finalizer")
 		})
 	})
 })
