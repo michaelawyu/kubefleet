@@ -30,7 +30,7 @@ import (
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
-	"github.com/kubefleet-dev/kubefleet/pkg/v1/controllers/utils/fieldindexers"
+	"github.com/kubefleet-dev/kubefleet/pkg/v1/utils/fieldindexers"
 )
 
 // retrieveLinkedAndLeftOverWorks retrieves two sets of work objects:
@@ -79,7 +79,7 @@ func (r *Reconciler) retrieveLinkedAndLeftOverWorks(ctx context.Context,
 	}
 
 	// List all work objects owned by the same placement binding as the primary work.
-	ownedByFieldVal := fmt.Sprintf(fieldindexers.WorkOwnedByPlacementBindingCustomFieldValFormat, ownerNS, ownedBy)
+	ownedByFieldVal := fmt.Sprintf(fieldindexers.WorkOwnedByPlacementBindingCustomFieldValFmt, ownerNS, ownedBy)
 	workList := &placementv1alpha1.WorkList{}
 	if err := r.hubClient.List(ctx, workList,
 		client.InNamespace(primaryWork.Namespace),

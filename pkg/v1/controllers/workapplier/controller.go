@@ -255,17 +255,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, nil
 	}
 
-	// Retrieve all linked work objects.
-	linkedWorks, leftOverWorks, err := r.retrieveLinkedAndLeftOverWorks(ctx, work)
-	if err != nil {
-		wrappedErr := errors.Wraps(err, "", "primaryWork", klog.KObj(work), "controller", controllerName)
-		klog.ErrorS(err, "Failed to retrieve linked work objects", errors.Args(wrappedErr)...)
-		return ctrl.Result{}, wrappedErr
-	}
-
 	// Clean things up if the work object has been marked for deletion.
 	if !work.DeletionTimestamp.IsZero() {
-		requeueAfter, err := r.cleanupWhenPlacementDeleted(ctx, linkedWorks, leftOverWorks)
+		requeueAfter, err := r.cleanupWhenBindingDeleted(ctx, work)
 		if err != nil {
 			wrappedErr := errors.Wraps(err, "", "primaryWork", klog.KObj(work), "controller", controllerName)
 			klog.ErrorS(err, "Failed to clean up linked work objects", errors.Args(wrappedErr)...)
@@ -275,6 +267,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 			return ctrl.Result{RequeueAfter: *requeueAfter}, nil
 		}
 		return ctrl.Result{}, nil
+	}
+
+	// Retrieve all linked work objects.
+	linkedWorks, leftOverWorks, err := r.retrieveLinkedAndLeftOverWorks(ctx, work)
+	if err != nil {
+		wrappedErr := errors.Wraps(err, "", "primaryWork", klog.KObj(work), "controller", controllerName)
+		klog.ErrorS(err, "Failed to retrieve linked work objects", errors.Args(wrappedErr)...)
+		return ctrl.Result{}, wrappedErr
 	}
 
 	// Add cleanup finalizer to all linked work objects.

@@ -27,7 +27,7 @@ import (
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/resource"
-	"github.com/kubefleet-dev/kubefleet/pkg/v1/controllers/utils/ownerreferences"
+	"github.com/kubefleet-dev/kubefleet/pkg/v1/utils/ownerreferences"
 )
 
 func (r *Reconciler) processManifests(ctx context.Context, manifestProcessingStates []*manifestProcessingState) error {

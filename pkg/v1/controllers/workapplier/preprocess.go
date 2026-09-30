@@ -19,6 +19,7 @@ package workapplier
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -31,8 +32,8 @@ import (
 	"k8s.io/utils/ptr"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
-	"github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
-	"github.com/kubefleet-dev/kubefleet/pkg/v1/controllers/utils/ownerreferences"
+	kferrors "github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
+	"github.com/kubefleet-dev/kubefleet/pkg/v1/utils/ownerreferences"
 )
 
 func prepareWorkObjectAndManifestProcessingStates(works []*placementv1alpha1.Work,
@@ -85,7 +86,9 @@ func (r *Reconciler) preProcessWorkObjects(ctx context.Context, workObjProcessin
 
 		// Pre-process the manifests one work object at a time, so that the ordinals assigned to the
 		// manifest identifiers stay relative to their own work object.
-		r.preProcessPerWorkObjManifests(ctx, workObjProcessingState.manifestProcessingStates)
+		if err := r.preProcessPerWorkObjManifests(ctx, workObjProcessingState.manifestProcessingStates); err != nil {
+			return nil, kferrors.Wraps(err, "failed to pre-process work object", "work", klog.KObj(workObjProcessingState.work))
+		}
 
 		klog.V(2).InfoS("Pre-processed a work object",
 			"work", klog.KObj(workObjProcessingState.work),
@@ -102,7 +105,7 @@ func (r *Reconciler) preProcessWorkObjects(ctx context.Context, workObjProcessin
 		// also check for any leftover apply attempts from previous runs and clean them up (if the
 		// corresponding manifest object has been applied).
 		if err := r.writeAheadPerWorkObjManifestProcessingAttempts(ctx, workObjProcessingState, seenManifestIDs); err != nil {
-			return nil, errors.Wraps(err, "failed to write ahead manifest processing states", "work", klog.KObj(workObjProcessingState.work))
+			return nil, kferrors.Wraps(err, "failed to write ahead manifest processing states", "work", klog.KObj(workObjProcessingState.work))
 		}
 
 		klog.V(2).InfoS("Wrote ahead manifest processing states for a work object",
@@ -111,17 +114,37 @@ func (r *Reconciler) preProcessWorkObjects(ctx context.Context, workObjProcessin
 	return seenManifestIDs, nil
 }
 
-func (r *Reconciler) preProcessPerWorkObjManifests(ctx context.Context, manifestProcessingStates []*manifestProcessingState) {
+func (r *Reconciler) preProcessPerWorkObjManifests(ctx context.Context, manifestProcessingStates []*manifestProcessingState) error {
+	childCtx, childCancel := context.WithCancel(ctx)
+	defer childCancel()
+
+	var innerErr atomic.Value
 	preProcessOneManifest := func(pieces int) {
 		// At this moment the processing state is just initialized.
 		processingState := manifestProcessingStates[pieces]
 		ownerWorkObj := processingState.fromWorkObj
 
 		gvr, manifestObj, err := r.decodeManifest(processingState.manifest)
+		// There exists a corner case where the decoding might have failed due to transient errors (e.g., the
+		// API discovery endpoint is not responding); in this case, if we register the error as a user-end
+		// decoding error and skip the manifest, and if the manifest has been applied before, the error might
+		// trigger the later left-over cleanup step, which would delete the previously applied manifest. It should
+		// be corrected in the subsequent reconciliation; however, it might trigger fluctuations. To be on the safer
+		// side, the work applier is set to requeue upon transient decoding errors.
+		//
+		// Note that with aggregated API discovery enabled by default in most Kubernetes clusters now,
+		// normally if the first decoding attempt succeeds, all subsequent decoding attempts will be resolved via
+		// cache.
+		if err != nil && kferrors.Category(err) == kferrors.ErrCategoryTransient {
+			wrappedErr := kferrors.Wraps(err, "failed to decode the manifest", "ordinal", pieces)
+			innerErr.Store(wrappedErr)
+			childCancel()
+			return
+		}
 		// Build the manifest identifier. Note that this would return an identifier even if the decoding fails.
 		processingState.id = buildManifestIdentifier(pieces, gvr, manifestObj)
 		if err != nil {
-			wrappedErr := errors.Wraps(err, "failed to decode the manifest", "ordinal", pieces)
+			wrappedErr := kferrors.Wraps(err, "failed to decode the manifest", "ordinal", pieces)
 			processingState.applyErr = wrappedErr
 			processingState.applyRes = ApplyResTypeDecodingErred
 			return
@@ -129,7 +152,7 @@ func (r *Reconciler) preProcessPerWorkObjManifests(ctx context.Context, manifest
 
 		// Reject objects with a generate name but no name.
 		if len(manifestObj.GetGenerateName()) > 0 && len(manifestObj.GetName()) == 0 {
-			wrappedErr := errors.NewUserError(nil, "rejected an object with only generate name",
+			wrappedErr := kferrors.NewUserError(nil, "rejected an object with only generate name",
 				"ordinal", pieces, "manifestObj", klog.KObj(manifestObj), "work", klog.KObj(ownerWorkObj))
 			processingState.applyErr = wrappedErr
 			processingState.applyRes = ApplyResTypeFoundGenerateName
@@ -150,20 +173,33 @@ func (r *Reconciler) preProcessPerWorkObjManifests(ctx context.Context, manifest
 			"GVR", *gvr,
 			"work", klog.KObj(ownerWorkObj))
 	}
-	r.parallelizer.ParallelizeUntil(ctx, len(manifestProcessingStates), preProcessOneManifest, "preProcessManifests")
+	r.parallelizer.ParallelizeUntil(childCtx, len(manifestProcessingStates), preProcessOneManifest, "preProcessManifests")
+
+	if err := innerErr.Load(); err != nil {
+		return kferrors.Wraps(err.(error), "failed to pre-process manifests")
+	}
+	// If the context has been cancelled, return an error immediately so that the reconciliation loop would exit now.
+	if ctx.Err() != nil {
+		return kferrors.NewTransientError(ctx.Err(), "context was canceled or timed out during manifest pre-processing")
+	}
+	return nil
 }
 
 // Decodes the manifest JSON into a Kubernetes unstructured object.
 func (r *Reconciler) decodeManifest(manifest *placementv1alpha1.Manifest) (*schema.GroupVersionResource, *unstructured.Unstructured, error) {
 	unstructuredObj := &unstructured.Unstructured{}
 	if err := unstructuredObj.UnmarshalJSON(manifest.Raw); err != nil {
-		return &schema.GroupVersionResource{}, nil, errors.NewUserError(err, "failed to unmarshal JSON")
+		return &schema.GroupVersionResource{}, nil, kferrors.NewUserError(err, "failed to unmarshal JSON")
 	}
 
 	mapping, err := r.restMapper.RESTMapping(unstructuredObj.GroupVersionKind().GroupKind(), unstructuredObj.GroupVersionKind().Version)
 	if err != nil {
+		if meta.IsNoMatchError(err) {
+			return &schema.GroupVersionResource{}, unstructuredObj,
+				kferrors.NewUserError(err, "failed to find GVR from member cluster client REST mapping; the resource might not be available on the member cluster side")
+		}
 		return &schema.GroupVersionResource{}, unstructuredObj,
-			errors.NewUserError(err, "failed to find GVR from member cluster client REST mapping; the resource might not be available on the member cluster side")
+			kferrors.NewTransientError(err, "failed to complete REST mapping for the manifest")
 	}
 
 	return &mapping.Resource, unstructuredObj, nil
@@ -226,7 +262,7 @@ func markDuplicatedManifests(workObjProcessingStates []*workObjectProcessingStat
 			}
 
 			if seenManifestIDs.Has(processingState.idStr) {
-				processingState.applyErr = errors.NewUserError(nil, "rejected a duplicated manifest",
+				processingState.applyErr = kferrors.NewUserError(nil, "rejected a duplicated manifest",
 					"ordinal", processingState.id.Ordinal, "manifest", processingState.idStr,
 					"work", klog.KObj(processingState.fromWorkObj))
 				processingState.applyRes = ApplyResTypeDuplicated
@@ -286,7 +322,7 @@ func (r *Reconciler) writeAheadPerWorkObjManifestProcessingAttempts(ctx context.
 	// over in the member cluster.
 	leftOverManifests := findLeftOverManifests(perManifestStatusesToWriteAhead, work, existingManifestStatusIdx, seenManifestIDs)
 	if err := r.removeLeftOverManifests(ctx, leftOverManifests, workObjProcessingState); err != nil {
-		return errors.Wraps(err, "failed to remove leftover manifests",
+		return kferrors.Wraps(err, "failed to remove leftover manifests",
 			"work", klog.KObj(work), "leftOverManifestCount", len(leftOverManifests), "removalFailedCount", len(err.Errors()))
 	}
 	klog.V(2).InfoS("Left-over manifests are found and removed",
@@ -303,7 +339,7 @@ func (r *Reconciler) writeAheadPerWorkObjManifestProcessingAttempts(ctx context.
 	}
 	work.Status.Manifests = perManifestStatusesToWriteAhead
 	if err := r.hubClient.Status().Update(ctx, work); err != nil {
-		return errors.NewAPIServerError(err, "failed to update work object status", false)
+		return kferrors.NewAPIServerError(err, "failed to update work object status", false)
 	}
 
 	klog.V(2).InfoS("Write-ahead process completed", "work", klog.KObj(work))
@@ -428,7 +464,7 @@ func (r *Reconciler) removeLeftOverManifests(
 		leftOverManifest := leftOverManifests[pieces]
 
 		if err := r.removeOneLeftOverManifest(childCtx, leftOverManifest, workObjProcessingState.appliedWorkOwnerRef); err != nil {
-			errs[pieces] = errors.Wraps(err, "failed to remove a left-over manifest", "manifestId", leftOverManifest)
+			errs[pieces] = kferrors.Wraps(err, "failed to remove a left-over manifest", "manifestId", leftOverManifest)
 		}
 	}
 	r.parallelizer.ParallelizeUntil(childCtx, len(leftOverManifests), doWork, "removeLeftOverManifests")
@@ -464,7 +500,7 @@ func (r *Reconciler) removeOneLeftOverManifest(
 		// Failed to retrieve the object from the member cluster.
 		//
 		// The cached flag is set to false as the dynamic client is non-caching.
-		return errors.NewAPIServerError(err, "failed to retrieve the object from the member cluster", false,
+		return kferrors.NewAPIServerError(err, "failed to retrieve the object from the member cluster", false,
 			"gvr", gvr, "manifestObj", manifestRef)
 	case inMemberClusterObj.GetDeletionTimestamp() != nil:
 		// The object has been marked for deletion; no further action is needed.
@@ -493,7 +529,7 @@ func (r *Reconciler) removeOneLeftOverManifest(
 			"expectedAppliedWorkOwnerRef", *expectedAppliedWorkOwnerRef)
 		ownerreferences.Disown(inMemberClusterObj, expectedAppliedWorkOwnerRef)
 		if _, err := r.spokeDynamicClient.Resource(gvr).Namespace(manifestNamespace).Update(ctx, inMemberClusterObj, metav1.UpdateOptions{}); err != nil && !apierrors.IsNotFound(err) {
-			return errors.NewAPIServerError(err, "failed to drop the ownership of the object", false,
+			return kferrors.NewAPIServerError(err, "failed to drop the ownership of the object", false,
 				"gvr", gvr, "manifestObj", manifestRef,
 				"inMemberClusterObj", klog.KObj(inMemberClusterObj),
 				"expectedAppliedWorkOwnerRef", *expectedAppliedWorkOwnerRef)
@@ -518,7 +554,7 @@ func (r *Reconciler) removeOneLeftOverManifest(
 			},
 		}
 		if err := r.spokeDynamicClient.Resource(gvr).Namespace(manifestNamespace).Delete(ctx, manifestName, deleteOpts); err != nil && !apierrors.IsNotFound(err) {
-			return errors.NewAPIServerError(err, "failed to delete the object", false,
+			return kferrors.NewAPIServerError(err, "failed to delete the object", false,
 				"gvr", gvr, "manifestObj", manifestRef,
 				"inMemberClusterObj", klog.KObj(inMemberClusterObj),
 				"expectedAppliedWorkOwnerRef", *expectedAppliedWorkOwnerRef)
