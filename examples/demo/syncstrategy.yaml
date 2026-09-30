@@ -1,0 +1,43 @@
+# A PlacementPolicy with every syncStrategy field spelled out explicitly, each set to its own
+# documented default value (see the SyncStrategy type in
+# apis/kubefleet.dev/placement/v1alpha1/placementpolicy_types.go). Omitting syncStrategy entirely,
+# or omitting any of the fields below, has KubeFleet fall back to these exact same values.
+apiVersion: placement.kubefleet.dev/v1alpha1
+kind: PlacementPolicy
+metadata:
+  name: demo-full-sync-strategy
+  namespace: work
+spec:
+  clusterSelectors:
+    - count: 1
+  resourceSelectors:
+    - apiGroup: ""
+      apiVersion: v1
+      kind: ConfigMap
+      name: app-config
+  syncStrategy:
+    # ClientSideApply | ServerSideApply. Default: ClientSideApply.
+    applyMethod: ClientSideApply
+
+    # Only takes effect when applyMethod is ServerSideApply; shown here for completeness. Default:
+    # unset (nil), which is equivalent to forceConflicts: false.
+    serverSideApplyOptions:
+      forceConflicts: false
+
+    # ShareOwnership | ReportError. Default: ReportError.
+    whenOwnedByOthers: ReportError
+
+    # ApplyAnyway | ReportError. Default: ApplyAnyway.
+    whenDrifted: ApplyAnyway
+
+    # AlwaysTakeOver | TakeOverIfNoDiff | ReportError. Default: ReportError.
+    whenAlreadyExists: ReportError
+
+    # CleanUpResources | OrphanResources. Default: CleanUpResources.
+    whenPlacementDeleted: CleanUpResources
+
+    # CreateNamespace | ReportError. Default: CreateNamespace.
+    whenNamespaceDoesNotExist: CreateNamespace
+
+    # PartialComparison | FullComparison. Default: PartialComparison.
+    comparisonOption: PartialComparison

@@ -1,0 +1,21 @@
+# Demo: place the "work" namespace onto a single, arbitrary member cluster.
+#
+# Namespace is a cluster-scoped resource, so a ClusterPlacementPolicy (rather than the
+# namespace-scoped PlacementPolicy) is used to select it.
+#
+# Prerequisite: create a namespace named "work" on the hub cluster.
+#
+# No cluster label/property terms are given below, so every member cluster is a candidate; count: 1
+# has KubeFleet pick just one of them, with no preference as to which.
+apiVersion: placement.kubefleet.dev/v1alpha1
+kind: ClusterPlacementPolicy
+metadata:
+  name: experimental
+spec:
+  clusterSelectors:
+    - count: 1
+  resourceSelectors:
+    - apiGroup: ""
+      apiVersion: v1
+      kind: Namespace
+      name: work

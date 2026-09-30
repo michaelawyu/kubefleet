@@ -1,0 +1,21 @@
+# Places the Kueue base manifests (ClusterQueue, LocalQueue, Namespace, ResourceFlavor) pushed to
+# fleetdemo.azurecr.io by notes.sh, using the "acr-access" image pull secret for registry auth.
+apiVersion: placement.kubefleet.dev/v1alpha1
+kind: ORASManifests
+metadata:
+  name: kueue-manifests
+  namespace: work
+spec:
+  ociArtifactRef:
+    url: fleetdemo.azurecr.io/testdata/kueue
+    ref:
+      tag: latest
+    authProvider:
+      authProviderType: Generic
+      secretRef:
+        apiGroup: ""
+        apiVersion: v1
+        kind: Secret
+        namespace: work
+        name: acr-access
+  path: base/

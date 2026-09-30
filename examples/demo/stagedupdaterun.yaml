@@ -1,0 +1,22 @@
+# Rolls out the resources currently selected by demo-work-placement-policy (see placementpolicy.yaml)
+# in a single stage across every cluster the policy has bound.
+apiVersion: rollout.kubefleet.dev/v1alpha1
+kind: ClusterStagedUpdateStrategy
+metadata:
+  name: demo-work-staged-update-strategy
+spec:
+  stages:
+    - name: all-clusters
+      # An empty (non-nil) label selector matches every cluster the placement policy has bound.
+      labelSelector: {}
+      maxConcurrency: 1
+---
+apiVersion: rollout.kubefleet.dev/v1alpha1
+kind: ClusterStagedUpdateRun
+metadata:
+  name: demo-work-staged-update-run
+spec:
+  placementPolicyName: demo-work-placement-policy
+  # resourceSnapshotName is left empty so that KubeFleet requests a new resource snapshot based on
+  # the placement policy's currently selected resources and rolls that out.
+  stagedUpdateStrategyName: demo-work-staged-update-strategy

@@ -1,0 +1,18 @@
+# Migrates every placement currently on a member cluster labeled env=prod (e.g., the cluster that
+# demo-work-placement-policy, from placementpolicy.yaml, ended up bound to) over to another member
+# cluster.
+#
+# Prerequisite: the source member cluster must carry the label env=prod; adjust fromClusterSelector
+# below to match your own cluster labels if they differ.
+apiVersion: placement.kubefleet.dev/v1alpha1
+kind: PlacementMigrationRequest
+metadata:
+  name: demo-work-migration-request
+spec:
+  # placementPolicySelectors is left empty: with no label matchers to narrow things down, every
+  # placement currently placed on a from cluster is selected for migration.
+  fromClusterSelector:
+    env: prod
+  # toClusterSelector is left unset, so any cluster other than the from cluster(s) can be a target.
+  failurePolicy:
+    maxFailureCount: 1
