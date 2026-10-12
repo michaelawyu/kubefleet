@@ -65,10 +65,10 @@ type Checker interface {
 	Wraps(c Checker)
 	DeepCopy() Checker
 
-	IsNamespaceEligibleForPlacement(namespace string) bool
-	IsResourceGVKEligibleForPlacement(gvk schema.GroupVersionKind) bool
-	IsResourceGVREligibleForPlacement(gvr schema.GroupVersionResource) (bool, error)
-	IsResourceObjectEligibleForPlacement(obj *unstructured.Unstructured) (bool, error)
+	AllowsNamespace(namespace string) bool
+	AllowsGVK(gvk schema.GroupVersionKind) bool
+	AllowsGVR(gvr schema.GroupVersionResource) (bool, error)
+	AllowsObject(obj *unstructured.Unstructured) (bool, error)
 }
 
 // Verify that checker implements the Checker interface.
@@ -214,8 +214,8 @@ func (c *checker) DeepCopy() Checker {
 	return cp
 }
 
-// IsNamespaceEligibleForPlacement checks if a given namespace is eligible for placement.
-func (c *checker) IsNamespaceEligibleForPlacement(namespace string) bool {
+// AllowsNamespace checks if a given namespace is eligible for placement.
+func (c *checker) AllowsNamespace(namespace string) bool {
 	if namespace == "" {
 		// Allow cluster-scoped resources (which have an empty namespace) for placement.
 		return true
@@ -244,13 +244,13 @@ func (c *checker) IsNamespaceEligibleForPlacement(namespace string) bool {
 
 	// Consult the wrapped checker to check if the eligibility is further restricted.
 	if c.wrapped != nil {
-		return c.wrapped.IsNamespaceEligibleForPlacement(namespace)
+		return c.wrapped.AllowsNamespace(namespace)
 	}
 	return true
 }
 
-// IsResourceGVKEligibleForPlacement checks if a given GVK is eligible for placement.
-func (c *checker) IsResourceGVKEligibleForPlacement(gvk schema.GroupVersionKind) bool {
+// AllowsGVK checks if a given GVK is eligible for placement.
+func (c *checker) AllowsGVK(gvk schema.GroupVersionKind) bool {
 	// Check GVK eligibility based on the configured allow list or deny list.
 	eligible := true
 	switch c.gvkEligibilityMode {
@@ -265,13 +265,13 @@ func (c *checker) IsResourceGVKEligibleForPlacement(gvk schema.GroupVersionKind)
 
 	// Consult the wrapped checker to check if the eligibility is further restricted.
 	if c.wrapped != nil {
-		return c.wrapped.IsResourceGVKEligibleForPlacement(gvk)
+		return c.wrapped.AllowsGVK(gvk)
 	}
 	return true
 }
 
-// IsResourceGVREligibleForPlacement checks if a given GVR is eligible for placement.
-func (c *checker) IsResourceGVREligibleForPlacement(gvr schema.GroupVersionResource) (bool, error) {
+// AllowsGVR checks if a given GVR is eligible for placement.
+func (c *checker) AllowsGVR(gvr schema.GroupVersionResource) (bool, error) {
 	gvks, err := c.restMapper.KindsFor(gvr)
 	if err != nil {
 		if meta.IsNoMatchError(err) {
@@ -280,35 +280,34 @@ func (c *checker) IsResourceGVREligibleForPlacement(gvr schema.GroupVersionResou
 		return false, errors.NewUnexpectedError(err, "failed to map the resource to its kinds", "gvr", gvr)
 	}
 	if len(gvks) == 0 {
-		noMatchErr := &meta.NoKindMatchError{
-			GroupKind:        schema.GroupKind{Group: gvr.Group, Kind: gvr.Resource},
-			SearchedVersions: []string{gvr.Version},
+		noMatchErr := &meta.NoResourceMatchError{
+			PartialResource: gvr,
 		}
 		return false, errors.NewUserError(noMatchErr, "no match is found given the GVR", "gvr", gvr)
 	}
 
 	// A resource is eligible only if every kind it maps to is eligible.
 	for _, gvk := range gvks {
-		if !c.IsResourceGVKEligibleForPlacement(gvk) {
+		if !c.AllowsGVK(gvk) {
 			return false, nil
 		}
 	}
 
 	// Consult the wrapped checker to check if the eligibility is further restricted.
 	if c.wrapped != nil {
-		return c.wrapped.IsResourceGVREligibleForPlacement(gvr)
+		return c.wrapped.AllowsGVR(gvr)
 	}
 	return true, nil
 }
 
-// IsResourceObjectEligibleForPlacement checks if the given unstructured resource object is eligible for placement.
+// AllowsObject checks if the given unstructured resource object is eligible for placement.
 //
 // This method will NOT check if the resource is eligible for placement given its namespaces, GVK (GVR); call
 // the other methods for verification.
 //
 // Note (chenyu1): the logic defined here applies only to the v1 APIs (placement policies), as the v1 APIs
 // require explicit resource selectors.
-func (c *checker) IsResourceObjectEligibleForPlacement(obj *unstructured.Unstructured) (bool, error) {
+func (c *checker) AllowsObject(obj *unstructured.Unstructured) (bool, error) {
 	switch {
 	case obj.GetDeletionTimestamp() != nil:
 		return false, errors.NewUserError(nil, "the resource is being deleted and cannot be placed")
@@ -332,7 +331,7 @@ func (c *checker) IsResourceObjectEligibleForPlacement(obj *unstructured.Unstruc
 
 	// Consult the wrapped checker to check if the eligibility is further restricted.
 	if c.wrapped != nil {
-		return c.wrapped.IsResourceObjectEligibleForPlacement(obj)
+		return c.wrapped.AllowsObject(obj)
 	}
 	return true, nil
 }

@@ -270,7 +270,7 @@ func (rs *ResourceSelectorResolver) gatherSelectedResource(placementKey types.Na
 			Kind:    selector.Kind,
 		}
 
-		if !rs.ResourceEligibilityChecker.IsResourceGVKEligibleForPlacement(gvk) {
+		if !rs.ResourceEligibilityChecker.AllowsGVK(gvk) {
 			klog.V(2).InfoS("Skip select resource as it is not eligible for placement", "GVK", gvk.String())
 			continue
 		}
@@ -433,7 +433,7 @@ func (rs *ResourceSelectorResolver) fetchNamespaceResources(selector placementv1
 func (rs *ResourceSelectorResolver) fetchAllResourcesInOneNamespace(namespaceName string, placeName string) ([]runtime.Object, error) {
 	var resources []runtime.Object
 
-	if !rs.ResourceEligibilityChecker.IsNamespaceEligibleForPlacement(namespaceName) {
+	if !rs.ResourceEligibilityChecker.AllowsNamespace(namespaceName) {
 		err := fmt.Errorf("invalid clusterResourcePlacement %s: namespace %s is not allowed to propagate", placeName, namespaceName)
 		return nil, NewUserError(err)
 	}
@@ -456,7 +456,7 @@ func (rs *ResourceSelectorResolver) fetchAllResourcesInOneNamespace(namespaceNam
 
 	trackedResource := rs.InformerManager.GetNameSpaceScopedResources()
 	for _, gvr := range trackedResource {
-		eligible, err := rs.ResourceEligibilityChecker.IsResourceGVREligibleForPlacement(gvr)
+		eligible, err := rs.ResourceEligibilityChecker.AllowsGVR(gvr)
 		switch {
 		case meta.IsNoMatchError(err):
 			// The informer manager never drops a GVR once it has been tracked, so aborting here would
@@ -624,7 +624,7 @@ func (rs *ResourceSelectorResolver) fetchSelectedNamespace(selector placementv1b
 	}
 
 	// Check if this namespace should be propagated
-	if !rs.ResourceEligibilityChecker.IsNamespaceEligibleForPlacement(ns.GetName()) {
+	if !rs.ResourceEligibilityChecker.AllowsNamespace(ns.GetName()) {
 		klog.V(2).InfoS("skip namespace that is not allowed to propagate", "namespace", ns.GetName(), "placement", placementName)
 		return "", false, nil
 	}

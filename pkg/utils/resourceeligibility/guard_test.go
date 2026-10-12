@@ -214,8 +214,8 @@ func TestSetNamespaceCheckListSkipsEmptyEntries(t *testing.T) {
 	if diff := cmp.Diff(c, wantDenyListChecker, checkerCmpOptions); diff != "" {
 		t.Errorf("checker after SetNamespaceCheckList(%s) mismatch (-got, +want):\n%s", NamespaceEligibilityModeDenyList, diff)
 	}
-	if got := c.IsNamespaceEligibleForPlacement("work"); !got {
-		t.Errorf("IsNamespaceEligibleForPlacement(work) = %t, want %t", got, true)
+	if got := c.AllowsNamespace("work"); !got {
+		t.Errorf("AllowsNamespace(work) = %t, want %t", got, true)
 	}
 }
 
@@ -227,13 +227,13 @@ func TestCheckerWraps(t *testing.T) {
 	}
 
 	c := New(nil, nil)
-	if got := c.IsResourceGVKEligibleForPlacement(deploymentGVK); !got {
-		t.Fatalf("IsResourceGVKEligibleForPlacement(%v) = %t, want %t", deploymentGVK, got, true)
+	if got := c.AllowsGVK(deploymentGVK); !got {
+		t.Fatalf("AllowsGVK(%v) = %t, want %t", deploymentGVK, got, true)
 	}
 
 	c.Wraps(inner)
-	if got := c.IsResourceGVKEligibleForPlacement(deploymentGVK); got {
-		t.Errorf("IsResourceGVKEligibleForPlacement(%v) = %t, want %t", deploymentGVK, got, false)
+	if got := c.AllowsGVK(deploymentGVK); got {
+		t.Errorf("AllowsGVK(%v) = %t, want %t", deploymentGVK, got, false)
 	}
 }
 
@@ -256,14 +256,14 @@ func TestCheckerDeepCopy(t *testing.T) {
 	if err := cp.SetGVKCheckList(GVKEligibilityModeAllowList, []schema.GroupVersionKind{configMapGVK}); err != nil {
 		t.Fatalf("SetGVKCheckList(AllowList) = %v, want no error", err)
 	}
-	if got := c.IsNamespaceEligibleForPlacement("work-1"); !got {
-		t.Errorf("IsNamespaceEligibleForPlacement(work-1) on the original checker = %t, want %t", got, true)
+	if got := c.AllowsNamespace("work-1"); !got {
+		t.Errorf("AllowsNamespace(work-1) on the original checker = %t, want %t", got, true)
 	}
-	if got := c.IsResourceGVKEligibleForPlacement(configMapGVK); !got {
-		t.Errorf("IsResourceGVKEligibleForPlacement(%v) on the original checker = %t, want %t", configMapGVK, got, true)
+	if got := c.AllowsGVK(configMapGVK); !got {
+		t.Errorf("AllowsGVK(%v) on the original checker = %t, want %t", configMapGVK, got, true)
 	}
-	if got := c.IsResourceGVKEligibleForPlacement(deploymentGVK); got {
-		t.Errorf("IsResourceGVKEligibleForPlacement(%v) on the original checker = %t, want %t", deploymentGVK, got, false)
+	if got := c.AllowsGVK(deploymentGVK); got {
+		t.Errorf("AllowsGVK(%v) on the original checker = %t, want %t", deploymentGVK, got, false)
 	}
 
 	// Mutate the wrapped checker of the copy; the original checker should stay intact.
@@ -272,13 +272,13 @@ func TestCheckerDeepCopy(t *testing.T) {
 		t.Fatalf("DeepCopy() returned a checker of type %T, want *checker", cp)
 	}
 	cpChecker.wrapped.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"work"}, nil)
-	if got := c.IsNamespaceEligibleForPlacement("work"); !got {
-		t.Errorf("IsNamespaceEligibleForPlacement(work) on the original checker = %t, want %t", got, true)
+	if got := c.AllowsNamespace("work"); !got {
+		t.Errorf("AllowsNamespace(work) on the original checker = %t, want %t", got, true)
 	}
 }
 
-// TestIsNamespaceEligibleForPlacement tests the IsNamespaceEligibleForPlacement method of the checker type.
-func TestIsNamespaceEligibleForPlacement(t *testing.T) {
+// TestAllowsNamespace tests the AllowsNamespace method of the checker type.
+func TestAllowsNamespace(t *testing.T) {
 	testCases := []struct {
 		name      string
 		checker   Checker
@@ -403,15 +403,15 @@ func TestIsNamespaceEligibleForPlacement(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.checker.IsNamespaceEligibleForPlacement(tc.namespace); got != tc.want {
-				t.Errorf("IsNamespaceEligibleForPlacement(%s) = %t, want %t", tc.namespace, got, tc.want)
+			if got := tc.checker.AllowsNamespace(tc.namespace); got != tc.want {
+				t.Errorf("AllowsNamespace(%s) = %t, want %t", tc.namespace, got, tc.want)
 			}
 		})
 	}
 }
 
-// TestIsResourceGVKEligibleForPlacement tests the IsResourceGVKEligibleForPlacement method of the checker type.
-func TestIsResourceGVKEligibleForPlacement(t *testing.T) {
+// TestAllowsGVK tests the AllowsGVK method of the checker type.
+func TestAllowsGVK(t *testing.T) {
 	testCases := []struct {
 		name    string
 		checker Checker
@@ -552,15 +552,15 @@ func TestIsResourceGVKEligibleForPlacement(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.checker.IsResourceGVKEligibleForPlacement(tc.gvk); got != tc.want {
-				t.Errorf("IsResourceGVKEligibleForPlacement(%v) = %t, want %t", tc.gvk, got, tc.want)
+			if got := tc.checker.AllowsGVK(tc.gvk); got != tc.want {
+				t.Errorf("AllowsGVK(%v) = %t, want %t", tc.gvk, got, tc.want)
 			}
 		})
 	}
 }
 
-// TestIsResourceGVREligibleForPlacement tests the IsResourceGVREligibleForPlacement method of the checker type.
-func TestIsResourceGVREligibleForPlacement(t *testing.T) {
+// TestAllowsGVR tests the AllowsGVR method of the checker type.
+func TestAllowsGVR(t *testing.T) {
 	testCases := []struct {
 		name        string
 		checker     Checker
@@ -630,22 +630,22 @@ func TestIsResourceGVREligibleForPlacement(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, gotErr := tc.checker.IsResourceGVREligibleForPlacement(tc.gvr)
+			got, gotErr := tc.checker.AllowsGVR(tc.gvr)
 			if (gotErr != nil) != tc.wantErr {
-				t.Fatalf("IsResourceGVREligibleForPlacement(%v) error = %v, wantErr %t", tc.gvr, gotErr, tc.wantErr)
+				t.Fatalf("AllowsGVR(%v) error = %v, wantErr %t", tc.gvr, gotErr, tc.wantErr)
 			}
 			if gotNoMatch := meta.IsNoMatchError(gotErr); gotNoMatch != tc.wantNoMatch {
-				t.Errorf("IsNoMatchError(IsResourceGVREligibleForPlacement(%v)) = %t, want %t", tc.gvr, gotNoMatch, tc.wantNoMatch)
+				t.Errorf("IsNoMatchError(AllowsGVR(%v)) = %t, want %t", tc.gvr, gotNoMatch, tc.wantNoMatch)
 			}
 			if got != tc.want {
-				t.Errorf("IsResourceGVREligibleForPlacement(%v) = %t, want %t", tc.gvr, got, tc.want)
+				t.Errorf("AllowsGVR(%v) = %t, want %t", tc.gvr, got, tc.want)
 			}
 		})
 	}
 }
 
-// TestIsResourceObjectEligibleForPlacement tests the IsResourceObjectEligibleForPlacement method of the checker type.
-func TestIsResourceObjectEligibleForPlacement(t *testing.T) {
+// TestAllowsObject tests the AllowsObject method of the checker type.
+func TestAllowsObject(t *testing.T) {
 	now := metav1.Now()
 
 	configMapObj := func(name string) *unstructured.Unstructured {
@@ -816,12 +816,12 @@ func TestIsResourceObjectEligibleForPlacement(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, gotErr := tc.checker.IsResourceObjectEligibleForPlacement(tc.obj)
+			got, gotErr := tc.checker.AllowsObject(tc.obj)
 			if (gotErr != nil) != tc.wantErr {
-				t.Fatalf("IsResourceObjectEligibleForPlacement() error = %v, wantErr %t", gotErr, tc.wantErr)
+				t.Fatalf("AllowsObject() error = %v, wantErr %t", gotErr, tc.wantErr)
 			}
 			if got != tc.want {
-				t.Errorf("IsResourceObjectEligibleForPlacement() = %t, want %t", got, tc.want)
+				t.Errorf("AllowsObject() = %t, want %t", got, tc.want)
 			}
 		})
 	}
@@ -832,6 +832,6 @@ type alwaysIneligibleChecker struct {
 	Checker
 }
 
-func (c *alwaysIneligibleChecker) IsResourceObjectEligibleForPlacement(_ *unstructured.Unstructured) (bool, error) {
+func (c *alwaysIneligibleChecker) AllowsObject(_ *unstructured.Unstructured) (bool, error) {
 	return false, errors.New("ineligible")
 }

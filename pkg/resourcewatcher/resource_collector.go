@@ -96,7 +96,7 @@ func discoverWatchableResources(discoveryClient discovery.DiscoveryInterface, re
 
 	var resourcesToWatch []informer.APIResourceMeta
 	for _, res := range newResources {
-		if resourceEligibilityChecker != nil && !resourceEligibilityChecker.IsResourceGVKEligibleForPlacement(res.GroupVersionKind) {
+		if resourceEligibilityChecker != nil && !resourceEligibilityChecker.AllowsGVK(res.GroupVersionKind) {
 			continue
 		}
 		resourcesToWatch = append(resourcesToWatch, res)

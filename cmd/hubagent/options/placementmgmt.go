@@ -50,8 +50,8 @@ type PlacementManagementOptions struct {
 	//   in the networking.k8s.io/v1beta1 group version for placement;
 	// * v1: skip all resources of version v1 in the core API group for placement;
 	// * v1/ConfigMap: skip ConfigMap resources of version v1 in the core API group for placement;
-	// * networking.k8s.io/v1beta1/Ingress; v1beta1: skip the Ingress resource in the networking.k8s.io/v1beta1 group version
-	//   and all resources of version v1beta1 in the core API group for placement.
+	// * networking.k8s.io/v1beta1/Ingress;v1/ConfigMap: skip the Ingress resource in the networking.k8s.io/v1beta1
+	//   group version and the ConfigMap resource of version v1 in the core API group for placement.
 	//
 	// You can leave the [API-VERSION] and/or [KINDS] parts empty to deny all versions and/or kinds in an API group.
 	//

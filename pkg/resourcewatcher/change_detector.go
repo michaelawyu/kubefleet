@@ -165,7 +165,7 @@ func (d *ChangeDetector) dynamicResourceFilter(obj any) bool {
 	}
 
 	cwKey, _ := key.(keys.ClusterWideKey)
-	if !d.ResourceEligibilityChecker.IsNamespaceEligibleForPlacement(cwKey.Namespace) {
+	if d.ResourceEligibilityChecker != nil && !d.ResourceEligibilityChecker.AllowsNamespace(cwKey.Namespace) {
 		klog.V(5).InfoS("Skip watching resource in namespace due to placement eligibility", "namespace", cwKey.Namespace,
 			"group", cwKey.Group, "version", cwKey.Version, "kind", cwKey.Kind, "object", cwKey.Name)
 		return false
