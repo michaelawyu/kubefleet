@@ -602,7 +602,7 @@ var _ = Describe("core ops (placement resource snapshots)", func() {
 			}
 		})
 
-		// verifySnapshotsOfconfig maps verifies that the given snapshots, created at the given index, are
+		// verifySnapshotsOfConfigMaps verifies that the given snapshots, created at the given index, are
 		// the primary and secondary placement resource snapshots that cover the given config maps, and returns
 		// the snapshots as persisted.
 		//
@@ -2352,7 +2352,7 @@ var _ = Describe("core ops (cluster placement resource snapshots)", func() {
 			}
 		})
 
-		// verifySnapshotsOfconfig maps verifies that the given snapshots, created at the given index, are
+		// verifySnapshotsOfConfigMaps verifies that the given snapshots, created at the given index, are
 		// the primary and secondary placement resource snapshots that cover the given config maps, and returns
 		// the snapshots as persisted.
 		//
