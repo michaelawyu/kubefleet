@@ -71,7 +71,8 @@ func ParseGVKs(input string) ([]schema.GroupVersionKind, error) {
 // * "v1/[KINDS]", e.g., "v1/ConfigMap,Secret";
 //
 // The API version or kind segments can be left empty or set to the wildcard value "*" to match with any value.
-// The API group segment, however, must name a specific group.
+// The API group segment, however, must name a specific group. In addition, when multiple kinds are specified,
+// none of them can be empty, e.g., "apps/v1/Deployment," is invalid.
 //
 // Surrounding whitespace on each segment and kind is ignored.
 func ParseOneGVK(input string) ([]schema.GroupVersionKind, error) {
@@ -89,7 +90,11 @@ func ParseOneGVK(input string) ([]schema.GroupVersionKind, error) {
 			kinds := strings.Split(segments[1], kindSeparator)
 			gvks := make([]schema.GroupVersionKind, 0, len(kinds))
 			for _, kind := range kinds {
-				gvks = append(gvks, schema.GroupVersionKind{Version: coreAPIVersion, Kind: strings.TrimSpace(kind)})
+				kind = strings.TrimSpace(kind)
+				if kind == "" && len(kinds) > 1 {
+					return nil, errors.NewUserError(nil, "kind cannot be empty", "input", input, "kinds", kinds)
+				}
+				gvks = append(gvks, schema.GroupVersionKind{Version: coreAPIVersion, Kind: kind})
 			}
 			return gvks, nil
 		default:
@@ -110,7 +115,11 @@ func ParseOneGVK(input string) ([]schema.GroupVersionKind, error) {
 		kinds := strings.Split(segments[2], kindSeparator)
 		gvks := make([]schema.GroupVersionKind, 0, len(kinds))
 		for _, kind := range kinds {
-			gvks = append(gvks, schema.GroupVersionKind{Group: segments[0], Version: segments[1], Kind: strings.TrimSpace(kind)})
+			kind = strings.TrimSpace(kind)
+			if kind == "" && len(kinds) > 1 {
+				return nil, errors.NewUserError(nil, "kind cannot be empty", "input", input, "kinds", kinds)
+			}
+			gvks = append(gvks, schema.GroupVersionKind{Group: segments[0], Version: segments[1], Kind: kind})
 		}
 		return gvks, nil
 	default:

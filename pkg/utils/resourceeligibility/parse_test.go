@@ -83,6 +83,32 @@ func TestParseOneGVK(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "core API group, multiple kinds with a leading empty kind",
+			input:   "v1/,ConfigMap",
+			wantErr: true,
+		},
+		{
+			name:    "core API group, multiple kinds with a trailing empty kind",
+			input:   "v1/ConfigMap,",
+			wantErr: true,
+		},
+		{
+			name:    "core API group, multiple kinds with an empty kind in between",
+			input:   "v1/ConfigMap,,Secret",
+			wantErr: true,
+		},
+		{
+			// A whitespace-only kind must not be trimmed into an empty kind, which would act as a wildcard.
+			name:    "core API group, multiple kinds with a whitespace-only kind in between",
+			input:   "v1/ConfigMap, ,Secret",
+			wantErr: true,
+		},
+		{
+			name:    "core API group, multiple kinds that are all empty",
+			input:   "v1/,",
+			wantErr: true,
+		},
+		{
 			name:     "wildcard version and kind",
 			input:    "apps/*/*",
 			wantGVKs: []schema.GroupVersionKind{{Group: "apps", Version: wildcard, Kind: wildcard}},
@@ -96,6 +122,42 @@ func TestParseOneGVK(t *testing.T) {
 			name:     "empty kind segment",
 			input:    "apps/v1/",
 			wantGVKs: []schema.GroupVersionKind{{Group: "apps", Version: "v1"}},
+		},
+		{
+			name:     "whitespace-only kind segment",
+			input:    "apps/v1/ ",
+			wantGVKs: []schema.GroupVersionKind{{Group: "apps", Version: "v1"}},
+		},
+		{
+			name:    "multiple kinds with a leading empty kind",
+			input:   "apps/v1/,Deployment",
+			wantErr: true,
+		},
+		{
+			name:    "multiple kinds with a trailing empty kind",
+			input:   "apps/v1/Deployment,",
+			wantErr: true,
+		},
+		{
+			name:    "multiple kinds with an empty kind in between",
+			input:   "apps/v1/Deployment,,StatefulSet",
+			wantErr: true,
+		},
+		{
+			// A whitespace-only kind must not be trimmed into an empty kind, which would act as a wildcard.
+			name:    "multiple kinds with a whitespace-only kind in between",
+			input:   "apps/v1/Deployment, ,StatefulSet",
+			wantErr: true,
+		},
+		{
+			name:    "multiple kinds that are all empty",
+			input:   "apps/v1/,",
+			wantErr: true,
+		},
+		{
+			name:    "empty version segment, multiple kinds with an empty kind",
+			input:   "apps//Deployment,",
+			wantErr: true,
 		},
 		{
 			name:    "wildcard API group",
@@ -233,6 +295,16 @@ func TestParseGVKs(t *testing.T) {
 		{
 			name:    "one invalid entry",
 			input:   "apps/v1;apps/v1/Deployment/extra",
+			wantErr: true,
+		},
+		{
+			name:    "one entry with an empty kind among multiple kinds",
+			input:   "apps/v1/Deployment,;v1/ConfigMap",
+			wantErr: true,
+		},
+		{
+			name:    "one core API group entry with a whitespace-only kind among multiple kinds",
+			input:   "apps/v1/Deployment; v1/ConfigMap, ,Secret",
 			wantErr: true,
 		},
 	}

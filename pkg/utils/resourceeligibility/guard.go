@@ -293,6 +293,11 @@ func (c *checker) IsResourceGVREligibleForPlacement(gvr schema.GroupVersionResou
 			return false, nil
 		}
 	}
+
+	// Consult the wrapped checker to check if the eligibility is further restricted.
+	if c.wrapped != nil {
+		return c.wrapped.IsResourceGVREligibleForPlacement(gvr)
+	}
 	return true, nil
 }
 

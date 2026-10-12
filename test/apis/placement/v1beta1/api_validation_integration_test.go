@@ -30,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
@@ -563,6 +564,112 @@ var _ = Describe("Test placement v1beta1 API validation", func() {
 			var statusErr *k8sErrors.StatusError
 			Expect(errors.As(err, &statusErr)).To(BeTrue(), "The returned error is not a StatusError")
 			Expect(statusErr.Status().Message).Should(ContainSubstring("operator must be Exists when key is empty"))
+		})
+
+		// The rolling update bounds are an int-or-string whose pattern constrains the string form
+		// only; the CEL rules are what keep the integer form non-negative, so these cases exercise
+		// the integer form specifically, with the string entries pinning that the pattern still
+		// owns its side.
+		DescribeTable("the rolling update bounds of a ClusterResourcePlacement",
+			func(mutate func(*placementv1beta1.RollingUpdateConfig), wantMessage string) {
+				crpName := fmt.Sprintf(crpNameTemplate, GinkgoParallelProcess())
+				rollingUpdate := &placementv1beta1.RollingUpdateConfig{}
+				mutate(rollingUpdate)
+				crp := &placementv1beta1.ClusterResourcePlacement{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: crpName,
+					},
+					Spec: placementv1beta1.PlacementSpec{
+						ResourceSelectors: []placementv1beta1.ResourceSelectorTerm{
+							{
+								Group:   "",
+								Version: "v1",
+								Kind:    "Namespace",
+								Name:    nonExistentNSName,
+							},
+						},
+						Strategy: placementv1beta1.RolloutStrategy{
+							Type:          placementv1beta1.RollingUpdateRolloutStrategyType,
+							RollingUpdate: rollingUpdate,
+						},
+					},
+				}
+
+				err := hubClient.Create(ctx, crp)
+				if wantMessage == "" {
+					Expect(err).To(Succeed(), "Expected the CRP to be accepted")
+					return
+				}
+				Expect(err).To(HaveOccurred(), "Expected error when creating CRP with an out-of-range rolling update bound")
+				var statusErr *k8sErrors.StatusError
+				Expect(errors.As(err, &statusErr)).To(BeTrue(), "The returned error is not a StatusError")
+				Expect(statusErr.Status().Message).Should(ContainSubstring(wantMessage))
+			},
+			Entry("maxUnavailable 0 as an integer is accepted", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxUnavailable = ptr.To(intstr.FromInt32(0))
+			}, ""),
+			Entry("maxUnavailable 5 as an integer is accepted", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxUnavailable = ptr.To(intstr.FromInt32(5))
+			}, ""),
+			Entry("maxSurge 0 as an integer is accepted", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxSurge = ptr.To(intstr.FromInt32(0))
+			}, ""),
+			Entry("maxUnavailable 25% is accepted", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxUnavailable = ptr.To(intstr.FromString("25%"))
+			}, ""),
+			Entry("maxUnavailable 100% is accepted", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxUnavailable = ptr.To(intstr.FromString("100%"))
+			}, ""),
+			Entry("maxUnavailable -1 as an integer is rejected", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxUnavailable = ptr.To(intstr.FromInt32(-1))
+			}, "maxUnavailable must be a non-negative integer or a percentage"),
+			Entry("maxSurge -1 as an integer is rejected", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxSurge = ptr.To(intstr.FromInt32(-1))
+			}, "maxSurge must be a non-negative integer or a percentage"),
+			Entry("maxUnavailable -1 as a string is rejected by the pattern", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxUnavailable = ptr.To(intstr.FromString("-1"))
+			}, "spec.strategy.rollingUpdate.maxUnavailable in body should match"),
+			Entry("maxUnavailable 101% is rejected by the pattern", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxUnavailable = ptr.To(intstr.FromString("101%"))
+			}, "spec.strategy.rollingUpdate.maxUnavailable in body should match"),
+			// The digit branch of the pattern is bounded to nine digits, all of which fit an int32
+			// comfortably; an unbounded digit string used to pass validation only to fail in
+			// whatever later consumed it.
+			Entry("maxUnavailable with nine digits is accepted", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxUnavailable = ptr.To(intstr.FromString("999999999"))
+			}, ""),
+			Entry("maxUnavailable with ten digits is rejected by the pattern", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxUnavailable = ptr.To(intstr.FromString("9999999999"))
+			}, "spec.strategy.rollingUpdate.maxUnavailable in body should match"),
+		)
+
+		It("does not re-litigate the rolling update bounds on an unrelated update", func() {
+			crpName := fmt.Sprintf(crpNameTemplate, GinkgoParallelProcess())
+			crp := &placementv1beta1.ClusterResourcePlacement{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: crpName,
+				},
+				Spec: placementv1beta1.PlacementSpec{
+					ResourceSelectors: []placementv1beta1.ResourceSelectorTerm{
+						{
+							Group:   "",
+							Version: "v1",
+							Kind:    "Namespace",
+							Name:    nonExistentNSName,
+						},
+					},
+					Strategy: placementv1beta1.RolloutStrategy{
+						Type: placementv1beta1.RollingUpdateRolloutStrategyType,
+						RollingUpdate: &placementv1beta1.RollingUpdateConfig{
+							MaxUnavailable: ptr.To(intstr.FromString("25%")),
+						},
+					},
+				},
+			}
+			Expect(hubClient.Create(ctx, crp)).To(Succeed())
+
+			crp.Spec.RevisionHistoryLimit = ptr.To(int32(5))
+			Expect(hubClient.Update(ctx, crp)).To(Succeed(), "Expected an update leaving the bounds untouched to pass their validation")
 		})
 	})
 
@@ -1826,6 +1933,79 @@ var _ = Describe("Test placement v1beta1 API validation", func() {
 		})
 	})
 
+	Context("Test ResourcePlacement rolling update bounds", func() {
+		rpNamespace := "default"
+
+		AfterEach(func() {
+			rpName := fmt.Sprintf(rpNameTemplate, GinkgoParallelProcess())
+			Eventually(func() error {
+				rp := &placementv1beta1.ResourcePlacement{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      rpName,
+						Namespace: rpNamespace,
+					},
+				}
+				if err := hubClient.Delete(ctx, rp); err != nil && !k8sErrors.IsNotFound(err) {
+					return fmt.Errorf("failed to delete RP: %w", err)
+				}
+				if err := hubClient.Get(ctx, client.ObjectKey{Name: rpName, Namespace: rpNamespace}, &placementv1beta1.ResourcePlacement{}); !k8sErrors.IsNotFound(err) {
+					return fmt.Errorf("RP still exists after deletion attempt (error: %w)", err)
+				}
+				return nil
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed())
+		})
+
+		// ResourcePlacement shares RollingUpdateConfig with ClusterResourcePlacement, but unlike
+		// the cluster-scoped placement it has no validating webhook behind it, so the CRD schema
+		// is the only line of defense here.
+		DescribeTable("the rolling update bounds of a ResourcePlacement",
+			func(mutate func(*placementv1beta1.RollingUpdateConfig), wantMessage string) {
+				rpName := fmt.Sprintf(rpNameTemplate, GinkgoParallelProcess())
+				rollingUpdate := &placementv1beta1.RollingUpdateConfig{}
+				mutate(rollingUpdate)
+				rp := &placementv1beta1.ResourcePlacement{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      rpName,
+						Namespace: rpNamespace,
+					},
+					Spec: placementv1beta1.PlacementSpec{
+						ResourceSelectors: []placementv1beta1.ResourceSelectorTerm{
+							{
+								Group:   "",
+								Version: "v1",
+								Kind:    "ConfigMap",
+								Name:    "app",
+							},
+						},
+						Strategy: placementv1beta1.RolloutStrategy{
+							Type:          placementv1beta1.RollingUpdateRolloutStrategyType,
+							RollingUpdate: rollingUpdate,
+						},
+					},
+				}
+
+				err := hubClient.Create(ctx, rp)
+				if wantMessage == "" {
+					Expect(err).To(Succeed(), "Expected the RP to be accepted")
+					return
+				}
+				Expect(err).To(HaveOccurred(), "Expected error when creating RP with an out-of-range rolling update bound")
+				var statusErr *k8sErrors.StatusError
+				Expect(errors.As(err, &statusErr)).To(BeTrue(), "The returned error is not a StatusError")
+				Expect(statusErr.Status().Message).Should(ContainSubstring(wantMessage))
+			},
+			Entry("maxUnavailable 0 as an integer is accepted", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxUnavailable = ptr.To(intstr.FromInt32(0))
+			}, ""),
+			Entry("maxUnavailable -1 as an integer is rejected", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxUnavailable = ptr.To(intstr.FromInt32(-1))
+			}, "maxUnavailable must be a non-negative integer or a percentage"),
+			Entry("maxSurge -1 as an integer is rejected", func(c *placementv1beta1.RollingUpdateConfig) {
+				c.MaxSurge = ptr.To(intstr.FromInt32(-1))
+			}, "maxSurge must be a non-negative integer or a percentage"),
+		)
+	})
+
 	Context("Test ResourcePlacement API validation - invalid update cases", func() {
 		var rp placementv1beta1.ResourcePlacement
 		rpName := fmt.Sprintf(rpNameTemplate, GinkgoParallelProcess())
@@ -2721,6 +2901,31 @@ var _ = Describe("Test placement v1beta1 API validation", func() {
 			Expect(statusErr.ErrStatus.Message).Should(MatchRegexp("Too many: 3: must have at most 2 items"))
 		})
 
+		It("Should deny creation of ClusterStagedUpdateStrategy with BeforeStageTask of type Approval with waitTime specified", func() {
+			strategy := placementv1beta1.ClusterStagedUpdateStrategy{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: fmt.Sprintf(updateRunStrategyNameTemplate, GinkgoParallelProcess()),
+				},
+				Spec: placementv1beta1.UpdateStrategySpec{
+					Stages: []placementv1beta1.StageConfig{
+						{
+							Name: fmt.Sprintf(updateRunStageNameTemplate, GinkgoParallelProcess(), 1),
+							BeforeStageTasks: []placementv1beta1.StageTask{
+								{
+									Type:     placementv1beta1.StageTaskTypeApproval,
+									WaitTime: &metav1.Duration{Duration: time.Minute * 10},
+								},
+							},
+						},
+					},
+				},
+			}
+			err := hubClient.Create(ctx, &strategy)
+			var statusErr *k8sErrors.StatusError
+			Expect(errors.As(err, &statusErr)).To(BeTrue(), fmt.Sprintf("Create updateRunStrategy call produced error %s. Error type wanted is %s.", reflect.TypeOf(err), reflect.TypeOf(&k8sErrors.StatusError{})))
+			Expect(statusErr.ErrStatus.Message).Should(MatchRegexp("BeforeStageTaskType is Approval, waitTime is not allowed"))
+		})
+
 		It("Should deny creation of ClusterStagedUpdateStrategy with AfterStageTask of type Approval with waitTime specified", func() {
 			strategy := placementv1beta1.ClusterStagedUpdateStrategy{
 				ObjectMeta: metav1.ObjectMeta{
@@ -3198,6 +3403,74 @@ var _ = Describe("Test placement v1beta1 API validation", func() {
 			Expect(statusErr.ErrStatus.Message).Should(MatchRegexp("The spec field is immutable"))
 			Expect(hubClient.Delete(ctx, &appReq)).Should(Succeed())
 		})
+	})
+
+	// The delete stage tasks have the same rules in both scopes, as the cluster-scoped and the namespaced
+	// strategies share their spec; each CRD is generated separately, so both are checked.
+	Context("Test the delete stage of a StagedUpdateStrategy and a ClusterStagedUpdateStrategy", func() {
+		approval := placementv1beta1.StageTask{Type: placementv1beta1.StageTaskTypeApproval}
+
+		deleteStageEntries := func(namespaced bool) []TableEntry {
+			scope := "ClusterStagedUpdateStrategy"
+			if namespaced {
+				scope = "StagedUpdateStrategy"
+			}
+			return []TableEntry{
+				Entry(scope+": a delete stage without tasks is accepted",
+					namespaced, &placementv1beta1.DeleteStageConfig{}, ""),
+				Entry(scope+": a single Approval task is accepted",
+					namespaced, &placementv1beta1.DeleteStageConfig{BeforeStageTasks: []placementv1beta1.StageTask{approval}}, ""),
+				Entry(scope+": more than 1 task is rejected",
+					namespaced, &placementv1beta1.DeleteStageConfig{BeforeStageTasks: []placementv1beta1.StageTask{approval, approval}},
+					"Too many: 2: must have at most 1 item"),
+				Entry(scope+": a TimedWait task is rejected",
+					namespaced, &placementv1beta1.DeleteStageConfig{BeforeStageTasks: []placementv1beta1.StageTask{{Type: placementv1beta1.StageTaskTypeTimedWait, WaitTime: &metav1.Duration{Duration: time.Minute}}}},
+					"BeforeStageTaskType cannot be TimedWait"),
+				Entry(scope+": an Approval task with a waitTime is rejected",
+					namespaced, &placementv1beta1.DeleteStageConfig{BeforeStageTasks: []placementv1beta1.StageTask{{Type: placementv1beta1.StageTaskTypeApproval, WaitTime: &metav1.Duration{Duration: 10 * time.Minute}}}},
+					"BeforeStageTaskType is Approval, waitTime is not allowed"),
+			}
+		}
+
+		DescribeTable("the before-stage tasks of the delete stage",
+			func(namespaced bool, deleteStage *placementv1beta1.DeleteStageConfig, wantMessage string) {
+				spec := placementv1beta1.UpdateStrategySpec{
+					Stages: []placementv1beta1.StageConfig{
+						{
+							Name: fmt.Sprintf(updateRunStageNameTemplate, GinkgoParallelProcess(), 1),
+						},
+					},
+					DeleteStage: deleteStage,
+				}
+				var strategy client.Object = &placementv1beta1.ClusterStagedUpdateStrategy{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: fmt.Sprintf(updateRunStrategyNameTemplate, GinkgoParallelProcess()),
+					},
+					Spec: spec,
+				}
+				if namespaced {
+					strategy = &placementv1beta1.StagedUpdateStrategy{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      fmt.Sprintf(updateRunStrategyNameTemplate, GinkgoParallelProcess()),
+							Namespace: testNamespace,
+						},
+						Spec: spec,
+					}
+				}
+
+				err := hubClient.Create(ctx, strategy)
+				if wantMessage == "" {
+					Expect(err).To(Succeed(), "Expected the strategy to be accepted")
+					Expect(hubClient.Delete(ctx, strategy)).To(Succeed())
+					return
+				}
+				var statusErr *k8sErrors.StatusError
+				Expect(errors.As(err, &statusErr)).To(BeTrue(), fmt.Sprintf("Create updateRunStrategy call produced error %s. Error type wanted is %s.", reflect.TypeOf(err), reflect.TypeOf(&k8sErrors.StatusError{})))
+				Expect(statusErr.ErrStatus.Message).Should(ContainSubstring(wantMessage))
+			},
+			deleteStageEntries(false),
+			deleteStageEntries(true),
+		)
 	})
 
 	Context("Test ClusterStagedUpdateRun State API validation - valid Initialize state transitions", func() {
