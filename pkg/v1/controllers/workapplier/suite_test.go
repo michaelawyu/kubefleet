@@ -28,9 +28,11 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/textlogger"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -189,8 +191,8 @@ var _ = BeforeSuite(func() {
 		memberClient1.RESTMapper(),
 		parallelizer.NewParallelizer(workerCount),
 		maxConcurrentReconciles,
-		cleanupRequeueAfter,
-		periodicRequeueAfter,
+		workqueue.NewTypedItemExponentialFailureRateLimiter[types.NamespacedName](DefaultCleanupBaseDelay, DefaultCleanupMaxDelay),
+		defaultRequeueRateLimiter,
 		cleanupWaitTime,
 	)
 	Expect(workApplier1.SetupWithManager(hubMgr1)).To(Succeed())
