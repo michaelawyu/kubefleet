@@ -43,7 +43,7 @@ import (
 )
 
 const (
-	controllerName   = "work-applier"
+	controllerName   = "work-applier-v1"
 	fieldManagerName = "kubefleet-member-agent"
 
 	workApplierCleanupFinalizer = "placement.kubefleet.dev/work-cleanup"
@@ -384,9 +384,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		Named(controllerName).
 		WithOptions(ctrloption.Options{
 			MaxConcurrentReconciles: r.concurrentReconciles,
 		}).
-		For(&placementv1alpha1.Work{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&placementv1alpha1.Work{}, &workEventHandler, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }

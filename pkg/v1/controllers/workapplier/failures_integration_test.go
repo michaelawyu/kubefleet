@@ -1728,15 +1728,15 @@ var _ = Describe("partial failures", func() {
 			// Create the secondary work object first, so that the work applier can find all the linked work
 			// objects as soon as it starts processing the primary work object.
 			//
-			// Note that normally KubeFleet sets the primary work object as the owner of all secondary work objects;
-			// this is skipped here as it has no effect on the work applier, and there is no GC controller in the
-			// test environment.
+			// As KubeFleet does, the primary work object is set as the controller owner of all secondary work objects,
+			// so that events on secondary work objects trigger reconciliations of the primary work object.
 			secondaryWork := buildWorkObject(
 				secondaryWorkName, memberReservedNSName1,
 				placementPolicyName, placementBindingName, primarySnapshotName,
 				nil,
 				duplicatedConfigMapJSON,
 			)
+			setPrimaryWorkAsOwner(secondaryWork, primaryWorkName)
 			Expect(hubClient.Create(ctx, secondaryWork)).To(Succeed(), "Failed to create the secondary work object")
 
 			// Create the primary work object.
@@ -2149,15 +2149,15 @@ var _ = Describe("partial failures", func() {
 			// object B first, then secondary work object A, and the primary work object at last, so that the work
 			// applier can find all the linked work objects as soon as it starts processing the primary work object.
 			//
-			// Note that normally KubeFleet sets the primary work object as the owner of all secondary work objects;
-			// this is skipped here as it has no effect on the work applier, and there is no GC controller in the
-			// test environment.
+			// As KubeFleet does, the primary work object is set as the controller owner of all secondary work objects,
+			// so that events on secondary work objects trigger reconciliations of the primary work object.
 			secondaryWorkB := buildWorkObject(
 				secondaryWorkBName, memberReservedNSName1,
 				placementPolicyName, placementBindingName, primarySnapshotName,
 				nil,
 				configMapBJSON,
 			)
+			setPrimaryWorkAsOwner(secondaryWorkB, primaryWorkName)
 			Expect(hubClient.Create(ctx, secondaryWorkB)).To(Succeed(), "Failed to create secondary work object B")
 
 			secondaryWorkA := buildWorkObject(
@@ -2166,6 +2166,7 @@ var _ = Describe("partial failures", func() {
 				nil,
 				configMapAJSON,
 			)
+			setPrimaryWorkAsOwner(secondaryWorkA, primaryWorkName)
 			Expect(hubClient.Create(ctx, secondaryWorkA)).To(Succeed(), "Failed to create secondary work object A")
 
 			primaryWork := buildWorkObject(
@@ -2469,11 +2470,9 @@ var _ = Describe("partial failures", func() {
 		})
 
 		It("can update secondary work object A to drop the duplicate", func() {
+			// The spec change on secondary work object A triggers a reconciliation of the primary work object via
+			// the owner reference.
 			updateLinkedWorkObject(secondaryWorkAName, memberReservedNSName1, primarySnapshotName, nil, configMapAOnlyJSON)
-
-			// A spec change on a secondary work object does not trigger a reconciliation of the primary work object;
-			// nudge the primary work object instead.
-			nudgeWork(primaryWorkName, memberReservedNSName1)
 		})
 
 		It("should hand the config map object over to secondary work object B without re-creating it", func() {

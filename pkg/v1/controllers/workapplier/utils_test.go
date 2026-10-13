@@ -54,6 +54,10 @@ const (
 	singleWorkLinkedWorkCountAnno = "1"
 	// A test-only label that nudgeWork sets on manifests to bump the generations of Work objects.
 	nudgeLabelKey = "nudge"
+	// The UID used in the owner references that link secondary work objects to their primary work objects. The API
+	// server only requires the UID to be non-empty, and there is no GC controller in the test environment to check
+	// it against the actual primary work object.
+	dummyPrimaryWorkUID types.UID = "dummy-primary-work-uid"
 )
 
 const (
@@ -194,6 +198,22 @@ func createWorkObject(workName, memberClusterReservedNSName string, syncStrategy
 	)
 	work.Annotations[placementv1alpha1.LinkedWorkCountAnnotationKey] = singleWorkLinkedWorkCountAnno
 	Expect(hubClient.Create(ctx, work)).To(Succeed(), "Failed to create the Work object")
+}
+
+// setPrimaryWorkAsOwner sets the primary work object as the controller owner of a secondary work object, which
+// mimics how KubeFleet links secondary work objects to their primary work objects; the work applier relies on
+// this owner reference to map events on secondary work objects to their primary work objects.
+func setPrimaryWorkAsOwner(secondaryWork *placementv1alpha1.Work, primaryWorkName string) {
+	secondaryWork.OwnerReferences = []metav1.OwnerReference{
+		{
+			APIVersion:         placementv1alpha1.GroupVersion.String(),
+			Kind:               placementv1alpha1.WorkKind,
+			Name:               primaryWorkName,
+			UID:                dummyPrimaryWorkUID,
+			Controller:         ptr.To(true),
+			BlockOwnerDeletion: ptr.To(true),
+		},
+	}
 }
 
 func marshalK8sObjJSON(obj runtime.Object) []byte {

@@ -622,14 +622,15 @@ var _ = Describe("multiple work objects", func() {
 			// Create the secondary work object first, so that the work applier can find all the linked work
 			// objects as soon as it starts processing the primary work object.
 			//
-			// Note that normally KubeFleet sets the primary work object as the owner of all secondary work objects;
-			// this is skipped here as there is no GC controller in the test environment.
+			// As KubeFleet does, the primary work object is set as the controller owner of all secondary work objects,
+			// so that events on secondary work objects trigger reconciliations of the primary work object.
 			secondaryWork := buildWorkObject(
 				secondaryWorkName, memberReservedNSName1,
 				placementPolicyName, placementBindingName, primarySnapshotName,
 				nil,
 				regularConfigMapJSON,
 			)
+			setPrimaryWorkAsOwner(secondaryWork, primaryWorkName)
 			Expect(hubClient.Create(ctx, secondaryWork)).To(Succeed(), "Failed to create the secondary work object")
 
 			// Create the primary work object.
@@ -1034,15 +1035,15 @@ var _ = Describe("multiple work objects", func() {
 			// Create the secondary work object first, so that the work applier can find all the linked work
 			// objects as soon as it starts processing the primary work object.
 			//
-			// Note that normally KubeFleet sets the primary work object as the owner of all secondary work objects;
-			// this is skipped here as it has no effect on the work applier, and there is no GC controller in the
-			// test environment.
+			// As KubeFleet does, the primary work object is set as the controller owner of all secondary work objects,
+			// so that events on secondary work objects trigger reconciliations of the primary work object.
 			secondaryWork := buildWorkObject(
 				secondaryWorkName, memberReservedNSName1,
 				placementPolicyName, placementBindingName, primarySnapshotName,
 				nil,
 				regularConfigMapJSON,
 			)
+			setPrimaryWorkAsOwner(secondaryWork, primaryWorkName)
 			Expect(hubClient.Create(ctx, secondaryWork)).To(Succeed(), "Failed to create the secondary work object")
 
 			// Create the primary work object.
@@ -1294,15 +1295,15 @@ var _ = Describe("multiple work objects", func() {
 			// Create the secondary work object first, so that the work applier can find all the linked work
 			// objects as soon as it starts processing the primary work object.
 			//
-			// Note that normally KubeFleet sets the primary work object as the owner of all secondary work objects;
-			// this is skipped here as it has no effect on the work applier, and there is no GC controller in the
-			// test environment.
+			// As KubeFleet does, the primary work object is set as the controller owner of all secondary work objects,
+			// so that events on secondary work objects trigger reconciliations of the primary work object.
 			secondaryWork := buildWorkObject(
 				secondaryWorkName, memberReservedNSName1,
 				placementPolicyName, placementBindingName, primarySnapshotName,
 				nil,
 				regularConfigMapJSON,
 			)
+			setPrimaryWorkAsOwner(secondaryWork, primaryWorkName)
 			Expect(hubClient.Create(ctx, secondaryWork)).To(Succeed(), "Failed to create the secondary work object")
 
 			// Create the primary work object.
@@ -1515,10 +1516,10 @@ var _ = Describe("multiple work objects", func() {
 					},
 				},
 			}
-			// While the linked work objects were in an inconsistent state, the work applier kept requeueing the
-			// primary work object with exponential backoff; allow more time for the next attempt to happen.
+			// The update on the secondary work object triggers a reconciliation of the primary work object via the
+			// owner reference.
 			primaryWorkStatusUpdatedActual := workStatusUpdated(memberReservedNSName1, primaryWorkName, append([]metav1.Condition{}, workConds...), primaryWorkManifestStatuses)
-			Eventually(primaryWorkStatusUpdatedActual, 2*eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update the primary work object status")
+			Eventually(primaryWorkStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update the primary work object status")
 
 			// Note that the ordinals of the manifests are relative to their own work object.
 			secondaryWorkManifestStatuses := []placementv1alpha1.PerManifestStatus{
@@ -1707,15 +1708,15 @@ var _ = Describe("multiple work objects", func() {
 			// Create the secondary work object first, so that the work applier can find all the linked work
 			// objects as soon as it starts processing the primary work object.
 			//
-			// Note that normally KubeFleet sets the primary work object as the owner of all secondary work objects;
-			// this is skipped here as it has no effect on the work applier, and there is no GC controller in the
-			// test environment.
+			// As KubeFleet does, the primary work object is set as the controller owner of all secondary work objects,
+			// so that events on secondary work objects trigger reconciliations of the primary work object.
 			secondaryWork := buildWorkObject(
 				secondaryWorkName, memberReservedNSName1,
 				placementPolicyName, placementBindingName, primarySnapshotName,
 				nil,
 				secondaryConfigMapJSON,
 			)
+			setPrimaryWorkAsOwner(secondaryWork, primaryWorkName)
 			Expect(hubClient.Create(ctx, secondaryWork)).To(Succeed(), "Failed to create the secondary work object")
 
 			// Create the primary work object.
@@ -2080,15 +2081,15 @@ var _ = Describe("multiple work objects", func() {
 				nil,
 				thirdConfigMapJSON,
 			)
+			setPrimaryWorkAsOwner(thirdWork, primaryWorkName)
 			Expect(hubClient.Create(ctx, thirdWork)).To(Succeed(), "Failed to create the third work object")
 		})
 
 		It("should apply the manifests", func() {
-			// While the linked work objects were in an inconsistent state (across two Consistently checks), the work
-			// applier kept requeueing the primary work object with exponential backoff; allow more time for the next
-			// attempt to happen.
+			// The creation of the third work object triggers a reconciliation of the primary work object via the
+			// owner reference.
 			primaryConfigMapObjectAppliedActual := configMapObjectAppliedActual(memberClient1, updatedPrimaryConfigMap, appliedWorkOwnerRef)
-			Eventually(primaryConfigMapObjectAppliedActual, 3*eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the config map object from the primary work object")
+			Eventually(primaryConfigMapObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the config map object from the primary work object")
 
 			secondaryConfigMapObjectAppliedActual := configMapObjectAppliedActual(memberClient1, updatedSecondaryConfigMap, appliedWorkOwnerRef)
 			Eventually(secondaryConfigMapObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the config map object from the secondary work object")
@@ -2375,15 +2376,15 @@ var _ = Describe("multiple work objects", func() {
 			// Create the secondary and third work objects first, so that the work applier can find all the linked
 			// work objects as soon as it starts processing the primary work object.
 			//
-			// Note that normally KubeFleet sets the primary work object as the owner of all secondary work objects;
-			// this is skipped here as it has no effect on the work applier, and there is no GC controller in the
-			// test environment.
+			// As KubeFleet does, the primary work object is set as the controller owner of all secondary work objects,
+			// so that events on secondary work objects trigger reconciliations of the primary work object.
 			secondaryWork := buildWorkObject(
 				secondaryWorkName, memberReservedNSName1,
 				placementPolicyName, placementBindingName, primarySnapshotName,
 				nil,
 				secondaryConfigMapJSON,
 			)
+			setPrimaryWorkAsOwner(secondaryWork, primaryWorkName)
 			Expect(hubClient.Create(ctx, secondaryWork)).To(Succeed(), "Failed to create the secondary work object")
 
 			thirdWork := buildWorkObject(
@@ -2392,6 +2393,7 @@ var _ = Describe("multiple work objects", func() {
 				nil,
 				thirdConfigMapJSON,
 			)
+			setPrimaryWorkAsOwner(thirdWork, primaryWorkName)
 			Expect(hubClient.Create(ctx, thirdWork)).To(Succeed(), "Failed to create the third work object")
 
 			// Create the primary work object.
@@ -2881,11 +2883,10 @@ var _ = Describe("multiple work objects", func() {
 		})
 
 		It("should apply the manifests", func() {
-			// While the linked work objects were in an inconsistent state (across two Consistently checks), the work
-			// applier kept requeueing the primary work object with exponential backoff; allow more time for the next
-			// attempt to happen.
+			// The deletion of the third work object triggers a reconciliation of the primary work object via the
+			// owner reference.
 			primaryConfigMapObjectAppliedActual := configMapObjectAppliedActual(memberClient1, updatedPrimaryConfigMap, appliedWorkOwnerRef)
-			Eventually(primaryConfigMapObjectAppliedActual, 3*eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the config map object from the primary work object")
+			Eventually(primaryConfigMapObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the config map object from the primary work object")
 
 			secondaryConfigMapObjectAppliedActual := configMapObjectAppliedActual(memberClient1, updatedSecondaryConfigMap, appliedWorkOwnerRef)
 			Eventually(secondaryConfigMapObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the config map object from the secondary work object")
