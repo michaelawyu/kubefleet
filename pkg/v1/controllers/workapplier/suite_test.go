@@ -74,10 +74,6 @@ const (
 	// The count of workers for the work applier controller.
 	workerCount = 4
 
-	// The requeue delay when the work applier waits for the cleanup (appliedWork deletion) to complete.
-	cleanupRequeueAfter = time.Second * 2
-	// The requeue delay for the periodic re-processing of work objects.
-	periodicRequeueAfter = time.Second * 3
 	// The max. time the work applier waits for an appliedWork object to be deleted before it unblocks
 	// the deletion manually.
 	//

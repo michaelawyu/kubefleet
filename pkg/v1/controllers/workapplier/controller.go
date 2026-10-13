@@ -199,8 +199,7 @@ type Reconciler struct {
 	cleanupRequeueRateLimiter  workqueue.TypedRateLimiter[types.NamespacedName]
 	periodicRequeueRateLimiter *MultiStageRequeueWithExponentialBackoffRateLimiter
 
-	periodicRequeueAfter time.Duration
-	cleanupWaitTime      time.Duration
+	cleanupWaitTime time.Duration
 
 	ready atomic.Bool
 }
@@ -215,6 +214,13 @@ func New(workNSName string,
 	periodicRequeueRateLimiter *MultiStageRequeueWithExponentialBackoffRateLimiter,
 	cleanupWaitTime time.Duration,
 ) *Reconciler {
+	if cleanupRequeueRateLimiter == nil {
+		cleanupRequeueRateLimiter = workqueue.NewTypedItemExponentialFailureRateLimiter[types.NamespacedName](DefaultCleanupBaseDelay, DefaultCleanupMaxDelay)
+	}
+	if periodicRequeueRateLimiter == nil {
+		periodicRequeueRateLimiter = defaultRequeueRateLimiter
+	}
+
 	return &Reconciler{
 		workNSName:                 workNSName,
 		hubClient:                  hubClient,

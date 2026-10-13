@@ -43,11 +43,11 @@ const (
 	exponentialBaseLowerBound = 1.05
 	exponentialBaseUpperBound = 100.0
 
-	// With the current set of extremums (attemptsWithFixDelayUpperBound = 40,
-	// initialSlowBackoffDelaySecondsLowerBound = 2, maxSlowBackoffDelaySecondsUpperBound = 3600,
-	// exponentialBaseForSlowBackoffLowerBound = 1.05),
+	// With the current set of extremums (attemptsWithFixedDelayUpperBound = 40,
+	// initialSlowBackoffDelaySecondsLowerBound = 2, maxFastBackoffDelaySecondsUpperBound = 3600,
+	// exponentialBaseLowerBound = 1.05),
 	// the number of requeues needed for the requeue delay to reach to the maximum value
-	// would be 193. The rate limiter has no need to track number of requeues beyond
+	// would be 195. The rate limiter has no need to track number of requeues beyond
 	// this value.
 	maxNumOfRequeuesToTrack = 200
 )
@@ -162,8 +162,8 @@ func NewMultiStageRequeueWithExponentialBackoffRateLimiter(
 	skipToFastBackoffForAvailableOrDiffReportedWorkObjs bool,
 ) *MultiStageRequeueWithExponentialBackoffRateLimiter {
 	// Validate the input parameters and reset values as necessary.
-	if !(attemptsWithFixedDelay >= attemptsWithFixedDelayUpperBound &&
-		attemptsWithFixedDelay <= attemptsWithFixedDelayLowerBound) {
+	if !(attemptsWithFixedDelay >= attemptsWithFixedDelayLowerBound &&
+		attemptsWithFixedDelay <= attemptsWithFixedDelayUpperBound) {
 		// Reset the value.
 		attemptsWithFixedDelay = attemptsWithFixedDelayLowerBound
 		klog.Errorf("attemptsWithFixedDelay is not set to a valid value; set it to the minimum allowed value (%d) instead", attemptsWithFixedDelayLowerBound)
@@ -177,27 +177,27 @@ func NewMultiStageRequeueWithExponentialBackoffRateLimiter(
 	if !(exponentialBaseForSlowBackoff >= exponentialBaseLowerBound &&
 		exponentialBaseForSlowBackoff <= exponentialBaseForFastBackoff &&
 		exponentialBaseForFastBackoff <= exponentialBaseUpperBound) {
-		// Reset the values.
-		exponentialBaseForSlowBackoff = defaultBaseForExponentialBackoff
-		exponentialBaseForFastBackoff = defaultBaseForExponentialBackoff
 		klog.Errorf(
 			"exponentialBaseForSlowBackoff (%f) and exponentialBaseForFastBackoff (%f) are not set to valid values; using the default values instead (%f and %f)",
 			exponentialBaseForSlowBackoff, exponentialBaseForFastBackoff,
-			exponentialBaseLowerBound, exponentialBaseUpperBound)
+			defaultBaseForExponentialBackoff, defaultBaseForExponentialBackoff)
+		// Reset the values.
+		exponentialBaseForSlowBackoff = defaultBaseForExponentialBackoff
+		exponentialBaseForFastBackoff = defaultBaseForExponentialBackoff
 	}
 
 	if !(initialSlowBackoffDelaySeconds >= initialSlowBackoffDelaySecondsLowerBound &&
 		initialSlowBackoffDelaySeconds <= maxSlowBackoffDelaySeconds &&
 		maxSlowBackoffDelaySeconds <= maxFastBackoffDelaySeconds &&
 		maxFastBackoffDelaySeconds <= maxFastBackoffDelaySecondsUpperBound) {
-		// Reset the values.
-		initialSlowBackoffDelaySeconds = defaultInitialSlowBackoffDelaySeconds
-		maxSlowBackoffDelaySeconds = defaultMaxSlowBackoffDelaySeconds
-		maxFastBackoffDelaySeconds = defaultMaxFastBackoffDelaySeconds
 		klog.Errorf(
 			"initialSlowBackoffDelaySeconds (%d), maxSlowBackoffDelaySeconds (%d), and maxFastBackoffDelaySeconds (%d) are not set to valid values; using the default values instead (%d seconds, %d seconds, and %d seconds)",
 			initialSlowBackoffDelaySeconds, maxSlowBackoffDelaySeconds, maxFastBackoffDelaySeconds,
 			defaultInitialSlowBackoffDelaySeconds, defaultMaxSlowBackoffDelaySeconds, defaultMaxFastBackoffDelaySeconds)
+		// Reset the values.
+		initialSlowBackoffDelaySeconds = defaultInitialSlowBackoffDelaySeconds
+		maxSlowBackoffDelaySeconds = defaultMaxSlowBackoffDelaySeconds
+		maxFastBackoffDelaySeconds = defaultMaxFastBackoffDelaySeconds
 	}
 
 	return &MultiStageRequeueWithExponentialBackoffRateLimiter{

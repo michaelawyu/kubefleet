@@ -169,6 +169,10 @@ func (r *Reconciler) cleanupWhenBindingDeleted(ctx context.Context,
 		klog.V(2).InfoS("Removed the cleanup finalizer from the work", "work", klog.KObj(work))
 	}
 
+	// Set the requeue rate limiters to forget about the work.
+	r.cleanupRequeueRateLimiter.Forget(primaryWorkNamespacedName)
+	r.periodicRequeueRateLimiter.Forget(primaryWork)
+
 	// Remove the cleanup finalizer from the primary work object.
 	if controllerutil.ContainsFinalizer(primaryWork, workApplierCleanupFinalizer) {
 		controllerutil.RemoveFinalizer(primaryWork, workApplierCleanupFinalizer)
