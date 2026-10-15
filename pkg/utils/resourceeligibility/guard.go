@@ -93,9 +93,20 @@ type checker struct {
 	restMapper meta.RESTMapper
 }
 
-// Baseline returns a Checker that features default namespace and GVK deny lists.
-func Baseline(restMapper meta.RESTMapper, skipObjectCheck bool) Checker {
-	c := New(restMapper, nil, false, false, skipObjectCheck)
+// Baseline returns a Checker that features default namespace and GVK deny lists. The checker also has object checks
+// enabled.
+func Baseline(restMapper meta.RESTMapper) Checker {
+	return baseline(restMapper, false)
+}
+
+func baseline(restMapper meta.RESTMapper, skipObjectCheck bool) Checker {
+	c := New(CheckerOptions{
+		RestMapper:      restMapper,
+		Wrapped:         nil,
+		SkipNSCheck:     false,
+		SkipGVKRCheck:   false,
+		SkipObjectCheck: skipObjectCheck,
+	})
 
 	c.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"default"}, []string{utils.KubeNSNamePrefix, utils.FleetNSNamePrefix})
 	if err := c.SetGVKCheckList(GVKEligibilityModeDenyList, GVKsDeniedByDefault); err != nil {
@@ -118,7 +129,14 @@ func AllowAll(restMapper meta.RESTMapper) Checker {
 
 // DefaultForV0APIs returns a Checker for placement with v0 APIs.
 func DefaultForV0APIs(restMapper meta.RESTMapper) Checker {
-	c := New(restMapper, Baseline(restMapper, true), true, false, true)
+	checkerOpts := CheckerOptions{
+		RestMapper:      restMapper,
+		Wrapped:         baseline(restMapper, true),
+		SkipNSCheck:     true,
+		SkipGVKRCheck:   false,
+		SkipObjectCheck: true,
+	}
+	c := New(checkerOpts)
 
 	// TO-DO (chenyu1): deny envelope APIs in the kubefleet.dev API group when they are added.
 	return c
@@ -126,7 +144,14 @@ func DefaultForV0APIs(restMapper meta.RESTMapper) Checker {
 
 // DefaultForV1APIs returns a Checker for placement with v1 APIs.
 func DefaultForV1APIs(restMapper meta.RESTMapper) Checker {
-	c := New(restMapper, Baseline(restMapper, false), true, false, true)
+	checkerOpts := CheckerOptions{
+		RestMapper:      restMapper,
+		Wrapped:         Baseline(restMapper),
+		SkipNSCheck:     true,
+		SkipGVKRCheck:   false,
+		SkipObjectCheck: true,
+	}
+	c := New(checkerOpts)
 
 	if err := c.SetGVKCheckList(GVKEligibilityModeDenyList, GVKsDeniedForV1APIs); err != nil {
 		// The deny list is defined in this package, so a rejection here is a programming error.
@@ -135,16 +160,27 @@ func DefaultForV1APIs(restMapper meta.RESTMapper) Checker {
 	return c
 }
 
+// CheckerOptions is the options for creating a new Checker.
+type CheckerOptions struct {
+	RestMapper meta.RESTMapper
+
+	SkipNSCheck     bool
+	SkipGVKRCheck   bool
+	SkipObjectCheck bool
+
+	Wrapped Checker
+}
+
 // New creates a new Checker.
-func New(restMapper meta.RESTMapper, wrapped Checker, skipNSCheck, skipGVKRCheck, skipObjectCheck bool) Checker {
+func New(opts CheckerOptions) Checker {
 	return &checker{
 		nsEligibilityMode:  NamespaceEligibilityModeDenyList,
 		gvkEligibilityMode: GVKEligibilityModeDenyList,
-		wrapped:            wrapped,
-		restMapper:         restMapper,
-		skipNSCheck:        skipNSCheck,
-		skipGVKRCheck:      skipGVKRCheck,
-		skipObjectCheck:    skipObjectCheck,
+		wrapped:            opts.Wrapped,
+		restMapper:         opts.RestMapper,
+		skipNSCheck:        opts.SkipNSCheck,
+		skipGVKRCheck:      opts.SkipGVKRCheck,
+		skipObjectCheck:    opts.SkipObjectCheck,
 	}
 }
 
@@ -224,6 +260,10 @@ func (c *checker) DeepCopy() Checker {
 
 // AllowsNamespace checks if a given namespace is eligible for placement.
 func (c *checker) AllowsNamespace(namespace string) bool {
+	if namespace == "" {
+		// Allow cluster-scoped resources (which have an empty namespace) for placement.
+		return true
+	}
 	if c.skipNSCheck {
 		// This checker has been set to skip the namespace check; delegate the decision to the wrapped checker if available.
 		if c.wrapped != nil {
@@ -233,10 +273,6 @@ func (c *checker) AllowsNamespace(namespace string) bool {
 		//
 		// If the checker uses a namespace deny list, allow all namespaces; otherwise, deny all namespaces.
 		return c.nsEligibilityMode != NamespaceEligibilityModeAllowList
-	}
-	if namespace == "" {
-		// Allow cluster-scoped resources (which have an empty namespace) for placement.
-		return true
 	}
 
 	hasAnyPrefix := func(prefixes sets.Set[string]) bool {

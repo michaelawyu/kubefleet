@@ -112,6 +112,7 @@ var _ = Describe("core ops (placement resource snapshots)", func() {
 				},
 			}
 			Expect(hubClient.Create(ctx, deployment)).To(Succeed(), "Failed to create the Deployment")
+			waitForDeploymentsInCache(deployment)
 
 			// Create a placement policy that selects the two resources.
 			placementPolicy = &placementv1alpha1.PlacementPolicy{
@@ -314,6 +315,7 @@ var _ = Describe("core ops (placement resource snapshots)", func() {
 			deployment.Spec.Replicas = ptr.To(int32(3))
 			deployment.Spec.Template.Spec.Containers[0].Image = "nginx:1.28"
 			Expect(hubClient.Update(ctx, deployment)).To(Succeed(), "Failed to update the Deployment")
+			waitForDeploymentsInCache(deployment)
 		})
 
 		It("can create a new snapshot when the existing one is stale", func() {
@@ -326,7 +328,7 @@ var _ = Describe("core ops (placement resource snapshots)", func() {
 			Expect(gotSnapshots[0].GetName()).To(Equal(newSnapshotName), "Unexpected name of the new placement resource snapshot")
 		})
 
-		It("can create a new snapshot when the existing one is stale", func() {
+		It("should create a new snapshot with updated resources", func() {
 			_, newHash, err := resourceSnapshotManager.retrieveAndHashSelectedResources(ctx, placementPolicy)
 			Expect(err).ToNot(HaveOccurred(), "Failed to retrieve and hash the selected resources")
 			Expect(newHash).ToNot(Equal(wantHash), "The hash of the selected resources has not changed after the updates")
@@ -439,11 +441,14 @@ var _ = Describe("core ops (placement resource snapshots)", func() {
 
 		BeforeAll(func() {
 			// Create five Deployments with the same label in the app namespace.
+			deployments := make([]*appsv1.Deployment, 0, len(deploymentNames))
 			for _, name := range deploymentNames {
 				deployment := newDeployment(name, appNamespaceName)
 				deployment.Labels = map[string]string{"placement-group": "foo"}
 				Expect(hubClient.Create(ctx, deployment)).To(Succeed(), "Failed to create the Deployment")
+				deployments = append(deployments, deployment)
 			}
+			waitForDeploymentsInCache(deployments...)
 
 			// Create a placement policy that selects the Deployments by their label.
 			placementPolicy = &placementv1alpha1.PlacementPolicy{
@@ -563,11 +568,14 @@ var _ = Describe("core ops (placement resource snapshots)", func() {
 		})
 
 		It("can create more Deployments", func() {
+			deployments := make([]*appsv1.Deployment, 0, len(extraDeploymentNames))
 			for _, name := range extraDeploymentNames {
 				deployment := newDeployment(name, appNamespaceName)
 				deployment.Labels = map[string]string{"placement-group": "foo"}
 				Expect(hubClient.Create(ctx, deployment)).To(Succeed(), "Failed to create the Deployment")
+				deployments = append(deployments, deployment)
 			}
+			waitForDeploymentsInCache(deployments...)
 		})
 
 		It("should not create new snapshots if snapshots already exist", func() {
@@ -696,6 +704,7 @@ var _ = Describe("core ops (placement resource snapshots)", func() {
 			deployment.Spec.Replicas = ptr.To(int32(3))
 			deployment.Spec.Template.Spec.Containers[0].Image = "nginx:1.28"
 			Expect(hubClient.Update(ctx, deployment)).To(Succeed(), "Failed to update the Deployment")
+			waitForDeploymentsInCache(deployment)
 		})
 
 		It("should create new snapshots again if the existing ones are stale", func() {
@@ -719,10 +728,14 @@ var _ = Describe("core ops (placement resource snapshots)", func() {
 		})
 
 		It("can delete some Deployments", func() {
-			for _, idx := range []int{2, 5, 9} {
+			deletedIdxs := []int{2, 5, 9}
+			deployments := make([]*appsv1.Deployment, 0, len(deletedIdxs))
+			for _, idx := range deletedIdxs {
 				deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: allDeploymentNames[idx], Namespace: appNamespaceName}}
 				Expect(hubClient.Delete(ctx, deployment)).To(Succeed(), "Failed to delete the Deployment")
+				deployments = append(deployments, deployment)
 			}
+			waitForDeploymentsRemovedFromCache(deployments...)
 		})
 
 		It("should create new snapshots if some selected resources have been removed", func() {
@@ -1854,6 +1867,7 @@ var _ = Describe("core ops (cluster placement resource snapshots)", func() {
 				},
 			}
 			Expect(hubClient.Create(ctx, deployment)).To(Succeed(), "Failed to create the Deployment")
+			waitForDeploymentsInCache(deployment)
 
 			// Create a placement policy that selects the two resources.
 			placementPolicy = &placementv1alpha1.ClusterPlacementPolicy{
@@ -2057,6 +2071,7 @@ var _ = Describe("core ops (cluster placement resource snapshots)", func() {
 			deployment.Spec.Replicas = ptr.To(int32(3))
 			deployment.Spec.Template.Spec.Containers[0].Image = "nginx:1.28"
 			Expect(hubClient.Update(ctx, deployment)).To(Succeed(), "Failed to update the Deployment")
+			waitForDeploymentsInCache(deployment)
 		})
 
 		It("can create a new snapshot when the existing one is stale", func() {
@@ -2179,11 +2194,14 @@ var _ = Describe("core ops (cluster placement resource snapshots)", func() {
 
 		BeforeAll(func() {
 			// Create five Deployments with the same label in the app namespace.
+			deployments := make([]*appsv1.Deployment, 0, len(deploymentNames))
 			for _, name := range deploymentNames {
 				deployment := newDeployment(name, appNamespaceName)
 				deployment.Labels = map[string]string{"placement-group": "foo"}
 				Expect(hubClient.Create(ctx, deployment)).To(Succeed(), "Failed to create the Deployment")
+				deployments = append(deployments, deployment)
 			}
+			waitForDeploymentsInCache(deployments...)
 
 			// Create a placement policy that selects the Deployments by their label.
 			placementPolicy = &placementv1alpha1.ClusterPlacementPolicy{
@@ -2303,11 +2321,14 @@ var _ = Describe("core ops (cluster placement resource snapshots)", func() {
 		})
 
 		It("can create more Deployments", func() {
+			deployments := make([]*appsv1.Deployment, 0, len(extraDeploymentNames))
 			for _, name := range extraDeploymentNames {
 				deployment := newDeployment(name, appNamespaceName)
 				deployment.Labels = map[string]string{"placement-group": "foo"}
 				Expect(hubClient.Create(ctx, deployment)).To(Succeed(), "Failed to create the Deployment")
+				deployments = append(deployments, deployment)
 			}
+			waitForDeploymentsInCache(deployments...)
 		})
 
 		It("should not create new snapshots if snapshots already exist", func() {
@@ -2436,6 +2457,7 @@ var _ = Describe("core ops (cluster placement resource snapshots)", func() {
 			deployment.Spec.Replicas = ptr.To(int32(3))
 			deployment.Spec.Template.Spec.Containers[0].Image = "nginx:1.28"
 			Expect(hubClient.Update(ctx, deployment)).To(Succeed(), "Failed to update the Deployment")
+			waitForDeploymentsInCache(deployment)
 		})
 
 		It("should create new snapshots again if the existing ones are stale", func() {
@@ -2459,10 +2481,14 @@ var _ = Describe("core ops (cluster placement resource snapshots)", func() {
 		})
 
 		It("can delete some Deployments", func() {
-			for _, idx := range []int{2, 5, 9} {
+			deletedIdxs := []int{2, 5, 9}
+			deployments := make([]*appsv1.Deployment, 0, len(deletedIdxs))
+			for _, idx := range deletedIdxs {
 				deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: allDeploymentNames[idx], Namespace: appNamespaceName}}
 				Expect(hubClient.Delete(ctx, deployment)).To(Succeed(), "Failed to delete the Deployment")
+				deployments = append(deployments, deployment)
 			}
+			waitForDeploymentsRemovedFromCache(deployments...)
 		})
 
 		It("should create new snapshots if some selected resources have been removed", func() {

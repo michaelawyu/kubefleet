@@ -95,7 +95,6 @@ func (r *noOpReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&placementv1alpha1.ClusterPlacementResourceSnapshot{}, &handler.EnqueueRequestForObject{}).
 		Watches(&placementv1alpha1.PlacementBinding{}, &handler.EnqueueRequestForObject{}).
 		Watches(&placementv1alpha1.ClusterPlacementBinding{}, &handler.EnqueueRequestForObject{}).
-		Watches(&appsv1.Deployment{}, &handler.EnqueueRequestForObject{}).
 		Complete(r)
 }
 
@@ -149,13 +148,20 @@ var _ = BeforeSuite(func() {
 	hubDynamicClient, err := dynamic.NewForConfig(hubCfg)
 	Expect(err).ToNot(HaveOccurred())
 	hubDynamicInformerManager := informer.NewInformerManager(hubDynamicClient, 0, ctx.Done())
+	hubDynamicInformerManager.CreateInformerForResource(informer.APIResourceMeta{
+		GroupVersionKind:     appsv1.SchemeGroupVersion.WithKind("Deployment"),
+		GroupVersionResource: appsv1.SchemeGroupVersion.WithResource("deployments"),
+		IsClusterScoped:      false,
+	})
+	hubDynamicInformerManager.Start()
+	hubDynamicInformerManager.WaitForCacheSync()
 
 	By("Setting up the baseline resource eligibility checker")
 	httpClient, err := rest.HTTPClientFor(hubCfg)
 	Expect(err).ToNot(HaveOccurred())
 	restMapper, err := apiutil.NewDynamicRESTMapper(hubCfg, httpClient)
 	Expect(err).ToNot(HaveOccurred())
-	baselineResourceEligibilityChecker := resourceeligibility.Baseline(restMapper, false)
+	baselineResourceEligibilityChecker := resourceeligibility.Baseline(restMapper)
 
 	resourceSnapshotManager, err = New(hubMgr,
 		hubDynamicClient,

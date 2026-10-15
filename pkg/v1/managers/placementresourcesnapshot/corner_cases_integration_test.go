@@ -68,7 +68,7 @@ type decoySnapshotSpec struct {
 }
 
 var _ = Describe("corner cases (stale cache and inconsistent states)", func() {
-	// SC-1: the cache has yet to observe a primary placement resource snapshot at the next index; the scenario is
+	// The cache has yet to observe a primary placement resource snapshot at the next index; the scenario is
 	// run for both placement policies and cluster placement policies.
 	for _, clusterScoped := range []bool{false, true} {
 		desc := "newer primary snapshot visible only to quorum reads"

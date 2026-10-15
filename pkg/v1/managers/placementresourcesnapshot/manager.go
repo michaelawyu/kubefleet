@@ -102,6 +102,11 @@ func New(mgr ctrl.Manager,
 			"manager", managerName, "limitRange", fmt.Sprintf("%d~%d", MinPerSnapshotResourceCnt, MaxPerSnapshotResourceCnt), "actual", maxPerSnapshotResourceCnt)
 	}
 
+	if resourceEligibilityChecker == nil {
+		return nil, errors.NewUserError(nil, "a resource eligibility checker must be set",
+			"manager", managerName)
+	}
+
 	// Set up the resource snapshot GC workqueue.
 	//
 	// The work queue uses an exponential backoff rate limiter (power of 2, starting at 1 second and capped

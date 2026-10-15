@@ -30,6 +30,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -106,6 +107,47 @@ func newDeployment(name, namespace string) *appsv1.Deployment {
 				},
 			},
 		},
+	}
+}
+
+// waitForDeploymentsInCache waits until the informer cache, from which the manager under test reads Deployments,
+// has observed each of the given Deployments at its current resource version (i.e., the version returned by the
+// last create or update call on the object).
+//
+// As the informer applies watch events in order, once the cache has observed a write, it has also observed all
+// earlier writes to Deployments, including those made during the clean-up of other test cases.
+func waitForDeploymentsInCache(deployments ...*appsv1.Deployment) {
+	GinkgoHelper()
+
+	lister := resourceSnapshotManager.hubDynamicInformerManager.Lister(appsv1.SchemeGroupVersion.WithResource("deployments"))
+	for _, deployment := range deployments {
+		Expect(deployment.ResourceVersion).ToNot(BeEmpty(), "Deployment %s has no resource version", client.ObjectKeyFromObject(deployment))
+		Eventually(func() (string, error) {
+			obj, err := lister.ByNamespace(deployment.Namespace).Get(deployment.Name)
+			if err != nil {
+				return "", err
+			}
+			cachedDeployment, err := meta.Accessor(obj)
+			if err != nil {
+				return "", err
+			}
+			return cachedDeployment.GetResourceVersion(), nil
+		}, eventuallyDuration, eventuallyInterval).Should(Equal(deployment.ResourceVersion),
+			"The cache has not observed Deployment %s at resource version %s", client.ObjectKeyFromObject(deployment), deployment.ResourceVersion)
+	}
+}
+
+// waitForDeploymentsRemovedFromCache waits until the informer cache, from which the manager under test reads
+// Deployments, no longer holds any of the given Deployments.
+func waitForDeploymentsRemovedFromCache(deployments ...*appsv1.Deployment) {
+	GinkgoHelper()
+
+	lister := resourceSnapshotManager.hubDynamicInformerManager.Lister(appsv1.SchemeGroupVersion.WithResource("deployments"))
+	for _, deployment := range deployments {
+		Eventually(func() bool {
+			_, err := lister.ByNamespace(deployment.Namespace).Get(deployment.Name)
+			return errors.IsNotFound(err)
+		}, eventuallyDuration, eventuallyInterval).Should(BeTrue(), "The cache still holds Deployment %s", client.ObjectKeyFromObject(deployment))
 	}
 }
 

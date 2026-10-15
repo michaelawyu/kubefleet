@@ -146,7 +146,7 @@ func TestSetGVKCheckList(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := New(nil, nil, false, false, false)
+			c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 			gotErr := c.SetGVKCheckList(tc.mode, tc.gvks)
 			if (gotErr != nil) != tc.wantErr {
 				t.Fatalf("SetGVKCheckList(%s) error = %v, wantErr %t", tc.mode, gotErr, tc.wantErr)
@@ -160,7 +160,7 @@ func TestSetGVKCheckList(t *testing.T) {
 
 // TestSetNamespaceCheckList tests the SetNamespaceCheckList method of the checker type.
 func TestSetNamespaceCheckList(t *testing.T) {
-	c := New(nil, nil, false, false, false)
+	c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 
 	c.SetNamespaceCheckList(NamespaceEligibilityModeAllowList, []string{"work"}, []string{"app-"})
 	wantAllowListChecker := &checker{
@@ -189,7 +189,7 @@ func TestSetNamespaceCheckList(t *testing.T) {
 // TestSetNamespaceCheckListSkipsEmptyEntries tests that the namespace check list setter of the checker
 // type drops empty names and prefixes; an empty prefix would otherwise match every namespace.
 func TestSetNamespaceCheckListSkipsEmptyEntries(t *testing.T) {
-	c := New(nil, nil, false, false, false)
+	c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 
 	c.SetNamespaceCheckList(NamespaceEligibilityModeAllowList, []string{"", "work"}, []string{"", "app-"})
 	wantAllowListChecker := &checker{
@@ -202,7 +202,7 @@ func TestSetNamespaceCheckListSkipsEmptyEntries(t *testing.T) {
 		t.Errorf("checker after SetNamespaceCheckList(%s) mismatch (-got, +want):\n%s", NamespaceEligibilityModeAllowList, diff)
 	}
 
-	c = New(nil, nil, false, false, false)
+	c = New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 
 	c.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{""}, []string{""})
 	wantDenyListChecker := &checker{
@@ -221,12 +221,12 @@ func TestSetNamespaceCheckListSkipsEmptyEntries(t *testing.T) {
 
 // TestCheckerWraps tests the Wraps method of the checker type.
 func TestCheckerWraps(t *testing.T) {
-	inner := New(nil, nil, false, false, false)
+	inner := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 	if err := inner.SetGVKCheckList(GVKEligibilityModeDenyList, []schema.GroupVersionKind{deploymentGVK}); err != nil {
 		t.Fatalf("SetGVKCheckList(DenyList) = %v, want no error", err)
 	}
 
-	c := New(nil, nil, false, false, false)
+	c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 	if got := c.AllowsGVK(deploymentGVK); !got {
 		t.Fatalf("AllowsGVK(%v) = %t, want %t", deploymentGVK, got, true)
 	}
@@ -240,7 +240,7 @@ func TestCheckerWraps(t *testing.T) {
 // TestCheckerDeepCopy tests the DeepCopy method of the checker type.
 func TestCheckerDeepCopy(t *testing.T) {
 	restMapper := newTestRESTMapper()
-	c := New(restMapper, Baseline(restMapper, false), false, false, false)
+	c := New(CheckerOptions{RestMapper: restMapper, Wrapped: Baseline(restMapper), SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 	c.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"default"}, []string{utils.KubeNSNamePrefix})
 	if err := c.SetGVKCheckList(GVKEligibilityModeDenyList, []schema.GroupVersionKind{deploymentGVK}); err != nil {
 		t.Fatalf("SetGVKCheckList(DenyList) = %v, want no error", err)
@@ -276,7 +276,7 @@ func TestCheckerDeepCopy(t *testing.T) {
 		t.Errorf("AllowsNamespace(work) on the original checker = %t, want %t", got, true)
 	}
 
-	c = New(restMapper, nil, true, true, true)
+	c = New(CheckerOptions{RestMapper: restMapper, SkipNSCheck: true, SkipGVKRCheck: true, SkipObjectCheck: true})
 	cp = c.DeepCopy()
 	if diff := cmp.Diff(cp, c, checkerCmpOptions); diff != "" {
 		t.Fatalf("DeepCopy() with skip flags mismatch (-got, +want):\n%s", diff)
@@ -293,21 +293,21 @@ func TestAllowsNamespace(t *testing.T) {
 	}{
 		{
 			name:      "no list configured",
-			checker:   New(nil, nil, false, false, false),
+			checker:   New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false}),
 			namespace: "work",
 			want:      true,
 		},
 		{
 			name:      "skip check without wrapped checker allows everything in deny list mode",
-			checker:   New(nil, nil, true, false, false),
+			checker:   New(CheckerOptions{RestMapper: nil, SkipNSCheck: true, SkipGVKRCheck: false, SkipObjectCheck: false}),
 			namespace: "work",
 			want:      true,
 		},
 		{
 			name: "skip check delegates to wrapped checker",
 			checker: func() Checker {
-				inner := New(nil, nil, false, false, false)
-				c := New(nil, inner, true, false, false)
+				inner := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
+				c := New(CheckerOptions{RestMapper: nil, Wrapped: inner, SkipNSCheck: true, SkipGVKRCheck: false, SkipObjectCheck: false})
 				c.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"work"}, nil)
 				return c
 			}(),
@@ -317,7 +317,7 @@ func TestAllowsNamespace(t *testing.T) {
 		{
 			name: "skip check without wrapped checker denies everything in allow list mode",
 			checker: func() Checker {
-				c := New(nil, nil, true, false, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: true, SkipGVKRCheck: false, SkipObjectCheck: false})
 				c.SetNamespaceCheckList(NamespaceEligibilityModeAllowList, []string{"work"}, nil)
 				return c
 			}(),
@@ -326,16 +326,16 @@ func TestAllowsNamespace(t *testing.T) {
 		},
 		{
 			name:      "skip check without wrapped checker allows the empty namespace",
-			checker:   New(nil, nil, true, false, false),
+			checker:   New(CheckerOptions{RestMapper: nil, SkipNSCheck: true, SkipGVKRCheck: false, SkipObjectCheck: false}),
 			namespace: "",
 			want:      true,
 		},
 		{
 			name: "skip check delegates to wrapped checker that denies the namespace",
 			checker: func() Checker {
-				inner := New(nil, nil, false, false, false)
+				inner := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				inner.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"work"}, nil)
-				return New(nil, inner, true, false, false)
+				return New(CheckerOptions{RestMapper: nil, Wrapped: inner, SkipNSCheck: true, SkipGVKRCheck: false, SkipObjectCheck: false})
 			}(),
 			namespace: "work",
 			want:      false,
@@ -343,7 +343,7 @@ func TestAllowsNamespace(t *testing.T) {
 		{
 			name: "deny list, name match",
 			checker: func() Checker {
-				c := New(nil, nil, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				c.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"default"}, []string{utils.KubeNSNamePrefix})
 				return c
 			}(),
@@ -353,7 +353,7 @@ func TestAllowsNamespace(t *testing.T) {
 		{
 			name: "deny list, prefix match",
 			checker: func() Checker {
-				c := New(nil, nil, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				c.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"default"}, []string{utils.KubeNSNamePrefix})
 				return c
 			}(),
@@ -363,7 +363,7 @@ func TestAllowsNamespace(t *testing.T) {
 		{
 			name: "deny list, no match",
 			checker: func() Checker {
-				c := New(nil, nil, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				c.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"default"}, []string{utils.KubeNSNamePrefix})
 				return c
 			}(),
@@ -373,7 +373,7 @@ func TestAllowsNamespace(t *testing.T) {
 		{
 			name: "allow list, name match",
 			checker: func() Checker {
-				c := New(nil, nil, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				c.SetNamespaceCheckList(NamespaceEligibilityModeAllowList, []string{"work"}, []string{"app-"})
 				return c
 			}(),
@@ -383,7 +383,7 @@ func TestAllowsNamespace(t *testing.T) {
 		{
 			name: "allow list, prefix match",
 			checker: func() Checker {
-				c := New(nil, nil, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				c.SetNamespaceCheckList(NamespaceEligibilityModeAllowList, []string{"work"}, []string{"app-"})
 				return c
 			}(),
@@ -393,7 +393,7 @@ func TestAllowsNamespace(t *testing.T) {
 		{
 			name: "allow list, no match",
 			checker: func() Checker {
-				c := New(nil, nil, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				c.SetNamespaceCheckList(NamespaceEligibilityModeAllowList, []string{"work"}, []string{"app-"})
 				return c
 			}(),
@@ -403,9 +403,9 @@ func TestAllowsNamespace(t *testing.T) {
 		{
 			name: "wrapped checker further restricts the eligibility",
 			checker: func() Checker {
-				inner := New(nil, nil, false, false, false)
+				inner := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				inner.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"work"}, nil)
-				c := New(nil, inner, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, Wrapped: inner, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				c.SetNamespaceCheckList(NamespaceEligibilityModeAllowList, []string{"work", "app"}, nil)
 				return c
 			}(),
@@ -415,9 +415,9 @@ func TestAllowsNamespace(t *testing.T) {
 		{
 			name: "wrapped checker allows the namespace",
 			checker: func() Checker {
-				inner := New(nil, nil, false, false, false)
+				inner := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				inner.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"work"}, nil)
-				c := New(nil, inner, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, Wrapped: inner, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				c.SetNamespaceCheckList(NamespaceEligibilityModeAllowList, []string{"work", "app"}, nil)
 				return c
 			}(),
@@ -426,7 +426,7 @@ func TestAllowsNamespace(t *testing.T) {
 		},
 		{
 			name:      "baseline checker denies the fleet reserved namespaces",
-			checker:   Baseline(nil, false),
+			checker:   Baseline(nil),
 			namespace: utils.FleetSystemNamespace,
 			want:      false,
 		},
@@ -441,7 +441,7 @@ func TestAllowsNamespace(t *testing.T) {
 			// configured allow list does not name them.
 			name: "empty namespace is always eligible",
 			checker: func() Checker {
-				c := New(nil, Baseline(nil, false), false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, Wrapped: Baseline(nil), SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				c.SetNamespaceCheckList(NamespaceEligibilityModeAllowList, []string{"work"}, nil)
 				return c
 			}(),
@@ -469,21 +469,21 @@ func TestAllowsGVK(t *testing.T) {
 	}{
 		{
 			name:    "no list configured",
-			checker: New(nil, nil, false, false, false),
+			checker: New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false}),
 			gvk:     deploymentGVK,
 			want:    true,
 		},
 		{
 			name:    "skip check without wrapped checker allows everything in deny list mode",
-			checker: New(nil, nil, false, true, false),
+			checker: New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: true, SkipObjectCheck: false}),
 			gvk:     deploymentGVK,
 			want:    true,
 		},
 		{
 			name: "skip check delegates to wrapped checker",
 			checker: func() Checker {
-				inner := New(nil, nil, false, false, false)
-				c := New(nil, inner, false, true, false)
+				inner := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
+				c := New(CheckerOptions{RestMapper: nil, Wrapped: inner, SkipNSCheck: false, SkipGVKRCheck: true, SkipObjectCheck: false})
 				if err := c.SetGVKCheckList(GVKEligibilityModeDenyList, []schema.GroupVersionKind{deploymentGVK}); err != nil {
 					t.Fatalf("SetGVKCheckList(DenyList) = %v, want no error", err)
 				}
@@ -495,7 +495,7 @@ func TestAllowsGVK(t *testing.T) {
 		{
 			name: "skip check without wrapped checker denies everything in allow list mode",
 			checker: func() Checker {
-				c := New(nil, nil, false, true, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: true, SkipObjectCheck: false})
 				if err := c.SetGVKCheckList(GVKEligibilityModeAllowList, []schema.GroupVersionKind{deploymentGVK}); err != nil {
 					t.Fatalf("SetGVKCheckList(AllowList) = %v, want no error", err)
 				}
@@ -507,11 +507,11 @@ func TestAllowsGVK(t *testing.T) {
 		{
 			name: "skip check delegates to wrapped checker that denies the GVK",
 			checker: func() Checker {
-				inner := New(nil, nil, false, false, false)
+				inner := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				if err := inner.SetGVKCheckList(GVKEligibilityModeDenyList, []schema.GroupVersionKind{deploymentGVK}); err != nil {
 					t.Fatalf("SetGVKCheckList(DenyList) = %v, want no error", err)
 				}
-				return New(nil, inner, false, true, false)
+				return New(CheckerOptions{RestMapper: nil, Wrapped: inner, SkipNSCheck: false, SkipGVKRCheck: true, SkipObjectCheck: false})
 			}(),
 			gvk:  deploymentGVK,
 			want: false,
@@ -519,7 +519,7 @@ func TestAllowsGVK(t *testing.T) {
 		{
 			name: "deny list, match",
 			checker: func() Checker {
-				c := New(nil, nil, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				if err := c.SetGVKCheckList(GVKEligibilityModeDenyList, []schema.GroupVersionKind{nodeGVK}); err != nil {
 					t.Fatalf("SetGVKCheckList(DenyList) = %v, want no error", err)
 				}
@@ -531,7 +531,7 @@ func TestAllowsGVK(t *testing.T) {
 		{
 			name: "deny list, no match",
 			checker: func() Checker {
-				c := New(nil, nil, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				if err := c.SetGVKCheckList(GVKEligibilityModeDenyList, []schema.GroupVersionKind{nodeGVK}); err != nil {
 					t.Fatalf("SetGVKCheckList(DenyList) = %v, want no error", err)
 				}
@@ -543,7 +543,7 @@ func TestAllowsGVK(t *testing.T) {
 		{
 			name: "allow list, match",
 			checker: func() Checker {
-				c := New(nil, nil, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				if err := c.SetGVKCheckList(GVKEligibilityModeAllowList, []schema.GroupVersionKind{deploymentGVK}); err != nil {
 					t.Fatalf("SetGVKCheckList(AllowList) = %v, want no error", err)
 				}
@@ -555,7 +555,7 @@ func TestAllowsGVK(t *testing.T) {
 		{
 			name: "allow list, no match",
 			checker: func() Checker {
-				c := New(nil, nil, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				if err := c.SetGVKCheckList(GVKEligibilityModeAllowList, []schema.GroupVersionKind{deploymentGVK}); err != nil {
 					t.Fatalf("SetGVKCheckList(AllowList) = %v, want no error", err)
 				}
@@ -567,11 +567,11 @@ func TestAllowsGVK(t *testing.T) {
 		{
 			name: "wrapped checker further restricts the eligibility",
 			checker: func() Checker {
-				inner := New(nil, nil, false, false, false)
+				inner := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				if err := inner.SetGVKCheckList(GVKEligibilityModeDenyList, []schema.GroupVersionKind{deploymentGVK}); err != nil {
 					t.Fatalf("SetGVKCheckList(DenyList) = %v, want no error", err)
 				}
-				c := New(nil, inner, false, false, false)
+				c := New(CheckerOptions{RestMapper: nil, Wrapped: inner, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 				if err := c.SetGVKCheckList(GVKEligibilityModeAllowList, []schema.GroupVersionKind{deploymentGVK, configMapGVK}); err != nil {
 					t.Fatalf("SetGVKCheckList(AllowList) = %v, want no error", err)
 				}
@@ -582,31 +582,31 @@ func TestAllowsGVK(t *testing.T) {
 		},
 		{
 			name:    "baseline checker denies node resources",
-			checker: Baseline(nil, false),
+			checker: Baseline(nil),
 			gvk:     nodeGVK,
 			want:    false,
 		},
 		{
 			name:    "baseline checker denies the fleet cluster API group",
-			checker: Baseline(nil, false),
+			checker: Baseline(nil),
 			gvk:     clusterv1beta1.GroupVersion.WithKind("MemberCluster"),
 			want:    false,
 		},
 		{
 			name:    "baseline checker denies the fleet networking resources",
-			checker: Baseline(nil, false),
+			checker: Baseline(nil),
 			gvk:     schema.GroupVersionKind{Group: utils.NetworkingGroupName, Version: "v1alpha1", Kind: "ServiceImport"},
 			want:    false,
 		},
 		{
 			name:    "baseline checker allows other resources in the fleet networking API group",
-			checker: Baseline(nil, false),
+			checker: Baseline(nil),
 			gvk:     schema.GroupVersionKind{Group: utils.NetworkingGroupName, Version: "v1alpha1", Kind: "InternalServiceExport"},
 			want:    true,
 		},
 		{
 			name:    "baseline checker allows regular resources",
-			checker: Baseline(nil, false),
+			checker: Baseline(nil),
 			gvk:     deploymentGVK,
 			want:    true,
 		},
@@ -663,13 +663,13 @@ func TestAllowsGVR(t *testing.T) {
 	}{
 		{
 			name:    "eligible resource",
-			checker: Baseline(newTestRESTMapper(), false),
+			checker: Baseline(newTestRESTMapper()),
 			gvr:     deploymentGVR,
 			want:    true,
 		},
 		{
 			name:    "ineligible resource",
-			checker: Baseline(newTestRESTMapper(), false),
+			checker: Baseline(newTestRESTMapper()),
 			gvr:     nodeGVR,
 			want:    false,
 		},
@@ -681,26 +681,26 @@ func TestAllowsGVR(t *testing.T) {
 		},
 		{
 			name:    "skip check without wrapped checker allows everything in deny list mode",
-			checker: New(nil, nil, false, true, false),
+			checker: New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: true, SkipObjectCheck: false}),
 			gvr:     deploymentGVR,
 			want:    true,
 		},
 		{
 			name: "skip check delegates to wrapped checker",
-			checker: New(
-				&fakeRESTMapper{err: errors.New("outer mapper must not be called")},
-				Baseline(newTestRESTMapper(), false),
-				false,
-				true,
-				false,
-			),
+			checker: New(CheckerOptions{
+				RestMapper:      &fakeRESTMapper{err: errors.New("outer mapper must not be called")},
+				Wrapped:         Baseline(newTestRESTMapper()),
+				SkipNSCheck:     false,
+				SkipGVKRCheck:   true,
+				SkipObjectCheck: false,
+			}),
 			gvr:  deploymentGVR,
 			want: true,
 		},
 		{
 			name: "skip check without wrapped checker denies everything in allow list mode",
 			checker: func() Checker {
-				c := New(nil, nil, false, true, false)
+				c := New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: true, SkipObjectCheck: false})
 				if err := c.SetGVKCheckList(GVKEligibilityModeAllowList, []schema.GroupVersionKind{deploymentGVK}); err != nil {
 					t.Fatalf("SetGVKCheckList(AllowList) = %v, want no error", err)
 				}
@@ -711,45 +711,45 @@ func TestAllowsGVR(t *testing.T) {
 		},
 		{
 			name: "skip check propagates the error of the wrapped checker",
-			checker: New(
-				newTestRESTMapper(),
-				Baseline(&fakeRESTMapper{err: errors.New("mapper failure")}, false),
-				false,
-				true,
-				false,
-			),
+			checker: New(CheckerOptions{
+				RestMapper:      newTestRESTMapper(),
+				Wrapped:         Baseline(&fakeRESTMapper{err: errors.New("mapper failure")}),
+				SkipNSCheck:     false,
+				SkipGVKRCheck:   true,
+				SkipObjectCheck: false,
+			}),
 			gvr:     deploymentGVR,
 			want:    false,
 			wantErr: true,
 		},
 		{
 			name: "wrapped checker further restricts the eligibility",
-			checker: New(
-				newTestRESTMapper(),
-				Baseline(newTestRESTMapper(), false),
-				false,
-				false,
-				false,
-			),
+			checker: New(CheckerOptions{
+				RestMapper:      newTestRESTMapper(),
+				Wrapped:         Baseline(newTestRESTMapper()),
+				SkipNSCheck:     false,
+				SkipGVKRCheck:   false,
+				SkipObjectCheck: false,
+			}),
 			gvr:  nodeGVR,
 			want: false,
 		},
 		{
 			name: "wrapped checker error is propagated",
-			checker: New(
-				newTestRESTMapper(),
-				Baseline(&fakeRESTMapper{err: errors.New("mapper failure")}, false),
-				false,
-				false,
-				false,
-			),
+			checker: New(CheckerOptions{
+				RestMapper:      newTestRESTMapper(),
+				Wrapped:         Baseline(&fakeRESTMapper{err: errors.New("mapper failure")}),
+				SkipNSCheck:     false,
+				SkipGVKRCheck:   false,
+				SkipObjectCheck: false,
+			}),
 			gvr:     deploymentGVR,
 			want:    false,
 			wantErr: true,
 		},
 		{
 			name:        "unregistered resource",
-			checker:     Baseline(newTestRESTMapper(), false),
+			checker:     Baseline(newTestRESTMapper()),
 			gvr:         unknownGVR,
 			want:        false,
 			wantErr:     true,
@@ -757,7 +757,7 @@ func TestAllowsGVR(t *testing.T) {
 		},
 		{
 			name:        "no kind is mapped to the resource",
-			checker:     Baseline(&fakeRESTMapper{}, false),
+			checker:     Baseline(&fakeRESTMapper{}),
 			gvr:         deploymentGVR,
 			want:        false,
 			wantErr:     true,
@@ -765,7 +765,7 @@ func TestAllowsGVR(t *testing.T) {
 		},
 		{
 			name:    "REST mapper failure",
-			checker: Baseline(&fakeRESTMapper{err: errors.New("mapper failure")}, false),
+			checker: Baseline(&fakeRESTMapper{err: errors.New("mapper failure")}),
 			gvr:     deploymentGVR,
 			want:    false,
 			wantErr: true,
@@ -774,7 +774,7 @@ func TestAllowsGVR(t *testing.T) {
 			name: "multiple kinds are mapped to the resource, all eligible",
 			checker: Baseline(&fakeRESTMapper{
 				gvks: []schema.GroupVersionKind{deploymentGVK, configMapGVK},
-			}, false),
+			}),
 			gvr:  deploymentGVR,
 			want: true,
 		},
@@ -782,7 +782,7 @@ func TestAllowsGVR(t *testing.T) {
 			name: "multiple kinds are mapped to the resource, one ineligible",
 			checker: Baseline(&fakeRESTMapper{
 				gvks: []schema.GroupVersionKind{deploymentGVK, nodeGVK},
-			}, false),
+			}),
 			gvr:  deploymentGVR,
 			want: false,
 		},
@@ -843,7 +843,7 @@ func TestAllowsObject(t *testing.T) {
 		},
 		{
 			name:    "skip check without wrapped checker allows otherwise ineligible object",
-			checker: New(nil, nil, false, false, true),
+			checker: New(CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: true}),
 			obj: func() *unstructured.Unstructured {
 				obj := configMapObj("app-config")
 				obj.SetDeletionTimestamp(&now)
@@ -853,14 +853,14 @@ func TestAllowsObject(t *testing.T) {
 		},
 		{
 			name:    "skip check delegates to wrapped checker",
-			checker: New(nil, &alwaysIneligibleChecker{}, false, false, true),
+			checker: New(CheckerOptions{RestMapper: nil, Wrapped: &alwaysIneligibleChecker{}, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: true}),
 			obj:     configMapObj("app-config"),
 			want:    false,
 			reason:  "ineligible",
 		},
 		{
 			name:    "baseline checker rejects a resource being deleted",
-			checker: Baseline(nil, false),
+			checker: Baseline(nil),
 			obj: func() *unstructured.Unstructured {
 				obj := configMapObj("app-config")
 				obj.SetDeletionTimestamp(&now)
@@ -871,7 +871,7 @@ func TestAllowsObject(t *testing.T) {
 		},
 		{
 			name:    "baseline checker that skips the object check allows a resource being deleted",
-			checker: Baseline(nil, true),
+			checker: baseline(nil, true),
 			obj: func() *unstructured.Unstructured {
 				obj := configMapObj("app-config")
 				obj.SetDeletionTimestamp(&now)
@@ -908,14 +908,14 @@ func TestAllowsObject(t *testing.T) {
 		},
 		{
 			name:    "skip check propagates the error of the wrapped checker",
-			checker: New(nil, &failingChecker{}, false, false, true),
+			checker: New(CheckerOptions{RestMapper: nil, Wrapped: &failingChecker{}, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: true}),
 			obj:     configMapObj("app-config"),
 			want:    false,
 			wantErr: true,
 		},
 		{
 			name:    "wrapped checker error is propagated",
-			checker: New(nil, &failingChecker{}, false, false, false),
+			checker: New(CheckerOptions{RestMapper: nil, Wrapped: &failingChecker{}, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false}),
 			obj:     configMapObj("app-config"),
 			want:    false,
 			wantErr: true,
@@ -1047,7 +1047,7 @@ func TestAllowsObject(t *testing.T) {
 		},
 		{
 			name:    "wrapped checker further restricts the eligibility",
-			checker: New(nil, &alwaysIneligibleChecker{}, false, false, false),
+			checker: New(CheckerOptions{RestMapper: nil, Wrapped: &alwaysIneligibleChecker{}, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false}),
 			obj:     configMapObj("app-config"),
 			want:    false,
 			reason:  "ineligible",
@@ -1141,7 +1141,7 @@ func TestSkipFlagsAreIndependent(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Every check is set to reject its input unless it is skipped.
-			c := New(newTestRESTMapper(), nil, tc.skipNSCheck, tc.skipGVKRCheck, tc.skipObjectCheck)
+			c := New(CheckerOptions{RestMapper: newTestRESTMapper(), SkipNSCheck: tc.skipNSCheck, SkipGVKRCheck: tc.skipGVKRCheck, SkipObjectCheck: tc.skipObjectCheck})
 			c.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"work"}, nil)
 			if err := c.SetGVKCheckList(GVKEligibilityModeDenyList, []schema.GroupVersionKind{deploymentGVK}); err != nil {
 				t.Fatalf("SetGVKCheckList(DenyList) = %v, want no error", err)
@@ -1175,8 +1175,8 @@ func TestSkipFlagsAreIndependent(t *testing.T) {
 // the skip flags at every level of a chain of wrapped checkers.
 func TestCheckerDeepCopyWithWrappedSkippedCheckers(t *testing.T) {
 	restMapper := newTestRESTMapper()
-	inner := New(restMapper, nil, false, true, true)
-	c := New(restMapper, inner, true, false, true)
+	inner := New(CheckerOptions{RestMapper: restMapper, SkipNSCheck: false, SkipGVKRCheck: true, SkipObjectCheck: true})
+	c := New(CheckerOptions{RestMapper: restMapper, Wrapped: inner, SkipNSCheck: true, SkipGVKRCheck: false, SkipObjectCheck: true})
 	c.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"work"}, nil)
 
 	cp := c.DeepCopy()

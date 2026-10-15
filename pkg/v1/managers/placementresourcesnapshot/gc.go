@@ -185,11 +185,10 @@ func (m *Manager) garbageCollect(ctx context.Context, snapshotGCRequest snapshot
 
 	// Retrieve the owner reference of the primary resource snapshot that points to its placement policy; it is
 	// used to verify the ownership of the secondary resource snapshots.
-	placementPolicyName := ownedBy
-	primarySnapshotOwnerRef := placementPolicyOwnerRef(primarySnapshot, placementPolicyName)
+	primarySnapshotOwnerRef := placementPolicyOwnerRef(primarySnapshot, ownedBy)
 	if primarySnapshotOwnerRef == nil {
 		return errors.NewUnexpectedError(nil, "the primary placement resource snapshot is missing the owner reference to its placement policy",
-			"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot), "placementPolicyName", placementPolicyName)
+			"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot), "placementPolicyName", ownedBy)
 	}
 
 	// Delete all the resource snapshots that are not the primary first.
@@ -201,13 +200,13 @@ func (m *Manager) garbageCollect(ctx context.Context, snapshotGCRequest snapshot
 		// As a sanity check, verify if the secondary snapshot is owned by the same placement policy as the
 		// primary resource snapshot.
 		//
-		// The snapshots are listed by their owned-by label and index only; if a placement policy has been deleted
+		// The snapshots are listed by their owned-by annotation and index only; if a placement policy has been deleted
 		// and re-created with the same name, the cache might hold snapshots owned by different generations of
 		// the placement policy at the same time.
-		secondarySnapshotOwnerRef := placementPolicyOwnerRef(snapshot, placementPolicyName)
+		secondarySnapshotOwnerRef := placementPolicyOwnerRef(snapshot, ownedBy)
 		if secondarySnapshotOwnerRef == nil {
 			return errors.NewUnexpectedError(nil, "the secondary placement resource snapshot is missing the owner reference to its placement policy",
-				"secondaryPlacementResourceSnapshot", klog.KObj(snapshot), "placementPolicyName", placementPolicyName)
+				"secondaryPlacementResourceSnapshot", klog.KObj(snapshot), "placementPolicyName", ownedBy)
 		}
 		if secondarySnapshotOwnerRef.UID != primarySnapshotOwnerRef.UID {
 			return errors.NewTransientError(nil, "observed an inconsistent state: the secondary and the primary placement resource snapshots are owned by different placement policies with the same name",

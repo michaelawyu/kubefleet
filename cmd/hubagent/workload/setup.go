@@ -159,7 +159,12 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 	}
 
 	// Set up the resource eligibility checker (V0 APIs only).
-	customResourceEligibilityChecker := resourceeligibility.New(mgr.GetRESTMapper(), nil, len(userDefinedSkippedNSNames) == 0, len(parsedGVKs) == 0, true)
+	customResourceEligibilityChecker := resourceeligibility.New(resourceeligibility.CheckerOptions{
+		RestMapper:      mgr.GetRESTMapper(),
+		SkipNSCheck:     len(userDefinedSkippedNSNames) == 0,
+		SkipGVKRCheck:   len(parsedGVKs) == 0,
+		SkipObjectCheck: true,
+	})
 	customResourceEligibilityChecker.SetNamespaceCheckList(resourceeligibility.NamespaceEligibilityModeDenyList, userDefinedSkippedNSNames, nil)
 	if err := customResourceEligibilityChecker.SetGVKCheckList(gvkEligibilityMode, parsedGVKs); err != nil {
 		klog.ErrorS(err, "Failed to set GVK check list for the custom resource eligibility checker")

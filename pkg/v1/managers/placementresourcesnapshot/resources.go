@@ -88,6 +88,13 @@ func (m *Manager) retrieveAndHashSelectedResources(
 		// called at all if there are no resource selectors), hence the unexpected error returned here.
 		return nil, "", errors.NewUnexpectedError(nil, "no resource selectors are present")
 	}
+	if placementPolicyNSName := placementPolicyAccessor.GetNamespace(); placementPolicyNSName != "" {
+		// Check if the placement policy is in a namespace eligible for placement.
+		if m.resourceEligibilityChecker != nil && !m.resourceEligibilityChecker.AllowsNamespace(placementPolicyNSName) {
+			return nil, "", errors.NewUserError(nil, "placement policy is in a namespace that is ineligible for placement",
+				"placementPolicyNamespace", placementPolicyNSName)
+		}
+	}
 
 	for idx := range placementPolicySpec.ResourceSelectors {
 		selector := placementPolicySpec.ResourceSelectors[idx]
@@ -101,16 +108,11 @@ func (m *Manager) retrieveAndHashSelectedResources(
 				return nil, "", errors.NewUserError(nil, "resource selector specifies an invalid namespace (a placement policy can only select resources within its own namespace)",
 					"resourceSelectorIndex", idx, "invalidNamespace", namespaceInSelector)
 			}
-
-			if m.resourceEligibilityChecker != nil && !m.resourceEligibilityChecker.AllowsNamespace(placementPolicyNamespace) {
-				return nil, "", errors.NewUserError(nil, "placement policy is in a namespace that is ineligible for placement",
-					"placementPolicyNamespace", placementPolicyNamespace)
+		} else {
+			if m.resourceEligibilityChecker != nil && !m.resourceEligibilityChecker.AllowsNamespace(namespaceInSelector) {
+				return nil, "", errors.NewUserError(nil, "resource selector specifies a namespace that is ineligible for placement",
+					"resourceSelectorIndex", idx, "ineligibleNamespace", namespaceInSelector)
 			}
-			namespaceInSelector = placementPolicyNamespace
-		}
-		if m.resourceEligibilityChecker != nil && !m.resourceEligibilityChecker.AllowsNamespace(namespaceInSelector) {
-			return nil, "", errors.NewUserError(nil, "resource selector specifies a namespace that is ineligible for placement",
-				"resourceSelectorIndex", idx, "ineligibleNamespace", namespaceInSelector)
 		}
 
 		// Check if the resource selector specifies a GVK eligible for placement.

@@ -1097,7 +1097,9 @@ var _ = Describe("resource selection (placement policies)", func() {
 				Data: map[string]string{"key": "value"},
 			}
 			Expect(hubClient.Create(ctx, configMap)).To(Succeed(), "Failed to create the config map")
-			Expect(hubClient.Create(ctx, newDeployment(deploymentName, appNamespaceName))).To(Succeed(), "Failed to create the Deployment")
+			deployment := newDeployment(deploymentName, appNamespaceName)
+			Expect(hubClient.Create(ctx, deployment)).To(Succeed(), "Failed to create the Deployment")
+			waitForDeploymentsInCache(deployment)
 			Expect(hubClient.Create(ctx, placementPolicy)).To(Succeed(), "Failed to create the placement policy")
 		})
 
@@ -1333,6 +1335,7 @@ var _ = Describe("resource selection (placement policies)", func() {
 				ReadyReplicas:      2,
 			}
 			Expect(hubClient.Status().Update(ctx, deployment)).To(Succeed(), "Failed to update the Deployment status")
+			waitForDeploymentsInCache(deployment)
 
 			Expect(hubClient.Create(ctx, placementPolicy)).To(Succeed(), "Failed to create the placement policy")
 		})
@@ -1385,6 +1388,7 @@ var _ = Describe("resource selection (placement policies)", func() {
 				"Failed to get the Deployment")
 			deployment.Annotations[deploymentutil.RevisionAnnotation] = "2"
 			Expect(hubClient.Update(ctx, deployment)).To(Succeed(), "Failed to update the Deployment")
+			waitForDeploymentsInCache(deployment)
 		})
 
 		It("should return the existing snapshot as only stripped fields have changed", func() {
@@ -1810,6 +1814,7 @@ var _ = Describe("resource selection (cluster placement policies)", func() {
 		BeforeAll(func() {
 			createNamespace(namespaceName)
 
+			deployment := newDeployment(deploymentName, appNamespaceName)
 			objs := []client.Object{
 				&corev1.ConfigMap{
 					ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: appNamespaceName},
@@ -1819,7 +1824,7 @@ var _ = Describe("resource selection (cluster placement policies)", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: namespaceName},
 					Data:       map[string]string{"key": "value"},
 				},
-				newDeployment(deploymentName, appNamespaceName),
+				deployment,
 				&rbacv1.ClusterRole{
 					ObjectMeta: metav1.ObjectMeta{Name: clusterRoleName},
 				},
@@ -1827,6 +1832,7 @@ var _ = Describe("resource selection (cluster placement policies)", func() {
 			for _, obj := range objs {
 				Expect(hubClient.Create(ctx, obj)).To(Succeed(), "Failed to create object %T %s", obj, obj.GetName())
 			}
+			waitForDeploymentsInCache(deployment)
 			Expect(hubClient.Create(ctx, placementPolicy)).To(Succeed(), "Failed to create the cluster placement policy")
 		})
 
