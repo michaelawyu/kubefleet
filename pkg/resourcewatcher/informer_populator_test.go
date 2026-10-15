@@ -106,7 +106,7 @@ func TestInformerPopulator_discoverAndCreateInformers(t *testing.T) {
 			},
 			eligibilityChecker: func() resourceeligibility.Checker {
 				// Only the GVK check runs during discovery, which does not use the RESTMapper.
-				c := resourceeligibility.New(nil, resourceeligibility.DefaultForV0APIs(nil))
+				c := resourceeligibility.New(nil, resourceeligibility.DefaultForV0APIs(nil), false, false, false)
 				_ = c.SetGVKCheckList(resourceeligibility.GVKEligibilityModeDenyList, []schema.GroupVersionKind{{Version: "v1", Kind: "Secret"}}) // Skip secrets
 				return c
 			}(),
@@ -286,7 +286,7 @@ func TestInformerPopulator_Integration(t *testing.T) {
 	restMapper := restmapper.NewDiscoveryRESTMapper(groupResources)
 
 	// Create an eligibility checker that skips secrets
-	eligibilityChecker := resourceeligibility.New(restMapper, resourceeligibility.DefaultForV0APIs(restMapper))
+	eligibilityChecker := resourceeligibility.New(restMapper, resourceeligibility.DefaultForV0APIs(restMapper), false, false, false)
 	if err := eligibilityChecker.SetGVKCheckList(resourceeligibility.GVKEligibilityModeDenyList, []schema.GroupVersionKind{{Version: "v1", Kind: "Secret"}}); err != nil {
 		t.Fatalf("Failed to set the GVK deny list: %v", err)
 	}

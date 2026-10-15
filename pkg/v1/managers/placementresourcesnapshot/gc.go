@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
@@ -156,9 +157,9 @@ func (m *Manager) garbageCollect(ctx context.Context, snapshotGCRequest snapshot
 	}
 
 	// List all the resource snapshots with the same index.
-	ownedBy := primarySnapshot.GetLabels()[placementv1alpha1.PlacementResourceSnapshotOwnedByLabelKey]
+	ownedBy := primarySnapshot.GetAnnotations()[placementv1alpha1.PlacementResourceSnapshotOwnedByAnnotationKey]
 	if ownedBy == "" {
-		return errors.NewUnexpectedError(nil, "the primary placement resource snapshot is missing the owned-by label",
+		return errors.NewUnexpectedError(nil, "the primary placement resource snapshot is missing the owned-by annotation",
 			"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot))
 	}
 	fieldMatchers := client.MatchingFields{
@@ -184,11 +185,7 @@ func (m *Manager) garbageCollect(ctx context.Context, snapshotGCRequest snapshot
 
 	// Retrieve the owner reference of the primary resource snapshot that points to its placement policy; it is
 	// used to verify the ownership of the secondary resource snapshots.
-	placementPolicyName := primarySnapshot.GetAnnotations()[placementv1alpha1.PlacementResourceSnapshotOwnedByAnnotationKey]
-	if placementPolicyName == "" {
-		return errors.NewUnexpectedError(nil, "the primary placement resource snapshot is missing the owned-by annotation",
-			"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot))
-	}
+	placementPolicyName := ownedBy
 	primarySnapshotOwnerRef := placementPolicyOwnerRef(primarySnapshot, placementPolicyName)
 	if primarySnapshotOwnerRef == nil {
 		return errors.NewUnexpectedError(nil, "the primary placement resource snapshot is missing the owner reference to its placement policy",
@@ -218,14 +215,14 @@ func (m *Manager) garbageCollect(ctx context.Context, snapshotGCRequest snapshot
 				"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot), "primaryPlacementResourceSnapshotOwnerUID", primarySnapshotOwnerRef.UID)
 		}
 
-		if err := m.hubClient.Delete(ctx, snapshot); err != nil && !apierrors.IsNotFound(err) {
+		if err := m.hubClient.Delete(ctx, snapshot, client.Preconditions{UID: ptr.To(snapshot.GetUID())}); err != nil && !apierrors.IsNotFound(err) {
 			return errors.NewAPIServerError(err, "failed to delete a secondary placement resource snapshot", false,
 				"secondaryPlacementResourceSnapshot", klog.KObj(snapshot))
 		}
 	}
 
 	// Delete the primary placement resource snapshot last.
-	if err := m.hubClient.Delete(ctx, primarySnapshot); err != nil && !apierrors.IsNotFound(err) {
+	if err := m.hubClient.Delete(ctx, primarySnapshot, client.Preconditions{UID: ptr.To(primarySnapshot.GetUID())}); err != nil && !apierrors.IsNotFound(err) {
 		return errors.NewAPIServerError(err, "failed to delete the primary placement resource snapshot", false,
 			"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot))
 	}

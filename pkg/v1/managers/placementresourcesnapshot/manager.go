@@ -35,6 +35,7 @@ import (
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 	errors "github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/informer"
+	"github.com/kubefleet-dev/kubefleet/pkg/utils/resourceeligibility"
 )
 
 const (
@@ -64,6 +65,8 @@ type Manager struct {
 	hubDynamicClient          dynamic.Interface
 	hubDynamicInformerManager informer.Manager
 
+	resourceEligibilityChecker resourceeligibility.Checker
+
 	gcwq workqueue.TypedRateLimitingInterface[snapshotGarbageCollectionRequest]
 
 	restMapper meta.RESTMapper
@@ -79,6 +82,7 @@ type Manager struct {
 func New(mgr ctrl.Manager,
 	hubDynamicClient dynamic.Interface,
 	hubDynamicInformerManager informer.Manager,
+	resourceEligibilityChecker resourceeligibility.Checker,
 	restMapper meta.RESTMapper,
 	muSlotCnt int32,
 	maxPerSnapshotResourceDataSizeBytes int,
@@ -113,6 +117,7 @@ func New(mgr ctrl.Manager,
 		hubUncachedReader:                   mgr.GetAPIReader(),
 		hubDynamicClient:                    hubDynamicClient,
 		hubDynamicInformerManager:           hubDynamicInformerManager,
+		resourceEligibilityChecker:          resourceEligibilityChecker,
 		gcwq:                                gcwq,
 		restMapper:                          restMapper,
 		mus:                                 make([]sync.Mutex, muSlotCnt),
