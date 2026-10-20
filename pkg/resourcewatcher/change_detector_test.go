@@ -196,8 +196,7 @@ func TestChangeDetector_dynamicResourceFilter(t *testing.T) {
 		}
 	}
 
-	// Mirrors the namespace deny list the hub agent builds in production, minus the "default"
-	// namespace so that the other cases can place objects in it.
+	// Mirrors the namespace deny list the hub agent builds in production.
 	newChecker := func(skippedNSNames ...string) resourceeligibility.Checker {
 		c := resourceeligibility.New(resourceeligibility.CheckerOptions{RestMapper: nil, SkipNSCheck: false, SkipGVKRCheck: false, SkipObjectCheck: false})
 		c.SetNamespaceCheckList(resourceeligibility.NamespaceEligibilityModeDenyList, skippedNSNames, []string{utils.KubeNSNamePrefix, utils.FleetNSNamePrefix})

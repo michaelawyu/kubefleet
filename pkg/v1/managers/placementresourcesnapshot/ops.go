@@ -77,10 +77,7 @@ func (m *Manager) snapshotResources(ctx context.Context,
 		return nil, false, errors.Wraps(err, "failed to retrieve and hash the selected resources")
 	}
 
-	if len(currentResources) == 0 {
-		// No resources are currently selected; return a user error.
-		return nil, false, errors.NewUserError(nil, "no resources are selected by the placement policy", "placementPolicy", klog.KObj(placementPolicy))
-	}
+	// At this point, KubeFleet allows empty resource snapshots.
 
 	var latestPrimarySnapshot placementv1alpha1.PlacementResourceSnapshotAccessor
 	var isUpToDate bool

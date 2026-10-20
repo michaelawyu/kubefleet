@@ -108,7 +108,13 @@ func baseline(restMapper meta.RESTMapper, skipObjectCheck bool) Checker {
 		SkipObjectCheck: skipObjectCheck,
 	})
 
-	c.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, []string{"default"}, []string{utils.KubeNSNamePrefix, utils.FleetNSNamePrefix})
+	// About the `default` namespace: it is not explicitly denied here; the namespace itself cannot be selected for placement,
+	// but KubeFleet considers it OK to have resources within the namespace to be placed.
+	//
+	// For the v0 APIs, this is enforced individually when processing the placements.
+	// For the v1 APIs (the new placement experience), this is enforced through the AllowsObject check. See the definition
+	// below for more information.
+	c.SetNamespaceCheckList(NamespaceEligibilityModeDenyList, nil, []string{utils.KubeNSNamePrefix, utils.FleetNSNamePrefix})
 	if err := c.SetGVKCheckList(GVKEligibilityModeDenyList, GVKsDeniedByDefault); err != nil {
 		// The deny list is defined in this package, so a rejection here is a programming error.
 		panic(fmt.Sprintf("failed to register the default GVK deny list: %v", err))
@@ -258,7 +264,8 @@ func (c *checker) DeepCopy() Checker {
 	return cp
 }
 
-// AllowsNamespace checks if a given namespace is eligible for placement.
+// AllowsNamespace checks if a given namespace (the namespace itself and any resource within it)
+// is eligible for placement.
 func (c *checker) AllowsNamespace(namespace string) bool {
 	if namespace == "" {
 		// Allow cluster-scoped resources (which have an empty namespace) for placement.
@@ -396,8 +403,8 @@ func (c *checker) AllowsObject(obj *unstructured.Unstructured) (bool, string, er
 	switch {
 	case obj.GetDeletionTimestamp() != nil:
 		return false, "the resource is being deleted and cannot be placed", nil
-	case len(obj.GetOwnerReferences()) > 0:
-		return false, "the resource is under the management of another object; place the owner object instead if applicable", nil
+	case hasControllerOwner(obj):
+		return false, "the resource is under the management of a controller; place the owner object instead if applicable", nil
 	case obj.GroupVersionKind() == corev1.SchemeGroupVersion.WithKind(utils.ConfigMapKind) && obj.GetName() == "kube-root-ca.crt":
 		return false, "the built-in CA certificate config map is created automatically in every namespace and cannot be placed", nil
 	case obj.GroupVersionKind() == corev1.SchemeGroupVersion.WithKind("ServiceAccount") && obj.GetName() == "default":
@@ -412,6 +419,8 @@ func (c *checker) AllowsObject(obj *unstructured.Unstructured) (bool, string, er
 		if found && secretType == string(corev1.SecretTypeServiceAccountToken) {
 			return false, "service account token secrets are created automatically along with their service accounts and cannot be placed", nil
 		}
+	case obj.GroupVersionKind() == utils.NamespaceGVK && obj.GetName() == "default":
+		return false, "the default namespace itself cannot be placed", nil
 	}
 
 	// Consult the wrapped checker to check if the eligibility is further restricted.
@@ -419,4 +428,13 @@ func (c *checker) AllowsObject(obj *unstructured.Unstructured) (bool, string, er
 		return c.wrapped.AllowsObject(obj)
 	}
 	return true, "", nil
+}
+
+func hasControllerOwner(obj *unstructured.Unstructured) bool {
+	for _, ownerRef := range obj.GetOwnerReferences() {
+		if ownerRef.Controller != nil && *ownerRef.Controller {
+			return true
+		}
+	}
+	return false
 }

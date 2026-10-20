@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/ptr"
 
 	clusterv1beta1 "github.com/kubefleet-dev/kubefleet/apis/cluster/v1beta1"
 	placementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
@@ -429,6 +430,13 @@ func TestAllowsNamespace(t *testing.T) {
 			checker:   Baseline(nil),
 			namespace: utils.FleetSystemNamespace,
 			want:      false,
+		},
+		{
+			// The default namespace itself is blocked by the object check; resources within it are eligible.
+			name:      "baseline checker allows the default namespace",
+			checker:   Baseline(nil),
+			namespace: "default",
+			want:      true,
 		},
 		{
 			name:      "allow all checker",
@@ -921,7 +929,26 @@ func TestAllowsObject(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "resource owned by another object",
+			name:    "resource owned by a controller",
+			checker: DefaultForV1APIs(nil),
+			obj: func() *unstructured.Unstructured {
+				obj := configMapObj("app-config")
+				obj.SetOwnerReferences([]metav1.OwnerReference{
+					{
+						APIVersion: "apps/v1",
+						Kind:       "Deployment",
+						Name:       "app",
+						UID:        "1",
+						Controller: ptr.To(true),
+					},
+				})
+				return obj
+			}(),
+			want:   false,
+			reason: "the resource is under the management of a controller; place the owner object instead if applicable",
+		},
+		{
+			name:    "resource owned by another object that is not its controller",
 			checker: DefaultForV1APIs(nil),
 			obj: func() *unstructured.Unstructured {
 				obj := configMapObj("app-config")
@@ -932,11 +959,40 @@ func TestAllowsObject(t *testing.T) {
 						Name:       "app",
 						UID:        "1",
 					},
+					{
+						APIVersion: "apps/v1",
+						Kind:       "Deployment",
+						Name:       "another-app",
+						UID:        "2",
+						Controller: ptr.To(false),
+					},
 				})
 				return obj
 			}(),
+			want: true,
+		},
+		{
+			name:    "default namespace",
+			checker: DefaultForV1APIs(nil),
+			obj: func() *unstructured.Unstructured {
+				obj := &unstructured.Unstructured{}
+				obj.SetGroupVersionKind(utils.NamespaceGVK)
+				obj.SetName("default")
+				return obj
+			}(),
 			want:   false,
-			reason: "the resource is under the management of another object; place the owner object instead if applicable",
+			reason: "the default namespace itself cannot be placed",
+		},
+		{
+			name:    "non-default namespace",
+			checker: DefaultForV1APIs(nil),
+			obj: func() *unstructured.Unstructured {
+				obj := &unstructured.Unstructured{}
+				obj.SetGroupVersionKind(utils.NamespaceGVK)
+				obj.SetName("work")
+				return obj
+			}(),
+			want: true,
 		},
 		{
 			name:    "built-in CA certificate config map",

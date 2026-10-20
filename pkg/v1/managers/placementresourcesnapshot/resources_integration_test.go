@@ -53,6 +53,11 @@ const (
 	placementGroupLabelKey = "placement-group"
 	customAnnotationKey    = "custom-annotation"
 
+	// The default namespace and the Kubernetes API service within it are created by the API server itself,
+	// including the one that the envtest package runs.
+	defaultNamespaceName     = "default"
+	kubernetesAPIServiceName = "kubernetes"
+
 	testFinalizer        = "test.kubefleet.dev/block-deletion"
 	anotherTestFinalizer = "test.kubefleet.dev/another"
 
@@ -68,7 +73,6 @@ const (
 	ineligibleGVKErrMsg               = "resource selector specifies a GVK that is ineligible for placement"
 	invalidLabelSelectorErrMsg        = "invalid label selector"
 	noMatchForGVKErrMsg               = "no match found for GVK"
-	noResourcesSelectedErrMsg         = "no resources are selected by the placement policy"
 	resourceNotFoundErrMsg            = "failed to get selected resource directly from the API server"
 )
 
@@ -99,16 +103,6 @@ var _ = Describe("resource selection (placement policies)", func() {
 				}),
 				wantErrCategory:   kferrors.ErrCategoryUser,
 				wantErrMsgSubstrs: []string{"resource selector specifies an invalid namespace"},
-			},
-			{
-				desc: "the placement policy is in the default namespace",
-				placementPolicy: newPlacementPolicy("default", placementv1alpha1.ResourceSelector{
-					APIVersion: "v1",
-					Kind:       "ConfigMap",
-					Name:       configMapName,
-				}),
-				wantErrCategory:   kferrors.ErrCategoryUser,
-				wantErrMsgSubstrs: []string{"placement policy is in a namespace that is ineligible for placement"},
 			},
 			{
 				desc: "the placement policy is in a reserved Kubernetes namespace",
@@ -407,14 +401,14 @@ var _ = Describe("resource selection (placement policies)", func() {
 					"service account token secrets are created automatically along with their service accounts and cannot be placed"},
 			},
 			{
-				desc: "a resource owned by another object is selected by name",
+				desc: "a resource owned by a controller is selected by name",
 				placementPolicy: newPlacementPolicy(namespaceName, placementv1alpha1.ResourceSelector{
 					APIVersion: "v1",
 					Kind:       "ConfigMap",
 					Name:       ownedConfigMapName,
 				}),
 				wantErrCategory:   kferrors.ErrCategoryUser,
-				wantErrMsgSubstrs: []string{ineligibleResourceErrMsg, "the resource is under the management of another object"},
+				wantErrMsgSubstrs: []string{ineligibleResourceErrMsg, "the resource is under the management of a controller"},
 			},
 			{
 				desc: "a resource being deleted is selected by name",
@@ -487,6 +481,7 @@ var _ = Describe("resource selection (placement policies)", func() {
 							Kind:       "ConfigMap",
 							Name:       ownerConfigMapName,
 							UID:        ownerConfigMap.UID,
+							Controller: ptr.To(true),
 						},
 					},
 				},
@@ -663,6 +658,7 @@ var _ = Describe("resource selection (placement policies)", func() {
 								Kind:       "ConfigMap",
 								Name:       ownerConfigMapName,
 								UID:        ownerConfigMap.UID,
+								Controller: ptr.To(true),
 							},
 						},
 					},
@@ -705,7 +701,7 @@ var _ = Describe("resource selection (placement policies)", func() {
 			verifySnapshottedResourceIdentifiers(snapshot.GetSpec().Resources, wantIdentifiers)
 		})
 
-		It("can make a selected config map ineligible by adding an owner reference", func() {
+		It("can make a selected config map ineligible by adding a controller owner reference", func() {
 			ownerConfigMap := &corev1.ConfigMap{}
 			Expect(hubUncachedReader.Get(ctx, types.NamespacedName{Namespace: namespaceName, Name: ownerConfigMapName}, ownerConfigMap)).To(Succeed(),
 				"Failed to get the owner config map")
@@ -719,6 +715,7 @@ var _ = Describe("resource selection (placement policies)", func() {
 					Kind:       "ConfigMap",
 					Name:       ownerConfigMapName,
 					UID:        ownerConfigMap.UID,
+					Controller: ptr.To(true),
 				},
 			}
 			Expect(hubClient.Update(ctx, configMap)).To(Succeed(), "Failed to update the config map")
@@ -772,6 +769,120 @@ var _ = Describe("resource selection (placement policies)", func() {
 		})
 	})
 
+	Context("resources with non-controller owner references", Ordered, func() {
+		// Owner references that do not point to a controller do not make a resource ineligible for placement; they
+		// are stripped from the snapshotted manifests, as the owners do not exist on the member clusters.
+		groupLabels := map[string]string{placementGroupLabelKey: utils.RandStr()}
+		configMapNamePrefix := fmt.Sprintf(configMapNameTemplate, utils.RandStr())
+		ownerConfigMapName := configMapNamePrefix + "-owner"
+		namedConfigMapName := configMapNamePrefix + "-named"
+		labeledConfigMapName := configMapNamePrefix + "-labeled"
+
+		placementPolicy := newPlacementPolicy(appNamespaceName,
+			configMapNameSelector(namedConfigMapName),
+			configMapLabelSelector(groupLabels),
+		)
+
+		BeforeAll(func() {
+			// The owner config map is not labeled and thus not selected.
+			ownerConfigMap := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: ownerConfigMapName, Namespace: appNamespaceName},
+				Data:       map[string]string{"key": "value"},
+			}
+			Expect(hubClient.Create(ctx, ownerConfigMap)).To(Succeed(), "Failed to create the owner config map")
+
+			ownerRefs := func(controller *bool) []metav1.OwnerReference {
+				return []metav1.OwnerReference{
+					{
+						APIVersion: "v1",
+						Kind:       "ConfigMap",
+						Name:       ownerConfigMapName,
+						UID:        ownerConfigMap.UID,
+						Controller: controller,
+					},
+				}
+			}
+			configMaps := []*corev1.ConfigMap{
+				{
+					// A config map, selected by name, whose owner reference leaves the controller field unset.
+					ObjectMeta: metav1.ObjectMeta{
+						Name:            namedConfigMapName,
+						Namespace:       appNamespaceName,
+						OwnerReferences: ownerRefs(nil),
+					},
+					Data: map[string]string{"key": "value-named"},
+				},
+				{
+					// A config map, selected by labels, whose owner reference explicitly states that the owner
+					// is not a controller.
+					ObjectMeta: metav1.ObjectMeta{
+						Name:            labeledConfigMapName,
+						Namespace:       appNamespaceName,
+						Labels:          groupLabels,
+						OwnerReferences: ownerRefs(ptr.To(false)),
+					},
+					Data: map[string]string{"key": "value-labeled"},
+				},
+			}
+			for _, configMap := range configMaps {
+				Expect(hubClient.Create(ctx, configMap)).To(Succeed(), "Failed to create config map %s", configMap.Name)
+			}
+			Expect(hubClient.Create(ctx, placementPolicy)).To(Succeed(), "Failed to create the placement policy")
+		})
+
+		It("can create a placement resource snapshot with the owned config maps", func() {
+			gotSnapshots, isUpToDate, err := resourceSnapshotManager.SnapshotResourcesIfNoSnapshotExists(ctx, placementPolicy)
+			verifyReturnedPrimarySnapshot(gotSnapshots, isUpToDate, err, placementPolicy, 0)
+		})
+
+		It("should strip the owner references", func() {
+			snapshot := getPrimarySnapshotFromCache(placementPolicy, 0)
+			resources := snapshot.GetSpec().Resources
+
+			// The resources are sorted by their unique IDs, i.e., the labeled config map comes first.
+			//
+			// Compare the manifests as generic maps; this verifies that the owner references are absent.
+			wantManifests := []map[string]interface{}{
+				{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]interface{}{
+						"name":      labeledConfigMapName,
+						"namespace": appNamespaceName,
+						"labels":    map[string]interface{}{placementGroupLabelKey: groupLabels[placementGroupLabelKey]},
+					},
+					"data": map[string]interface{}{"key": "value-labeled"},
+				},
+				{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]interface{}{
+						"name":      namedConfigMapName,
+						"namespace": appNamespaceName,
+					},
+					"data": map[string]interface{}{"key": "value-named"},
+				},
+			}
+			Expect(resources).To(HaveLen(len(wantManifests)), "Unexpected number of snapshotted resources")
+			for idx := range resources {
+				if diff := cmp.Diff(manifestAsMap(resources[idx].Manifest.Raw), wantManifests[idx]); diff != "" {
+					Fail(fmt.Sprintf("Snapshotted config map manifest (#%d) diff (-got +want):\n%s", idx, diff))
+				}
+			}
+		})
+
+		AfterAll(func() {
+			objs := primarySnapshotObjs(placementPolicy, 1)
+			objs = append(objs,
+				placementPolicy,
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: namedConfigMapName, Namespace: appNamespaceName}},
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: labeledConfigMapName, Namespace: appNamespaceName}},
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: ownerConfigMapName, Namespace: appNamespaceName}},
+			)
+			deleteObjectsAndWait(objs)
+		})
+	})
+
 	Context("no resources selected", Ordered, func() {
 		groupLabels := map[string]string{placementGroupLabelKey: utils.RandStr()}
 		configMapName := fmt.Sprintf(configMapNameTemplate, utils.RandStr())
@@ -782,16 +893,32 @@ var _ = Describe("resource selection (placement policies)", func() {
 			LabelSelector: &metav1.LabelSelector{MatchLabels: groupLabels},
 		})
 
-		var wantHash string
+		var emptyHash string
 
 		BeforeAll(func() {
 			// Create a placement policy whose label selector matches no resources (yet).
 			Expect(hubClient.Create(ctx, placementPolicy)).To(Succeed(), "Failed to create the placement policy")
 		})
 
-		It("should return a user error when the label selector matches no resources", func() {
-			err := snapshotResourcesAndExpectErr(placementPolicy)
-			verifyErrCategoryAndMsg(err, kferrors.ErrCategoryUser, noResourcesSelectedErrMsg)
+		It("can create an empty placement resource snapshot when the label selector matches no resources", func() {
+			resources, hash, err := resourceSnapshotManager.retrieveAndHashSelectedResources(ctx, placementPolicy)
+			Expect(err).ToNot(HaveOccurred(), "Failed to retrieve and hash the selected resources")
+			Expect(resources).To(BeEmpty(), "Resources are selected unexpectedly")
+			emptyHash = hash
+
+			gotSnapshots, isUpToDate, err := resourceSnapshotManager.SnapshotResourcesIfNoSnapshotExists(ctx, placementPolicy)
+			verifyReturnedPrimarySnapshot(gotSnapshots, isUpToDate, err, placementPolicy, 0)
+
+			// Wait until the cache has observed the new snapshot.
+			snapshot := getPrimarySnapshotFromCache(placementPolicy, 0)
+			verifySnapshotMetadata(snapshot, placementPolicy, 0, 0, 1, emptyHash)
+			Expect(snapshot.GetSpec().Resources).To(BeEmpty(), "The placement resource snapshot is not empty")
+		})
+
+		It("should return the existing empty snapshot as it is up-to-date", func() {
+			gotSnapshots, isUpToDate, err := resourceSnapshotManager.SnapshotResourcesIfStale(ctx, placementPolicy)
+			verifyReturnedPrimarySnapshot(gotSnapshots, isUpToDate, err, placementPolicy, 0)
+			verifyNoPrimarySnapshotAtIdx(placementPolicy, 1)
 		})
 
 		It("can create a config map that matches the label selector", func() {
@@ -806,12 +933,12 @@ var _ = Describe("resource selection (placement policies)", func() {
 			Expect(hubClient.Create(ctx, configMap)).To(Succeed(), "Failed to create the config map")
 		})
 
-		It("can create a placement resource snapshot once a resource matches", func() {
-			gotSnapshots, isUpToDate, err := resourceSnapshotManager.SnapshotResourcesIfNoSnapshotExists(ctx, placementPolicy)
-			verifyReturnedPrimarySnapshot(gotSnapshots, isUpToDate, err, placementPolicy, 0)
+		It("should create a new placement resource snapshot once a resource matches", func() {
+			gotSnapshots, isUpToDate, err := resourceSnapshotManager.SnapshotResourcesIfStale(ctx, placementPolicy)
+			verifyReturnedPrimarySnapshot(gotSnapshots, isUpToDate, err, placementPolicy, 1)
 
 			// Wait until the cache has observed the new snapshot.
-			snapshot := getPrimarySnapshotFromCache(placementPolicy, 0)
+			snapshot := getPrimarySnapshotFromCache(placementPolicy, 1)
 			wantIdentifiers := []placementv1alpha1.ObjectReference{
 				{
 					Namespace:  appNamespaceName,
@@ -821,7 +948,6 @@ var _ = Describe("resource selection (placement policies)", func() {
 				},
 			}
 			verifySnapshottedResourceIdentifiers(snapshot.GetSpec().Resources, wantIdentifiers)
-			wantHash = snapshot.GetAnnotations()[placementv1alpha1.PlacementResourceSnapshotContentsHashAnnotationKey]
 		})
 
 		It("can delete the config map", func() {
@@ -830,33 +956,17 @@ var _ = Describe("resource selection (placement policies)", func() {
 			})
 		})
 
-		It("should return a user error when no resources are selected any more, even though a snapshot exists", func() {
-			// The existing snapshot is not returned, even if the caller only asks for a snapshot when none exists.
-			gotSnapshots, isUpToDate, err := resourceSnapshotManager.SnapshotResourcesIfNoSnapshotExists(ctx, placementPolicy)
-			Expect(gotSnapshots).To(BeEmpty(), "Placement resource snapshots are returned unexpectedly")
-			Expect(isUpToDate).To(BeFalse(), "The up-to-date flag is set unexpectedly")
-			verifyErrCategoryAndMsg(err, kferrors.ErrCategoryUser, noResourcesSelectedErrMsg)
+		It("should create a new empty placement resource snapshot when no resources are selected any more", func() {
+			gotSnapshots, isUpToDate, err := resourceSnapshotManager.SnapshotResourcesIfStale(ctx, placementPolicy)
+			verifyReturnedPrimarySnapshot(gotSnapshots, isUpToDate, err, placementPolicy, 2)
 
-			gotSnapshots, isUpToDate, err = resourceSnapshotManager.SnapshotResourcesIfStale(ctx, placementPolicy)
-			Expect(gotSnapshots).To(BeEmpty(), "Placement resource snapshots are returned unexpectedly")
-			Expect(isUpToDate).To(BeFalse(), "The up-to-date flag is set unexpectedly")
-			verifyErrCategoryAndMsg(err, kferrors.ErrCategoryUser, noResourcesSelectedErrMsg)
-		})
-
-		It("should leave the existing snapshot intact", func() {
-			snapshot := &placementv1alpha1.PlacementResourceSnapshot{}
-			Expect(hubUncachedReader.Get(ctx, types.NamespacedName{
-				Namespace: appNamespaceName,
-				Name:      uniqueNameForPrimaryPlacementResourceSnapshot(placementPolicy.Name, 0),
-			}, snapshot)).To(Succeed(), "Failed to get the existing placement resource snapshot")
-			Expect(snapshot.Annotations[placementv1alpha1.PlacementResourceSnapshotContentsHashAnnotationKey]).To(Equal(wantHash),
-				"The existing placement resource snapshot has been modified")
-
-			verifyNoPrimarySnapshotAtIdx(placementPolicy, 1)
+			snapshot := getPrimarySnapshotFromCache(placementPolicy, 2)
+			verifySnapshotMetadata(snapshot, placementPolicy, 2, 0, 1, emptyHash)
+			Expect(snapshot.GetSpec().Resources).To(BeEmpty(), "The placement resource snapshot is not empty")
 		})
 
 		AfterAll(func() {
-			objs := primarySnapshotObjs(placementPolicy, 1)
+			objs := primarySnapshotObjs(placementPolicy, 3)
 			objs = append(objs,
 				placementPolicy,
 				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: appNamespaceName}},
@@ -1310,7 +1420,7 @@ var _ = Describe("resource selection (placement policies)", func() {
 		})
 	})
 
-	Context("manifest sanitization (Deployments)", Ordered, func() {
+	Context("manifest sanitization (deployments)", Ordered, func() {
 		deploymentName := fmt.Sprintf(deploymentNameTemplate, utils.RandStr())
 
 		placementPolicy := newPlacementPolicy(appNamespaceName, placementv1alpha1.ResourceSelector{
@@ -1406,6 +1516,87 @@ var _ = Describe("resource selection (placement policies)", func() {
 			deleteObjectsAndWait(objs)
 		})
 	})
+
+	Context("resources in the default namespace", Ordered, func() {
+		// The default namespace itself cannot be placed, but the resources within it can.
+		groupLabels := map[string]string{placementGroupLabelKey: utils.RandStr()}
+		configMapName := fmt.Sprintf(configMapNameTemplate, utils.RandStr())
+		labeledConfigMapName := configMapName + "-labeled"
+
+		placementPolicy := newPlacementPolicy(defaultNamespaceName,
+			configMapNameSelector(configMapName),
+			configMapLabelSelector(groupLabels),
+		)
+		kubernetesAPIServicePlacementPolicy := newPlacementPolicy(defaultNamespaceName, placementv1alpha1.ResourceSelector{
+			APIVersion: "v1",
+			Kind:       "Service",
+			Name:       kubernetesAPIServiceName,
+		})
+
+		// The resources are sorted by their unique IDs; the labeled config map has a longer name with the same prefix.
+		wantIdentifiers := []placementv1alpha1.ObjectReference{
+			{
+				Namespace:  defaultNamespaceName,
+				Name:       configMapName,
+				APIVersion: "v1",
+				Kind:       "ConfigMap",
+			},
+			{
+				Namespace:  defaultNamespaceName,
+				Name:       labeledConfigMapName,
+				APIVersion: "v1",
+				Kind:       "ConfigMap",
+			},
+		}
+
+		BeforeAll(func() {
+			// Make sure that the Kubernetes API service has been created by the API server.
+			Eventually(func() error {
+				return hubUncachedReader.Get(ctx, types.NamespacedName{Namespace: defaultNamespaceName, Name: kubernetesAPIServiceName}, &corev1.Service{})
+			}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to find the Kubernetes API service")
+
+			objs := []client.Object{
+				&corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: defaultNamespaceName},
+					Data:       map[string]string{"key": "value"},
+				},
+				&corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: labeledConfigMapName, Namespace: defaultNamespaceName, Labels: groupLabels},
+					Data:       map[string]string{"key": "value"},
+				},
+				placementPolicy,
+				kubernetesAPIServicePlacementPolicy,
+			}
+			for _, obj := range objs {
+				Expect(hubClient.Create(ctx, obj)).To(Succeed(), "Failed to create object %T %s", obj, obj.GetName())
+			}
+		})
+
+		It("can create a placement resource snapshot with resources in the default namespace", func() {
+			gotSnapshots, isUpToDate, err := resourceSnapshotManager.SnapshotResourcesIfNoSnapshotExists(ctx, placementPolicy)
+			verifyReturnedPrimarySnapshot(gotSnapshots, isUpToDate, err, placementPolicy, 0)
+
+			snapshot := getPrimarySnapshotFromCache(placementPolicy, 0)
+			verifySnapshottedResourceIdentifiers(snapshot.GetSpec().Resources, wantIdentifiers)
+		})
+
+		It("should return a user error when the Kubernetes API service is selected by name", func() {
+			err := snapshotResourcesAndExpectErr(kubernetesAPIServicePlacementPolicy)
+			verifyErrCategoryAndMsg(err, kferrors.ErrCategoryUser, ineligibleResourceErrMsg,
+				"the Kubernetes API service is created automatically in the default namespace and cannot be placed")
+		})
+
+		AfterAll(func() {
+			objs := primarySnapshotObjs(placementPolicy, 1)
+			objs = append(objs,
+				placementPolicy,
+				kubernetesAPIServicePlacementPolicy,
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: defaultNamespaceName}},
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: labeledConfigMapName, Namespace: defaultNamespaceName}},
+			)
+			deleteObjectsAndWait(objs)
+		})
+	})
 })
 
 var _ = Describe("resource selection (cluster placement policies)", func() {
@@ -1421,17 +1612,6 @@ var _ = Describe("resource selection (cluster placement policies)", func() {
 					APIVersion: "v1",
 					Kind:       "ConfigMap",
 					Namespace:  "kube-system",
-					Name:       resourceName,
-				}),
-				wantErrCategory:   kferrors.ErrCategoryUser,
-				wantErrMsgSubstrs: []string{"resource selector specifies a namespace that is ineligible for placement"},
-			},
-			{
-				desc: "the resource selector specifies the default namespace",
-				placementPolicy: newClusterPlacementPolicy(placementv1alpha1.ResourceSelector{
-					APIVersion: "v1",
-					Kind:       "ConfigMap",
-					Namespace:  "default",
 					Name:       resourceName,
 				}),
 				wantErrCategory:   kferrors.ErrCategoryUser,
@@ -1580,10 +1760,11 @@ var _ = Describe("resource selection (cluster placement policies)", func() {
 				wantErrMsgSubstrs: []string{ineligibleNamespaceErrMsg},
 			},
 			{
-				desc:              "the default namespace is selected by name",
-				placementPolicy:   newClusterPlacementPolicy(namespaceSelector("default")),
-				wantErrCategory:   kferrors.ErrCategoryUser,
-				wantErrMsgSubstrs: []string{ineligibleNamespaceErrMsg},
+				desc:            "the default namespace is selected by name",
+				placementPolicy: newClusterPlacementPolicy(namespaceSelector("default")),
+				wantErrCategory: kferrors.ErrCategoryUser,
+				wantErrMsgSubstrs: []string{ineligibleResourceErrMsg,
+					"the default namespace itself cannot be placed"},
 			},
 			{
 				desc:              "a reserved KubeFleet namespace is selected by name",
@@ -1721,13 +1902,17 @@ var _ = Describe("resource selection (cluster placement policies)", func() {
 			verifySnapshottedResourceIdentifiers(snapshot.GetSpec().Resources, wantIdentifiers)
 		})
 
-		It("should return a user error when every matched namespace is ineligible", func() {
-			err := snapshotResourcesAndExpectErr(allIneligiblePlacementPolicy)
-			verifyErrCategoryAndMsg(err, kferrors.ErrCategoryUser, noResourcesSelectedErrMsg)
+		It("can create an empty placement resource snapshot when every matched namespace is ineligible", func() {
+			gotSnapshots, isUpToDate, err := resourceSnapshotManager.SnapshotResourcesIfNoSnapshotExists(ctx, allIneligiblePlacementPolicy)
+			verifyReturnedPrimarySnapshot(gotSnapshots, isUpToDate, err, allIneligiblePlacementPolicy, 0)
+
+			snapshot := getPrimarySnapshotFromCache(allIneligiblePlacementPolicy, 0)
+			Expect(snapshot.GetSpec().Resources).To(BeEmpty(), "The placement resource snapshot is not empty")
 		})
 
 		AfterAll(func() {
 			objs := primarySnapshotObjs(placementPolicy, 1)
+			objs = append(objs, primarySnapshotObjs(allIneligiblePlacementPolicy, 1)...)
 			objs = append(objs, placementPolicy, allIneligiblePlacementPolicy)
 			deleteObjectsAndWait(objs)
 		})
@@ -1896,6 +2081,79 @@ var _ = Describe("resource selection (cluster placement policies)", func() {
 				&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: deploymentName, Namespace: appNamespaceName}},
 				&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: clusterRoleName}},
 			}
+			deleteObjectsAndWait(objs)
+		})
+	})
+
+	Context("resources in the default namespace", Ordered, func() {
+		// The default namespace itself cannot be placed, but the resources within it can.
+		groupLabels := map[string]string{placementGroupLabelKey: utils.RandStr()}
+		configMapName := fmt.Sprintf(configMapNameTemplate, utils.RandStr())
+		labeledConfigMapName := configMapName + "-labeled"
+
+		placementPolicy := newClusterPlacementPolicy(
+			placementv1alpha1.ResourceSelector{
+				APIVersion: "v1",
+				Kind:       "ConfigMap",
+				Namespace:  defaultNamespaceName,
+				Name:       configMapName,
+			},
+			placementv1alpha1.ResourceSelector{
+				APIVersion:    "v1",
+				Kind:          "ConfigMap",
+				Namespace:     defaultNamespaceName,
+				LabelSelector: &metav1.LabelSelector{MatchLabels: groupLabels},
+			},
+		)
+
+		// The resources are sorted by their unique IDs; the labeled config map has a longer name with the same prefix.
+		wantIdentifiers := []placementv1alpha1.ObjectReference{
+			{
+				Namespace:  defaultNamespaceName,
+				Name:       configMapName,
+				APIVersion: "v1",
+				Kind:       "ConfigMap",
+			},
+			{
+				Namespace:  defaultNamespaceName,
+				Name:       labeledConfigMapName,
+				APIVersion: "v1",
+				Kind:       "ConfigMap",
+			},
+		}
+
+		BeforeAll(func() {
+			objs := []client.Object{
+				&corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: defaultNamespaceName},
+					Data:       map[string]string{"key": "value"},
+				},
+				&corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Name: labeledConfigMapName, Namespace: defaultNamespaceName, Labels: groupLabels},
+					Data:       map[string]string{"key": "value"},
+				},
+				placementPolicy,
+			}
+			for _, obj := range objs {
+				Expect(hubClient.Create(ctx, obj)).To(Succeed(), "Failed to create object %T %s", obj, obj.GetName())
+			}
+		})
+
+		It("can create a placement resource snapshot with resources in the default namespace", func() {
+			gotSnapshots, isUpToDate, err := resourceSnapshotManager.SnapshotResourcesIfNoSnapshotExists(ctx, placementPolicy)
+			verifyReturnedPrimarySnapshot(gotSnapshots, isUpToDate, err, placementPolicy, 0)
+
+			snapshot := getPrimarySnapshotFromCache(placementPolicy, 0)
+			verifySnapshottedResourceIdentifiers(snapshot.GetSpec().Resources, wantIdentifiers)
+		})
+
+		AfterAll(func() {
+			objs := primarySnapshotObjs(placementPolicy, 1)
+			objs = append(objs,
+				placementPolicy,
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: configMapName, Namespace: defaultNamespaceName}},
+				&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: labeledConfigMapName, Namespace: defaultNamespaceName}},
+			)
 			deleteObjectsAndWait(objs)
 		})
 	})
