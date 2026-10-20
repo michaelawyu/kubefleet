@@ -103,7 +103,7 @@ func New(mgr ctrl.Manager,
 	}
 
 	if resourceEligibilityChecker == nil {
-		return nil, errors.NewUserError(nil, "a resource eligibility checker must be set",
+		return nil, errors.NewUnexpectedError(nil, "a resource eligibility checker must be set",
 			"manager", managerName)
 	}
 
