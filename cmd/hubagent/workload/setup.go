@@ -338,8 +338,12 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 				klog.ErrorS(err, "Unable to set up the field indexes for the placement policy controllers")
 				return err
 			}
-			snapshots, snapshotErr := placementresourcesnapshot.New(mgr, dynamicClient, dynamicInformerManager, mgr.GetRESTMapper(), placementResourceSnapshotSlots,
-				placementresourcesnapshot.DefaultMaxPerSnapshotResourceDataSizeBytes, placementresourcesnapshot.DefaultMaxPerSnapshotResourceCnt)
+			snapshots, snapshotErr := placementresourcesnapshot.New(mgr,
+				dynamicClient, dynamicInformerManager,
+				customResourceEligibilityChecker, mgr.GetRESTMapper(),
+				placementResourceSnapshotSlots,
+				placementresourcesnapshot.DefaultMaxPerSnapshotResourceDataSizeBytes,
+				placementresourcesnapshot.DefaultMaxPerSnapshotResourceCnt)
 			if snapshotErr != nil {
 				klog.ErrorS(snapshotErr, "Unable to set up the placement resource snapshot manager")
 				return snapshotErr
