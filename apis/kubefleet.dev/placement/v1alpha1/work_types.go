@@ -216,10 +216,13 @@ type ManifestIdentifier struct {
 	Namespace string `json:"namespace,omitempty"`
 
 	// The name of the manifest.
-	// +kubebuilder:validation:Required
-	Name string `json:"name"`
+	// +kubebuilder:validation:Optional
+	Name string `json:"name,omitempty"`
 
 	// The API group, version, kind, and resource of the manifest.
+	//
+	// Note that runtime.RawExtension, which is used to store manifests, have additional validation on the manifest
+	// data (e.g., API Group/Version and Kind must be set; they are not guarateed to be valid though).
 
 	// +kubebuilder:validation:Optional
 	APIGroup string `json:"apiGroup,omitempty"`
@@ -230,8 +233,8 @@ type ManifestIdentifier struct {
 	// +kubebuilder:validation:Required
 	Kind string `json:"kind"`
 
-	// +kubebuilder:validation:Required
-	Resource string `json:"resource"`
+	// +kubebuilder:validation:Optional
+	Resource string `json:"resource,omitempty"`
 }
 
 // WorkList contains a list of Work.
@@ -309,22 +312,22 @@ type AppliedResourceIdentifier struct {
 	Namespace string `json:"namespace,omitempty"`
 
 	// The name of the manifest.
-	// +kubebuilder:validation:Optional
-	Name string `json:"name,omitempty"`
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
 
 	// The API group, version, kind, and resource of the manifest.
 
 	// +kubebuilder:validation:Optional
-	APIGroup string `json:"apiGroup"`
+	APIGroup string `json:"apiGroup,omitempty"`
 
-	// +kubebuilder:validation:Optional
-	APIVersion string `json:"apiVersion,omitempty"`
+	// +kubebuilder:validation:Required
+	APIVersion string `json:"apiVersion"`
 
-	// +kubebuilder:validation:Optional
-	Kind string `json:"kind,omitempty"`
+	// +kubebuilder:validation:Required
+	Kind string `json:"kind"`
 
-	// +kubebuilder:validation:Optional
-	Resource string `json:"resource,omitempty"`
+	// +kubebuilder:validation:Required
+	Resource string `json:"resource"`
 }
 
 // AppliedWorkList contains a list of AppliedWork.

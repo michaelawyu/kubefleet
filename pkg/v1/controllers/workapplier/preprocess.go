@@ -151,11 +151,20 @@ func (r *Reconciler) preProcessPerWorkObjManifests(ctx context.Context, manifest
 		}
 
 		// Reject objects with a generate name but no name.
-		if len(manifestObj.GetGenerateName()) > 0 && len(manifestObj.GetName()) == 0 {
-			wrappedErr := kferrors.NewUserError(nil, "rejected an object with only generate name",
+		if len(manifestObj.GetGenerateName()) > 0 {
+			wrappedErr := kferrors.NewUserError(nil, "cannot process a manifest with only generate name",
 				"ordinal", pieces, "manifestObj", klog.KObj(manifestObj), "work", klog.KObj(ownerWorkObj))
 			processingState.applyErr = wrappedErr
 			processingState.applyRes = ApplyResTypeFoundGenerateName
+			return
+		}
+
+		// Reject objects with no name set.
+		if len(manifestObj.GetName()) == 0 {
+			wrappedErr := kferrors.NewUserError(nil, "cannot process a manifest with no name specified",
+				"ordinal", pieces, "manifestObj", klog.KObj(manifestObj), "work", klog.KObj(ownerWorkObj))
+			processingState.applyErr = wrappedErr
+			processingState.applyRes = ApplyResTypeNoName
 			return
 		}
 
@@ -200,6 +209,16 @@ func (r *Reconciler) decodeManifest(manifest *placementv1alpha1.Manifest) (*sche
 		}
 		return &schema.GroupVersionResource{}, unstructuredObj,
 			kferrors.NewTransientError(err, "failed to complete REST mapping for the manifest")
+	}
+
+	// Verify that the REST scope matches the manifest's scope.
+	if mapping.Scope.Name() == meta.RESTScopeNameRoot && unstructuredObj.GetNamespace() != "" {
+		return &schema.GroupVersionResource{}, unstructuredObj,
+			kferrors.NewUserError(nil, "cluster-scoped resource should not have a namespace specified")
+	}
+	if mapping.Scope.Name() == meta.RESTScopeNameNamespace && unstructuredObj.GetNamespace() == "" {
+		return &schema.GroupVersionResource{}, unstructuredObj,
+			kferrors.NewUserError(nil, "namespace-scoped resource must have a namespace specified")
 	}
 
 	return &mapping.Resource, unstructuredObj, nil

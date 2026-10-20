@@ -459,7 +459,7 @@ var _ = Describe("partial failures", func() {
 		})
 	})
 
-	Context("manifest with generate name but no name", Ordered, func() {
+	Context("manifests with generate name", Ordered, func() {
 		workName := fmt.Sprintf(workNameTemplate, utils.RandStr())
 		// The environment prepared by the envtest package does not support namespace
 		// deletion; each test case would use a new namespace.
@@ -488,22 +488,26 @@ var _ = Describe("partial failures", func() {
 			generateNameOnlyConfigMap.GenerateName = generateNamePrefix
 			generateNameOnlyConfigMapJSON := marshalK8sObjJSON(generateNameOnlyConfigMap)
 
-			// Prepare a config map object with both the name and the generate name set; the name wins.
+			// Prepare a config map object with both the name and the generate name set; it is rejected as well.
+			nameAndGenerateNameConfigMap := configMap.DeepCopy()
+			nameAndGenerateNameConfigMap.Namespace = nsName
+			nameAndGenerateNameConfigMap.Name = configMapName
+			nameAndGenerateNameConfigMap.GenerateName = generateNamePrefix
+			nameAndGenerateNameConfigMapJSON := marshalK8sObjJSON(nameAndGenerateNameConfigMap)
+
+			// Prepare config map objects with only the name set, which are used to fix the manifests above later.
 			regularConfigMap = configMap.DeepCopy()
 			regularConfigMap.Namespace = nsName
 			regularConfigMap.Name = configMapName
-			regularConfigMap.GenerateName = generateNamePrefix
 			regularConfigMapJSON = marshalK8sObjJSON(regularConfigMap)
 
-			// Prepare a config map object, which is used to fix the manifest with only the generate name set later.
 			secondConfigMap = configMap.DeepCopy()
 			secondConfigMap.Namespace = nsName
 			secondConfigMap.Name = secondConfigMapName
-			secondConfigMap.GenerateName = generateNamePrefix
 			secondConfigMapJSON = marshalK8sObjJSON(secondConfigMap)
 
 			// Create a new work object with all the manifest JSONs.
-			createWorkObject(workName, memberReservedNSName1, nil, regularNSJSON, generateNameOnlyConfigMapJSON, regularConfigMapJSON)
+			createWorkObject(workName, memberReservedNSName1, nil, regularNSJSON, generateNameOnlyConfigMapJSON, nameAndGenerateNameConfigMapJSON)
 		})
 
 		It("should add cleanup finalizer to the work object", func() {
@@ -518,23 +522,19 @@ var _ = Describe("partial failures", func() {
 			appliedWorkOwnerRef = prepareAppliedWorkOwnerRef(memberClient1, workName)
 		})
 
-		It("should apply the manifests with names", func() {
-			// Ensure that the NS object has been applied as expected.
+		It("should apply the manifest without a generate name", func() {
 			regularNSObjectAppliedActual := regularNSObjectAppliedActual(memberClient1, nsName, appliedWorkOwnerRef)
 			Eventually(regularNSObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the namespace object")
 
 			Expect(memberClient1.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
-
-			// Ensure that the ConfigMap object with both the name and the generate name set has been applied as expected.
-			configMapObjectAppliedActual := configMapObjectAppliedActual(memberClient1, regularConfigMap, appliedWorkOwnerRef)
-			Eventually(configMapObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the config map object")
-
-			Expect(memberClient1.Get(ctx, client.ObjectKey{Namespace: nsName, Name: configMapName}, regularConfigMap)).To(Succeed(), "Failed to retrieve the ConfigMap object")
 		})
 
-		It("should not create any object for the manifest with only the generate name", func() {
+		It("should not create any object for the manifests with a generate name", func() {
 			configMapsWithPrefixAbsentActual := configMapsWithPrefixAbsentActual(memberClient1, nsName, generateNamePrefix)
 			Consistently(configMapsWithPrefixAbsentActual, consistentlyDuration, consistentlyInterval).Should(Succeed(), "A config map object has been created from the manifest with only the generate name unexpectedly")
+
+			regularConfigMapAbsentActual := regularConfigMapAbsentActual(memberClient1, nsName, configMapName)
+			Consistently(regularConfigMapAbsentActual, consistentlyDuration, consistentlyInterval).Should(Succeed(), "A config map object has been created from the manifest with both the name and the generate name unexpectedly")
 		})
 
 		It("should update the work object status", func() {
@@ -551,8 +551,8 @@ var _ = Describe("partial failures", func() {
 					Reason: placementv1alpha1.WorkAvailableCondNotAllManifestsAvailableReason,
 				},
 			}
-			// Note that the manifest with only the generate name can be REST mapped, so the resource field in its
-			// identifier is populated; its name field, however, is empty.
+			// Note that the manifests with a generate name can be REST mapped, so the resource field in their
+			// identifiers is populated; the name field of the manifest with only the generate name, however, is empty.
 			manifestStatuses := []placementv1alpha1.PerManifestStatus{
 				{
 					Identifier: placementv1alpha1.ManifestIdentifier{
@@ -610,14 +610,8 @@ var _ = Describe("partial failures", func() {
 					Conditions: []metav1.Condition{
 						{
 							Type:               placementv1alpha1.ManifestCondTypeApplied,
-							Status:             metav1.ConditionTrue,
-							Reason:             string(ApplyResTypeApplied),
-							ObservedGeneration: 0,
-						},
-						{
-							Type:               placementv1alpha1.ManifestCondTypeAvailable,
-							Status:             metav1.ConditionTrue,
-							Reason:             string(AvailabilityResultTypeAvailable),
+							Status:             metav1.ConditionFalse,
+							Reason:             string(ApplyResTypeFoundGenerateName),
 							ObservedGeneration: 0,
 						},
 					},
@@ -629,7 +623,7 @@ var _ = Describe("partial failures", func() {
 		})
 
 		It("should update the appliedWork object status", func() {
-			// Only the applied manifests are reported.
+			// Only the applied manifest is reported.
 			appliedResources := []placementv1alpha1.AppliedResource{
 				{
 					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
@@ -642,33 +636,26 @@ var _ = Describe("partial failures", func() {
 					},
 					UID: regularNS.UID,
 				},
-				{
-					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
-						Ordinal:    2,
-						APIGroup:   "",
-						APIVersion: "v1",
-						Kind:       "ConfigMap",
-						Resource:   "configmaps",
-						Name:       configMapName,
-						Namespace:  nsName,
-					},
-					UID: regularConfigMap.UID,
-				},
 			}
 
 			appliedWorkStatusUpdatedActual := appliedWorkStatusUpdated(memberClient1, workName, appliedResources)
 			Eventually(appliedWorkStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update appliedWork status")
 		})
 
-		It("can update the work object to set a name for the manifest with only the generate name", func() {
+		It("can update the work object to remove the generate names", func() {
 			updateWorkObject(workName, memberReservedNSName1, nil, regularNSJSON, secondConfigMapJSON, regularConfigMapJSON)
 		})
 
-		It("should apply the manifest", func() {
-			configMapObjectAppliedActual := configMapObjectAppliedActual(memberClient1, secondConfigMap, appliedWorkOwnerRef)
-			Eventually(configMapObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the second config map object")
+		It("should apply the manifests", func() {
+			secondConfigMapObjectAppliedActual := configMapObjectAppliedActual(memberClient1, secondConfigMap, appliedWorkOwnerRef)
+			Eventually(secondConfigMapObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the second config map object")
 
 			Expect(memberClient1.Get(ctx, client.ObjectKey{Namespace: nsName, Name: secondConfigMapName}, secondConfigMap)).To(Succeed(), "Failed to retrieve the second ConfigMap object")
+
+			firstConfigMapObjectAppliedActual := configMapObjectAppliedActual(memberClient1, regularConfigMap, appliedWorkOwnerRef)
+			Eventually(firstConfigMapObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the config map object")
+
+			Expect(memberClient1.Get(ctx, client.ObjectKey{Namespace: nsName, Name: configMapName}, regularConfigMap)).To(Succeed(), "Failed to retrieve the ConfigMap object")
 		})
 
 		It("should update the work object status", func() {
@@ -819,6 +806,229 @@ var _ = Describe("partial failures", func() {
 
 			secondConfigMapRemovedActual := regularConfigMapRemovedActual(memberClient1, nsName, secondConfigMapName)
 			Eventually(secondConfigMapRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove the second config map object")
+
+			// Ensure that the appliedWork object has been removed.
+			appliedWorkRemovedActual := appliedWorkRemovedActual(memberClient1, workName)
+			Eventually(appliedWorkRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove the appliedWork object")
+
+			workRemovedActual := workRemovedActual(memberReservedNSName1, workName)
+			Eventually(workRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove the work object")
+
+			// The environment prepared by the envtest package does not support namespace
+			// deletion; consequently this test suite would not attempt to verify its deletion.
+		})
+	})
+
+	Context("manifests with no name or mismatching scopes", Ordered, func() {
+		workName := fmt.Sprintf(workNameTemplate, utils.RandStr())
+		// The environment prepared by the envtest package does not support namespace
+		// deletion; each test case would use a new namespace.
+		nsName := fmt.Sprintf(nsNameTemplate, utils.RandStr())
+		noNamespaceConfigMapName := "configmap-no-namespace"
+		namespacedNSName := fmt.Sprintf(nsNameTemplate, utils.RandStr())
+
+		var appliedWorkOwnerRef *metav1.OwnerReference
+		var regularNS *corev1.Namespace
+
+		BeforeAll(func() {
+			// Prepare a namespace object.
+			regularNS = ns.DeepCopy()
+			regularNS.Name = nsName
+			regularNSJSON := marshalK8sObjJSON(regularNS)
+
+			// Prepare a config map object with neither the name nor the generate name set.
+			noNameConfigMap := configMap.DeepCopy()
+			noNameConfigMap.Namespace = nsName
+			noNameConfigMap.Name = ""
+			noNameConfigMap.GenerateName = ""
+			noNameConfigMapJSON := marshalK8sObjJSON(noNameConfigMap)
+
+			// Prepare a config map object (namespace-scoped) with no namespace set.
+			noNamespaceConfigMap := configMap.DeepCopy()
+			noNamespaceConfigMap.Namespace = ""
+			noNamespaceConfigMap.Name = noNamespaceConfigMapName
+			noNamespaceConfigMapJSON := marshalK8sObjJSON(noNamespaceConfigMap)
+
+			// Prepare a namespace object (cluster-scoped) with a namespace set.
+			namespacedNS := ns.DeepCopy()
+			namespacedNS.Namespace = nsName
+			namespacedNS.Name = namespacedNSName
+			namespacedNSJSON := marshalK8sObjJSON(namespacedNS)
+
+			// Create a new work object with all the manifest JSONs.
+			createWorkObject(workName, memberReservedNSName1, nil, regularNSJSON, noNameConfigMapJSON, noNamespaceConfigMapJSON, namespacedNSJSON)
+		})
+
+		It("should add cleanup finalizer to the work object", func() {
+			finalizerAddedActual := workFinalizerAddedActual(memberReservedNSName1, workName)
+			Eventually(finalizerAddedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to add cleanup finalizer to the work object")
+		})
+
+		It("should prepare an appliedWork object", func() {
+			appliedWorkCreatedActual := appliedWorkCreatedActual(memberClient1, memberReservedNSName1, workName)
+			Eventually(appliedWorkCreatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to prepare an appliedWork object")
+
+			appliedWorkOwnerRef = prepareAppliedWorkOwnerRef(memberClient1, workName)
+		})
+
+		It("should apply the valid manifest", func() {
+			regularNSObjectAppliedActual := regularNSObjectAppliedActual(memberClient1, nsName, appliedWorkOwnerRef)
+			Eventually(regularNSObjectAppliedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to apply the namespace object")
+
+			Expect(memberClient1.Get(ctx, client.ObjectKey{Name: nsName}, regularNS)).To(Succeed(), "Failed to retrieve the NS object")
+		})
+
+		It("should not create any object for the rejected manifests", func() {
+			Consistently(func() error {
+				configMapList := &corev1.ConfigMapList{}
+				if err := memberClient1.List(ctx, configMapList, client.InNamespace(nsName)); err != nil {
+					return fmt.Errorf("failed to list ConfigMap objects: %w", err)
+				}
+				for idx := range configMapList.Items {
+					// The root CA config map might be present in the namespace (if the test environment
+					// publishes it); it is not created by the work applier.
+					if configMapList.Items[idx].Name != "kube-root-ca.crt" {
+						return fmt.Errorf("found an unexpected ConfigMap object (%s)", configMapList.Items[idx].Name)
+					}
+				}
+				return nil
+			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "A config map object has been created from the manifest with no name unexpectedly")
+
+			noNamespaceConfigMapAbsentActual := regularConfigMapAbsentActual(memberClient1, "default", noNamespaceConfigMapName)
+			Consistently(noNamespaceConfigMapAbsentActual, consistentlyDuration, consistentlyInterval).Should(Succeed(), "A config map object has been created from the manifest with no namespace unexpectedly")
+
+			namespacedNSAbsentActual := namespaceAbsentActual(memberClient1, namespacedNSName)
+			Consistently(namespacedNSAbsentActual, consistentlyDuration, consistentlyInterval).Should(Succeed(), "A namespace object has been created from the manifest with a namespace set unexpectedly")
+		})
+
+		It("should update the work object status", func() {
+			// Prepare the status information.
+			workConds := []metav1.Condition{
+				{
+					Type:   placementv1alpha1.WorkCondTypeApplied,
+					Status: metav1.ConditionFalse,
+					Reason: placementv1alpha1.WorkAppliedCondNotAllManifestsAppliedReason,
+				},
+				{
+					Type:   placementv1alpha1.WorkCondTypeAvailable,
+					Status: metav1.ConditionFalse,
+					Reason: placementv1alpha1.WorkAvailableCondNotAllManifestsAvailableReason,
+				},
+			}
+			// Note that the manifest with no name can be REST mapped, so the resource field in its identifier is
+			// populated; its name field, however, is empty. The manifests with mismatching scopes have an empty
+			// resource field in their identifiers, as the scope check is part of the decoding process.
+			manifestStatuses := []placementv1alpha1.PerManifestStatus{
+				{
+					Identifier: placementv1alpha1.ManifestIdentifier{
+						Ordinal:    0,
+						APIGroup:   "",
+						APIVersion: "v1",
+						Kind:       "Namespace",
+						Resource:   "namespaces",
+						Name:       nsName,
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:               placementv1alpha1.ManifestCondTypeApplied,
+							Status:             metav1.ConditionTrue,
+							Reason:             string(ApplyResTypeApplied),
+							ObservedGeneration: 0,
+						},
+						{
+							Type:               placementv1alpha1.ManifestCondTypeAvailable,
+							Status:             metav1.ConditionTrue,
+							Reason:             string(AvailabilityResultTypeAvailable),
+							ObservedGeneration: 0,
+						},
+					},
+				},
+				{
+					Identifier: placementv1alpha1.ManifestIdentifier{
+						Ordinal:    1,
+						APIGroup:   "",
+						APIVersion: "v1",
+						Kind:       "ConfigMap",
+						Resource:   "configmaps",
+						Name:       "",
+						Namespace:  nsName,
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:               placementv1alpha1.ManifestCondTypeApplied,
+							Status:             metav1.ConditionFalse,
+							Reason:             string(ApplyResTypeNoName),
+							ObservedGeneration: 0,
+						},
+					},
+				},
+				{
+					Identifier: placementv1alpha1.ManifestIdentifier{
+						Ordinal:    2,
+						APIGroup:   "",
+						APIVersion: "v1",
+						Kind:       "ConfigMap",
+						Resource:   "",
+						Name:       noNamespaceConfigMapName,
+						Namespace:  "",
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:               placementv1alpha1.ManifestCondTypeApplied,
+							Status:             metav1.ConditionFalse,
+							Reason:             string(ApplyResTypeDecodingErred),
+							ObservedGeneration: 0,
+						},
+					},
+				},
+				{
+					Identifier: placementv1alpha1.ManifestIdentifier{
+						Ordinal:    3,
+						APIGroup:   "",
+						APIVersion: "v1",
+						Kind:       "Namespace",
+						Resource:   "",
+						Name:       namespacedNSName,
+						Namespace:  nsName,
+					},
+					Conditions: []metav1.Condition{
+						{
+							Type:               placementv1alpha1.ManifestCondTypeApplied,
+							Status:             metav1.ConditionFalse,
+							Reason:             string(ApplyResTypeDecodingErred),
+							ObservedGeneration: 0,
+						},
+					},
+				},
+			}
+
+			workStatusUpdatedActual := workStatusUpdated(memberReservedNSName1, workName, workConds, manifestStatuses)
+			Eventually(workStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update work status")
+		})
+
+		It("should update the appliedWork object status", func() {
+			// Only the applied manifest is reported.
+			appliedResources := []placementv1alpha1.AppliedResource{
+				{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
+						Ordinal:    0,
+						APIGroup:   "",
+						APIVersion: "v1",
+						Kind:       "Namespace",
+						Resource:   "namespaces",
+						Name:       nsName,
+					},
+					UID: regularNS.UID,
+				},
+			}
+
+			appliedWorkStatusUpdatedActual := appliedWorkStatusUpdated(memberClient1, workName, appliedResources)
+			Eventually(appliedWorkStatusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update appliedWork status")
+		})
+
+		AfterAll(func() {
+			// Delete the work object and related resources.
+			deleteWorkObject(workName, memberReservedNSName1)
 
 			// Ensure that the appliedWork object has been removed.
 			appliedWorkRemovedActual := appliedWorkRemovedActual(memberClient1, workName)

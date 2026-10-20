@@ -85,7 +85,11 @@ spec:
                       description: The UID of the applied manifest.
                       type: string
                   required:
+                  - apiVersion
+                  - kind
+                  - name
                   - ordinal
+                  - resource
                   - uid
                   type: object
                 type: array

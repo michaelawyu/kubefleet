@@ -60,6 +60,7 @@ const (
 	// The result types for apply op failures.
 	ApplyResTypeDecodingErred                   ApplyResultType = "DecodingErred"
 	ApplyResTypeFoundGenerateName               ApplyResultType = "FoundGenerateName"
+	ApplyResTypeNoName                          ApplyResultType = "NoNameSpecified"
 	ApplyResTypeDuplicated                      ApplyResultType = "Duplicated"
 	ApplyResTypeFailedToFindObjInMemberCluster  ApplyResultType = "FailedToFindObjInMemberCluster"
 	ApplyResTypeOwnedByOtherKubeFleetAPIObjects ApplyResultType = "OwnedByOtherKubeFleetAPIObjects"
@@ -80,6 +81,7 @@ var allApplyResTypes = sets.New(
 	ApplyResTypePreparingToProcess,
 	ApplyResTypeDecodingErred,
 	ApplyResTypeFoundGenerateName,
+	ApplyResTypeNoName,
 	ApplyResTypeDuplicated,
 	ApplyResTypeFailedToFindObjInMemberCluster,
 	ApplyResTypeOwnedByOtherKubeFleetAPIObjects,
