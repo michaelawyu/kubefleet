@@ -87,7 +87,7 @@ const (
 const clusterScopedNS = ""
 
 const (
-	eventuallyDuration   = time.Second * 10
+	eventuallyDuration   = time.Second * 20
 	eventuallyInterval   = time.Millisecond * 500
 	consistentlyDuration = time.Second * 5
 	consistentlyInterval = time.Millisecond * 500
@@ -145,16 +145,16 @@ var (
 )
 
 // placementPolicyKind returns the kind of the placement policy of the scope that the given namespace implies.
-func placementPolicyKind(policyNS string) string {
-	if policyNS == clusterScopedNS {
+func placementPolicyKind(policyNSName string) string {
+	if policyNSName == clusterScopedNS {
 		return placementv1alpha1.ClusterPlacementPolicyKind
 	}
 	return placementv1alpha1.PlacementPolicyKind
 }
 
 // stagedUpdateRunKind returns the kind of the staged update run of the scope that the given namespace implies.
-func stagedUpdateRunKind(runNS string) string {
-	if runNS == clusterScopedNS {
+func stagedUpdateRunKind(runNSName string) string {
+	if runNSName == clusterScopedNS {
 		return rolloutv1alpha1.ClusterStagedUpdateRunKind
 	}
 	return rolloutv1alpha1.StagedUpdateRunKind
@@ -162,8 +162,8 @@ func stagedUpdateRunKind(runNS string) string {
 
 // newPlacementPolicyObj returns a placement policy object of the appropriate scope with only the namespace and name
 // set: a ClusterPlacementPolicy object if the namespace is empty, or a PlacementPolicy object otherwise.
-func newPlacementPolicyObj(policyNS, policyName string) placementv1alpha1.PlacementPolicyAccessor {
-	if policyNS == clusterScopedNS {
+func newPlacementPolicyObj(policyNSName, policyName string) placementv1alpha1.PlacementPolicyAccessor {
+	if policyNSName == clusterScopedNS {
 		return &placementv1alpha1.ClusterPlacementPolicy{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: policyName,
@@ -172,7 +172,7 @@ func newPlacementPolicyObj(policyNS, policyName string) placementv1alpha1.Placem
 	}
 	return &placementv1alpha1.PlacementPolicy{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: policyNS,
+			Namespace: policyNSName,
 			Name:      policyName,
 		},
 	}
@@ -236,8 +236,8 @@ func newStagedUpdateStrategyObj(strategyNS, strategyName string) rolloutv1alpha1
 
 // newStagedUpdateRunObj returns a staged update run object of the appropriate scope with only the namespace and name
 // set: a ClusterStagedUpdateRun object if the namespace is empty, or a StagedUpdateRun object otherwise.
-func newStagedUpdateRunObj(runNS, runName string) rolloutv1alpha1.StagedUpdateRunAccessor {
-	if runNS == clusterScopedNS {
+func newStagedUpdateRunObj(runNSName, runName string) rolloutv1alpha1.StagedUpdateRunAccessor {
+	if runNSName == clusterScopedNS {
 		return &rolloutv1alpha1.ClusterStagedUpdateRun{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: runName,
@@ -246,7 +246,7 @@ func newStagedUpdateRunObj(runNS, runName string) rolloutv1alpha1.StagedUpdateRu
 	}
 	return &rolloutv1alpha1.StagedUpdateRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Namespace: runNS,
+			Namespace: runNSName,
 			Name:      runName,
 		},
 	}
@@ -295,18 +295,18 @@ func createConfigMap(configMapName string) *corev1.ConfigMap {
 //
 // If the namespace is empty, a ClusterPlacementPolicy object is created; otherwise, a PlacementPolicy object is
 // created, which must be in the app namespace to select the ConfigMap.
-func createPlacementPolicy(policyNS, policyName, configMapName string) placementv1alpha1.PlacementPolicyAccessor {
+func createPlacementPolicy(policyNSName, policyName, configMapName string) placementv1alpha1.PlacementPolicyAccessor {
 	resourceSelector := placementv1alpha1.ResourceSelector{
 		APIVersion: "v1",
 		Kind:       "ConfigMap",
 		Name:       configMapName,
 	}
-	if policyNS == clusterScopedNS {
+	if policyNSName == clusterScopedNS {
 		// A cluster placement policy must specify the namespace of the namespaced resources it selects.
 		resourceSelector.Namespace = appNamespaceName
 	}
 
-	policy := newPlacementPolicyObj(policyNS, policyName)
+	policy := newPlacementPolicyObj(policyNSName, policyName)
 	policy.SetSpec(placementv1alpha1.PlacementPolicySpec{
 		ResourceSelectors: []placementv1alpha1.ResourceSelector{resourceSelector},
 	})
@@ -414,8 +414,8 @@ func createStagedUpdateStrategy(strategyNS, strategyName string, stages []rollou
 //
 // If the namespace is empty, a ClusterStagedUpdateRun object is created; otherwise, a StagedUpdateRun object
 // is created.
-func createStagedUpdateRun(runNS, runName string, spec rolloutv1alpha1.StagedUpdateRunSpec) rolloutv1alpha1.StagedUpdateRunAccessor {
-	run := newStagedUpdateRunObj(runNS, runName)
+func createStagedUpdateRun(runNSName, runName string, spec rolloutv1alpha1.StagedUpdateRunSpec) rolloutv1alpha1.StagedUpdateRunAccessor {
+	run := newStagedUpdateRunObj(runNSName, runName)
 	run.SetSpec(spec)
 	Expect(hubClient.Create(ctx, run)).To(Succeed(), "Failed to create the staged update run")
 	return run
@@ -492,9 +492,9 @@ func updateStagedUpdateStrategyStages(strategyNS, strategyName string, stages []
 }
 
 // updateStagedUpdateRunSuspended suspends or resumes a staged update run.
-func updateStagedUpdateRunSuspended(runNS, runName string, suspended bool) {
+func updateStagedUpdateRunSuspended(runNSName, runName string, suspended bool) {
 	Eventually(func() error {
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
@@ -656,8 +656,8 @@ func createManualApprovalRequest(requestNS, requestName, runName, stageName stri
 // that test cases change (e.g., placement policies and bindings), but it does process a staged update run when an
 // approval request that references the run is deleted; the function creates such an approval request (with the
 // given name, for the given stage) and deletes it, and returns once the cache has observed the deletion.
-func triggerStagedUpdateRunReconciliation(runNS, runName, stageName, requestName string) {
-	request := createManualApprovalRequest(runNS, requestName, runName, stageName)
+func triggerStagedUpdateRunReconciliation(runNSName, runName, stageName, requestName string) {
+	request := createManualApprovalRequest(runNSName, requestName, runName, stageName)
 	waitForObjectsToBeCached(request)
 	Expect(hubClient.Delete(ctx, request)).To(Succeed(), "Failed to delete the approval request")
 	Eventually(objectRemovedActual(request), eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to observe the deletion of the approval request in the cache")
@@ -739,9 +739,9 @@ func waitForObjectsToBeCached(objs ...client.Object) {
 }
 
 // getStagedUpdateRun retrieves a staged update run (cluster-scoped if the namespace is empty).
-func getStagedUpdateRun(runNS, runName string) (rolloutv1alpha1.StagedUpdateRunAccessor, error) {
-	run := newStagedUpdateRunObj(runNS, runName)
-	if err := hubClient.Get(ctx, client.ObjectKey{Namespace: runNS, Name: runName}, run); err != nil {
+func getStagedUpdateRun(runNSName, runName string) (rolloutv1alpha1.StagedUpdateRunAccessor, error) {
+	run := newStagedUpdateRunObj(runNSName, runName)
+	if err := hubClient.Get(ctx, client.ObjectKey{Namespace: runNSName, Name: runName}, run); err != nil {
 		return nil, fmt.Errorf("failed to retrieve the staged update run: %w", err)
 	}
 	return run, nil
@@ -1017,23 +1017,23 @@ func setObservedGenerationOnAllConditions(status *rolloutv1alpha1.StagedUpdateRu
 
 // stagedUpdateRunStatusUpdatedActual verifies that the status of a staged update run matches the given one; the
 // observed generations of all the conditions are expected to match the current generation of the run.
-func stagedUpdateRunStatusUpdatedActual(runNS, runName string, wantStatus *rolloutv1alpha1.StagedUpdateRunStatus) func() error {
-	return stagedUpdateRunStatusMatchesActual(runNS, runName, wantStatus, true)
+func stagedUpdateRunStatusUpdatedActual(runNSName, runName string, wantStatus *rolloutv1alpha1.StagedUpdateRunStatus) func() error {
+	return stagedUpdateRunStatusMatchesActual(runNSName, runName, wantStatus, true)
 }
 
 // stagedUpdateRunRolloutStatusActual is the same as stagedUpdateRunStatusUpdatedActual, except that it ignores the
 // timestamps of the stages, which are set as a rollout progresses; see stagedUpdateRunStagesCompletedInOrderActual
 // for checking the timestamps.
-func stagedUpdateRunRolloutStatusActual(runNS, runName string, wantStatus *rolloutv1alpha1.StagedUpdateRunStatus) func() error {
-	return stagedUpdateRunStatusMatchesActual(runNS, runName, wantStatus, true, ignoreFieldsPerStageStatusTimestamps)
+func stagedUpdateRunRolloutStatusActual(runNSName, runName string, wantStatus *rolloutv1alpha1.StagedUpdateRunStatus) func() error {
+	return stagedUpdateRunStatusMatchesActual(runNSName, runName, wantStatus, true, ignoreFieldsPerStageStatusTimestamps)
 }
 
 // stagedUpdateRunRolloutStatusAsIsActual is the same as stagedUpdateRunRolloutStatusActual, except that it compares
 // the observed generations of the conditions as given in the expected status (see observedAt), rather than expecting
 // all of them to match the current generation of the run; this is useful once the generation of a run has changed
 // (e.g., after it is suspended), as the controller refreshes the observed generations of some conditions only.
-func stagedUpdateRunRolloutStatusAsIsActual(runNS, runName string, wantStatus *rolloutv1alpha1.StagedUpdateRunStatus) func() error {
-	return stagedUpdateRunStatusMatchesActual(runNS, runName, wantStatus, false, ignoreFieldsPerStageStatusTimestamps)
+func stagedUpdateRunRolloutStatusAsIsActual(runNSName, runName string, wantStatus *rolloutv1alpha1.StagedUpdateRunStatus) func() error {
+	return stagedUpdateRunStatusMatchesActual(runNSName, runName, wantStatus, false, ignoreFieldsPerStageStatusTimestamps)
 }
 
 // observedAt returns a copy of the given condition, observed at the given generation.
@@ -1046,14 +1046,14 @@ func observedAt(generation int64, cond metav1.Condition) metav1.Condition {
 // the given additional comparison options. If setObservedGenerations is true, the observed generations of all the
 // conditions are expected to match the current generation of the run; otherwise, they are compared as given.
 func stagedUpdateRunStatusMatchesActual(
-	runNS, runName string,
+	runNSName, runName string,
 	wantStatus *rolloutv1alpha1.StagedUpdateRunStatus,
 	setObservedGenerations bool,
 	additionalCmpOpts ...cmp.Option,
 ) func() error {
 	return func() error {
 		// Retrieve the staged update run.
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
@@ -1083,9 +1083,9 @@ func stagedUpdateRunStatusMatchesActual(
 // Note that the timestamps have a precision of seconds; as the controller computes elapsed wait times against
 // persisted (i.e., truncated) timestamps as well, a stage that waits for a given duration still lasts at least that
 // long by its timestamps.
-func stagedUpdateRunStageLastedAtLeastActual(runNS, runName, stageName string, minDuration time.Duration) func() error {
+func stagedUpdateRunStageLastedAtLeastActual(runNSName, runName, stageName string, minDuration time.Duration) func() error {
 	return func() error {
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
@@ -1112,9 +1112,9 @@ func stagedUpdateRunStageLastedAtLeastActual(runNS, runName, stageName string, m
 //
 // Note that the timestamps have a precision of seconds; a stage might start in the same second as the previous one
 // completes.
-func stagedUpdateRunStagesCompletedInOrderActual(runNS, runName string) func() error {
+func stagedUpdateRunStagesCompletedInOrderActual(runNSName, runName string) func() error {
 	return func() error {
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
@@ -1142,7 +1142,7 @@ func stagedUpdateRunStagesCompletedInOrderActual(runNS, runName string) func() e
 // stagedUpdateRunFailedToInitializeActual verifies that a staged update run has failed to initialize, i.e., its status
 // has only the Initialized condition set to False, and the message of the condition contains the given substring
 // (so that test cases can tell the causes of failures apart).
-func stagedUpdateRunFailedToInitializeActual(runNS, runName, wantMsgSubstr string) func() error {
+func stagedUpdateRunFailedToInitializeActual(runNSName, runName, wantMsgSubstr string) func() error {
 	wantStatus := &rolloutv1alpha1.StagedUpdateRunStatus{
 		Conditions: []metav1.Condition{
 			{
@@ -1152,14 +1152,14 @@ func stagedUpdateRunFailedToInitializeActual(runNS, runName, wantMsgSubstr strin
 			},
 		},
 	}
-	statusUpdatedActual := stagedUpdateRunStatusUpdatedActual(runNS, runName, wantStatus)
+	statusUpdatedActual := stagedUpdateRunStatusUpdatedActual(runNSName, runName, wantStatus)
 
 	return func() error {
 		if err := statusUpdatedActual(); err != nil {
 			return err
 		}
 
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
@@ -1173,9 +1173,9 @@ func stagedUpdateRunFailedToInitializeActual(runNS, runName, wantMsgSubstr strin
 
 // stagedUpdateRunConditionActual verifies that a staged update run has the given run-level condition, observed at
 // the current generation of the run.
-func stagedUpdateRunConditionActual(runNS, runName string, wantCond metav1.Condition) func() error {
+func stagedUpdateRunConditionActual(runNSName, runName string, wantCond metav1.Condition) func() error {
 	return func() error {
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
@@ -1193,9 +1193,9 @@ func stagedUpdateRunConditionActual(runNS, runName string, wantCond metav1.Condi
 // stagedUpdateRunStageLayoutActual verifies the layout of the stages in a staged update run, i.e., the stages, their
 // clusters and tasks, and the resolved max concurrency; the progress information (conditions, timestamps, and
 // approval request names) is ignored.
-func stagedUpdateRunStageLayoutActual(runNS, runName string, wantStages []rolloutv1alpha1.PerStageStatus) func() error {
+func stagedUpdateRunStageLayoutActual(runNSName, runName string, wantStages []rolloutv1alpha1.PerStageStatus) func() error {
 	return func() error {
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
@@ -1214,9 +1214,9 @@ func stagedUpdateRunStageLayoutActual(runNS, runName string, wantStages []rollou
 }
 
 // stagedUpdateRunCleanupFinalizerRemovedActual verifies that a staged update run does not have the cleanup finalizer.
-func stagedUpdateRunCleanupFinalizerRemovedActual(runNS, runName string) func() error {
+func stagedUpdateRunCleanupFinalizerRemovedActual(runNSName, runName string) func() error {
 	return func() error {
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
@@ -1228,9 +1228,9 @@ func stagedUpdateRunCleanupFinalizerRemovedActual(runNS, runName string) func() 
 }
 
 // stagedUpdateRunCleanupFinalizerAddedActual verifies that a staged update run has the cleanup finalizer.
-func stagedUpdateRunCleanupFinalizerAddedActual(runNS, runName string) func() error {
+func stagedUpdateRunCleanupFinalizerAddedActual(runNSName, runName string) func() error {
 	return func() error {
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
@@ -1243,20 +1243,20 @@ func stagedUpdateRunCleanupFinalizerAddedActual(runNS, runName string) func() er
 
 // wantStagedUpdateRunObjectRef returns the reference to a staged update run (cluster-scoped if the namespace is
 // empty) that the controller registers in the binding manager claim of a placement policy.
-func wantStagedUpdateRunObjectRef(runNS, runName string) placementv1alpha1.ObjectReference {
+func wantStagedUpdateRunObjectRef(runNSName, runName string) placementv1alpha1.ObjectReference {
 	return placementv1alpha1.ObjectReference{
 		APIGroup:   rolloutv1alpha1.GroupVersion.Group,
 		APIVersion: rolloutv1alpha1.GroupVersion.Version,
-		Kind:       stagedUpdateRunKind(runNS),
-		Namespace:  runNS,
+		Kind:       stagedUpdateRunKind(runNSName),
+		Namespace:  runNSName,
 		Name:       runName,
 	}
 }
 
 // bindingManagerRoleHeldActual verifies that the staged update run controller holds the binding manager role of a
 // placement policy, on behalf of exactly the given staged update runs (in any order).
-func bindingManagerRoleHeldActual(policyNS, policyName string, wantObjectRefs []placementv1alpha1.ObjectReference) func() error {
-	return bindingManagerActual(policyNS, policyName, &placementv1alpha1.BindingManager{
+func bindingManagerRoleHeldActual(policyNSName, policyName string, wantObjectRefs []placementv1alpha1.ObjectReference) func() error {
+	return bindingManagerActual(policyNSName, policyName, &placementv1alpha1.BindingManager{
 		ControllerName: controllerName,
 		ObjectRefs:     wantObjectRefs,
 	})
@@ -1264,10 +1264,10 @@ func bindingManagerRoleHeldActual(policyNS, policyName string, wantObjectRefs []
 
 // bindingManagerActual verifies that the binding manager of a placement policy matches the given one (nil if no one
 // holds the role); the object references may come in any order.
-func bindingManagerActual(policyNS, policyName string, wantBindingManager *placementv1alpha1.BindingManager) func() error {
+func bindingManagerActual(policyNSName, policyName string, wantBindingManager *placementv1alpha1.BindingManager) func() error {
 	return func() error {
-		policy := newPlacementPolicyObj(policyNS, policyName)
-		if err := hubClient.Get(ctx, client.ObjectKey{Namespace: policyNS, Name: policyName}, policy); err != nil {
+		policy := newPlacementPolicyObj(policyNSName, policyName)
+		if err := hubClient.Get(ctx, client.ObjectKey{Namespace: policyNSName, Name: policyName}, policy); err != nil {
 			return fmt.Errorf("failed to retrieve the placement policy: %w", err)
 		}
 
@@ -1286,10 +1286,10 @@ func bindingManagerActual(policyNS, policyName string, wantBindingManager *place
 //
 // Note that the function does not wait for the cache-backed client (which the controller shares) to observe the
 // change, as the controller may act on it right away (e.g., claim a released role).
-func updatePlacementPolicyBindingManager(policyNS, policyName string, bindingManager *placementv1alpha1.BindingManager) {
+func updatePlacementPolicyBindingManager(policyNSName, policyName string, bindingManager *placementv1alpha1.BindingManager) {
 	Eventually(func() error {
-		policy := newPlacementPolicyObj(policyNS, policyName)
-		if err := hubClient.Get(ctx, client.ObjectKey{Namespace: policyNS, Name: policyName}, policy); err != nil {
+		policy := newPlacementPolicyObj(policyNSName, policyName)
+		if err := hubClient.Get(ctx, client.ObjectKey{Namespace: policyNSName, Name: policyName}, policy); err != nil {
 			return fmt.Errorf("failed to retrieve the placement policy: %w", err)
 		}
 		policy.GetStatus().BindingManager = bindingManager.DeepCopy()
@@ -1299,11 +1299,11 @@ func updatePlacementPolicyBindingManager(policyNS, policyName string, bindingMan
 
 // wantStagedUpdateRunOwnerRefs returns the owner references that the controller sets on the objects (e.g., approval
 // requests) that a staged update run (cluster-scoped if the namespace is empty) owns.
-func wantStagedUpdateRunOwnerRefs(runNS, runName string, runUID types.UID) []metav1.OwnerReference {
+func wantStagedUpdateRunOwnerRefs(runNSName, runName string, runUID types.UID) []metav1.OwnerReference {
 	return []metav1.OwnerReference{
 		{
 			APIVersion:         rolloutv1alpha1.GroupVersion.String(),
-			Kind:               stagedUpdateRunKind(runNS),
+			Kind:               stagedUpdateRunKind(runNSName),
 			Name:               runName,
 			UID:                runUID,
 			Controller:         ptr.To(true),
@@ -1314,9 +1314,9 @@ func wantStagedUpdateRunOwnerRefs(runNS, runName string, runUID types.UID) []met
 
 // stagedUpdateRunConditionMessageActual verifies that the run-level condition of the given type of a staged update
 // run has a message that contains the given substring.
-func stagedUpdateRunConditionMessageActual(runNS, runName, condType, wantMsgSubstr string) func() error {
+func stagedUpdateRunConditionMessageActual(runNSName, runName, condType, wantMsgSubstr string) func() error {
 	return func() error {
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
@@ -1329,10 +1329,10 @@ func stagedUpdateRunConditionMessageActual(runNS, runName, condType, wantMsgSubs
 }
 
 // bindingManagerRoleReleasedActual verifies that no one holds the binding manager role of a placement policy.
-func bindingManagerRoleReleasedActual(policyNS, policyName string) func() error {
+func bindingManagerRoleReleasedActual(policyNSName, policyName string) func() error {
 	return func() error {
-		policy := newPlacementPolicyObj(policyNS, policyName)
-		if err := hubClient.Get(ctx, client.ObjectKey{Namespace: policyNS, Name: policyName}, policy); err != nil {
+		policy := newPlacementPolicyObj(policyNSName, policyName)
+		if err := hubClient.Get(ctx, client.ObjectKey{Namespace: policyNSName, Name: policyName}, policy); err != nil {
 			return fmt.Errorf("failed to retrieve the placement policy: %w", err)
 		}
 		if bindingManager := policy.GetStatus().BindingManager; bindingManager != nil {
@@ -1385,8 +1385,8 @@ func placementBindingGenerationActual(bindingNS, bindingName string, wantGenerat
 }
 
 // getPerClusterCondition retrieves the condition of the given type (nil if absent) of a cluster in a staged update run.
-func getPerClusterCondition(runNS, runName, clusterName, condType string) (*metav1.Condition, error) {
-	run, err := getStagedUpdateRun(runNS, runName)
+func getPerClusterCondition(runNSName, runName, clusterName, condType string) (*metav1.Condition, error) {
+	run, err := getStagedUpdateRun(runNSName, runName)
 	if err != nil {
 		return nil, err
 	}
@@ -1402,9 +1402,9 @@ func getPerClusterCondition(runNS, runName, clusterName, condType string) (*meta
 
 // perClusterConditionMessageActual verifies that the condition of the given type of a cluster in a staged update run
 // has a message that contains the given substring (so that test cases can tell the causes of outcomes apart).
-func perClusterConditionMessageActual(runNS, runName, clusterName, condType, wantMsgSubstr string) func() error {
+func perClusterConditionMessageActual(runNSName, runName, clusterName, condType, wantMsgSubstr string) func() error {
 	return func() error {
-		cond, err := getPerClusterCondition(runNS, runName, clusterName, condType)
+		cond, err := getPerClusterCondition(runNSName, runName, clusterName, condType)
 		if err != nil {
 			return err
 		}
@@ -1417,9 +1417,9 @@ func perClusterConditionMessageActual(runNS, runName, clusterName, condType, wan
 
 // perStageConditionMessageActual verifies that the condition of the given type of a stage in a staged update run
 // has a message that contains the given substring.
-func perStageConditionMessageActual(runNS, runName, stageName, condType, wantMsgSubstr string) func() error {
+func perStageConditionMessageActual(runNSName, runName, stageName, condType, wantMsgSubstr string) func() error {
 	return func() error {
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
@@ -1442,15 +1442,15 @@ func perStageConditionMessageActual(runNS, runName, stageName, condType, wantMsg
 //
 // The approval request is in the namespace of the staged update run (i.e., it is a ClusterApprovalRequest object if
 // the staged update run is cluster-scoped).
-func approvalRequestCreatedActual(runNS, runName, requestName, wantStageName string) func() error {
+func approvalRequestCreatedActual(runNSName, runName, requestName, wantStageName string) func() error {
 	return func() error {
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
 
-		request := newApprovalRequestObj(runNS, requestName)
-		if err := hubClient.Get(ctx, client.ObjectKey{Namespace: runNS, Name: requestName}, request); err != nil {
+		request := newApprovalRequestObj(runNSName, requestName)
+		if err := hubClient.Get(ctx, client.ObjectKey{Namespace: runNSName, Name: requestName}, request); err != nil {
 			return fmt.Errorf("failed to retrieve the approval request: %w", err)
 		}
 
@@ -1462,7 +1462,7 @@ func approvalRequestCreatedActual(runNS, runName, requestName, wantStageName str
 			return fmt.Errorf("approval request spec diff (-got +want):\n%s", diff)
 		}
 
-		wantOwnerRefs := wantStagedUpdateRunOwnerRefs(runNS, runName, run.GetUID())
+		wantOwnerRefs := wantStagedUpdateRunOwnerRefs(runNSName, runName, run.GetUID())
 		if diff := cmp.Diff(request.GetOwnerReferences(), wantOwnerRefs); diff != "" {
 			return fmt.Errorf("approval request owner references diff (-got +want):\n%s", diff)
 		}
@@ -1555,9 +1555,9 @@ func approvalRequestReplacedActual(requestNS, requestName string, oldUID types.U
 // perStageTaskTimedWaitLastedAtLeastActual verifies that the after-stage TimedWait task of a stage in a staged update
 // run has started and elapsed, at least the given duration apart (as the last transition times of its conditions
 // show), and that the stage has completed no earlier than the wait time elapsed.
-func perStageTaskTimedWaitLastedAtLeastActual(runNS, runName, stageName string, minDuration time.Duration) func() error {
+func perStageTaskTimedWaitLastedAtLeastActual(runNSName, runName, stageName string, minDuration time.Duration) func() error {
 	return func() error {
-		run, err := getStagedUpdateRun(runNS, runName)
+		run, err := getStagedUpdateRun(runNSName, runName)
 		if err != nil {
 			return err
 		}
