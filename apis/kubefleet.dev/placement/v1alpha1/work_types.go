@@ -221,8 +221,8 @@ type ManifestIdentifier struct {
 
 	// The API group, version, kind, and resource of the manifest.
 	//
-	// Note that runtime.RawExtension, which is used to store manifests, have additional validation on the manifest
-	// data (e.g., API Group/Version and Kind must be set; they are not guarateed to be valid though).
+	// Note that runtime.RawExtension, which is used to store manifests, has additional validation on the manifest
+	// data (e.g., API Group/Version and Kind must be set; they are not guaranteed to be valid though).
 
 	// +kubebuilder:validation:Optional
 	APIGroup string `json:"apiGroup,omitempty"`

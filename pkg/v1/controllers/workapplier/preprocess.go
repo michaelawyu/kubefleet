@@ -150,9 +150,9 @@ func (r *Reconciler) preProcessPerWorkObjManifests(ctx context.Context, manifest
 			return
 		}
 
-		// Reject objects with a generate name but no name.
+		// Reject objects with a generate name set, regardless of whether a name is also set.
 		if len(manifestObj.GetGenerateName()) > 0 {
-			wrappedErr := kferrors.NewUserError(nil, "cannot process a manifest with only generate name",
+			wrappedErr := kferrors.NewUserError(nil, "cannot process a manifest with a generate name",
 				"ordinal", pieces, "manifestObj", klog.KObj(manifestObj), "work", klog.KObj(ownerWorkObj))
 			processingState.applyErr = wrappedErr
 			processingState.applyRes = ApplyResTypeFoundGenerateName
