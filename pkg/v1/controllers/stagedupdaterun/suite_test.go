@@ -19,6 +19,8 @@ package stagedupdaterun
 import (
 	"context"
 	"flag"
+	"log"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -99,6 +101,25 @@ var (
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 )
+
+const (
+	// The environment variable that the CI pipeline sets to tell which runner invokes the tests.
+	testRunnerNameEnvVarName = "KUBEFLEET_CI_TEST_RUNNER_NAME"
+	// The runner (`go test`, via `make test`) with which the tests are skipped in the CI pipeline; the pipeline runs
+	// this package in a separate step with the Ginkgo CLI (in parallel) instead.
+	runnerNameToSkipTestsInCI = "default"
+)
+
+func TestMain(m *testing.M) {
+	// Skip the tests if in the CI environment the tests are invoked with `go test` instead of the Ginkgo CLI.
+	// This has no effect outside the CI environment.
+	if v := os.Getenv(testRunnerNameEnvVarName); v == runnerNameToSkipTestsInCI {
+		log.Println("Skipping the tests in CI as they are not run with the expected runner")
+		os.Exit(0)
+	}
+
+	os.Exit(m.Run())
+}
 
 func TestAPIs(t *testing.T) {
 	RegisterFailHandler(Fail)

@@ -518,6 +518,12 @@ already does; `Ordered` contexts stay within one process, and the random name su
 process. Add `--focus="<Describe/Context text>"` to run a subset, and `--label-filter='!slow'` to skip the ~1-minute
 per-cluster timeout context (C12). Run each change once; repeated runs (flake hunting) are not needed for now.
 
+In CI (`.github/workflows/ci.yml`), the package is skipped in the `make test` step (`TestMain` in `suite_test.go`
+exits early when `KUBEFLEET_CI_TEST_RUNNER_NAME` is `default`, as the work applier tests do) and runs in its own step
+instead: `ginkgo -v -p --procs=4 --race --cover -coverprofile=staged-update-run-it-coverage.out
+./pkg/v1/controllers/stagedupdaterun/` with `KUBEFLEET_CI_TEST_RUNNER_NAME=ginkgo`. Run locally the same way (with
+the v2.23.4 CLI that CI installs): 610 of 610 specs pass, ~207s of spec time, ~3m44s wall, 85.9% coverage.
+
 ## Estimated runtime
 
 With the 5s refresh period, about 6 min per scope (A ~1 min, B ~1.5 min, C ~1.5–2 min without C12, D ~1 min,
@@ -526,7 +532,7 @@ E ~1 min), so ~12 min for both scopes, plus ~1.5 min for C12: roughly 13–14 mi
 measured after group C: ~80s of spec time, ~1m33s wall (including compilation), dominated by C12; after group D:
 ~115s of spec time, ~2m07s wall; after group A: ~102s of spec time, ~1m55s wall; with everything (606 specs): ~99s of
 spec time, ~1m51s wall.
-`make local-unit-test` still runs this package serially under `go test` within the 30m timeout.
+Outside CI, `make local-unit-test` still runs this package serially under `go test` within the 30m timeout.
 
 ## Status
 
