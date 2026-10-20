@@ -54,7 +54,7 @@ const (
 	missingSortingLabelMsgSubstr    = "yet the label is missing on a cluster"
 	nonIntegerSortingLabelMsgSubstr = "failed to parse sorting label value as integer"
 	noPlacementBindingsMsgSubstr    = "no placement bindings are found"
-	strategyNotFoundMsgSubstr       = "staged update run strategy cannot be found"
+	strategyNotFoundMsgSubstr       = "staged update strategy cannot be found"
 	snapshotNotFoundMsgSubstr       = "the explicitly specified resource snapshot does not exist"
 	snapshotNotPrimaryMsgSubstr     = "is not a primary resource snapshot"
 	snapshotNotOwnedMsgSubstr       = "is not owned by the linked placement policy"
@@ -867,6 +867,7 @@ var _ = Describe("initializing staged update runs", func() {
 		policyName := fmt.Sprintf(placementPolicyNameTemplate, randStr)
 		strategyName := fmt.Sprintf(stagedUpdateStrategyNameTemplate, randStr)
 		runName := fmt.Sprintf(stagedUpdateRunNameTemplate, randStr)
+		triggerApprovalRequestName := fmt.Sprintf(triggerApprovalRequestNameTemplate, randStr)
 
 		memberClusterNames, bindingNames := memberClusterAndBindingNames(randStr, 1)
 
@@ -888,6 +889,13 @@ var _ = Describe("initializing staged update runs", func() {
 			Eventually(failedToInitializeActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to report the initialization failure")
 		})
 
+		It("should release the binding manager role of the placement policy", func() {
+			// The controller claims the role before it initializes the run, and releases it once the run has failed
+			// to initialize.
+			roleReleasedActual := bindingManagerRoleReleasedActual(appNamespaceName, policyName)
+			Eventually(roleReleasedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to release the binding manager role")
+		})
+
 		It("can create the staged update strategy", func() {
 			strategy := createStagedUpdateStrategy(appNamespaceName, strategyName, []rolloutv1alpha1.Stage{
 				{
@@ -899,22 +907,32 @@ var _ = Describe("initializing staged update runs", func() {
 		})
 
 		It("can trigger a new reconciliation of the staged update run", func() {
-			// The controller does not watch staged update strategies; update the run spec (which bumps the run
-			// generation) so that the controller processes the run again.
-			updateStagedUpdateRunSuspended(appNamespaceName, runName, true)
+			// The controller does not watch staged update strategies. The trigger leaves the run as is (in particular,
+			// the run is not suspended): had the controller initialized the run now that the strategy exists, it would
+			// go on to claim the binding manager role and roll out, which the check below would catch.
+			triggerStagedUpdateRunReconciliation(appNamespaceName, runName, restStageName, triggerApprovalRequestName)
 		})
 
 		It("should not initialize the staged update run again", func() {
-			// The check expects the conditions to be observed at the new generation of the run, i.e., the
-			// controller has processed the run again, but has kept it as failed to initialize.
 			failedToInitializeActual := stagedUpdateRunFailedToInitializeActual(appNamespaceName, runName, strategyNotFoundMsgSubstr)
-			Eventually(failedToInitializeActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to keep the initialization failure")
+			roleReleasedActual := bindingManagerRoleReleasedActual(appNamespaceName, policyName)
+			bindingUntouchedActual := placementBindingResourceSnapshotActual(appNamespaceName, bindingNames[0], previousResourceSnapshotName)
+			Consistently(func() error {
+				if err := failedToInitializeActual(); err != nil {
+					return err
+				}
+				if err := roleReleasedActual(); err != nil {
+					return err
+				}
+				return bindingUntouchedActual()
+			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Initialized the staged update run, claimed the binding manager role, or rolled out unexpectedly")
 		})
 
 		AfterAll(func() {
 			removeObjects(slices.Concat(
 				[]client.Object{
 					newStagedUpdateRunObj(appNamespaceName, runName),
+					newApprovalRequestObj(appNamespaceName, triggerApprovalRequestName),
 					newStagedUpdateStrategyObj(appNamespaceName, strategyName),
 					newPlacementPolicyObj(appNamespaceName, policyName),
 					newConfigMapObj(configMapName),
@@ -937,7 +955,7 @@ var _ = Describe("initializing staged update runs", func() {
 			createConfigMap(configMapName)
 			policy := createPlacementPolicy(appNamespaceName, policyName, configMapName)
 			fixtures := createMemberClustersAndBindings(appNamespaceName, policyName, memberClusterNames, bindingNames, []map[string]string{nil})
-			// The staged update strategy is created in another namespace than the one of the staged update run.
+			// The staged update strategy is created in a namespace other than that of the staged update run.
 			strategy := createStagedUpdateStrategy(otherAppNamespaceName, strategyName, []rolloutv1alpha1.Stage{
 				{
 					Name:          restStageName,
@@ -1329,11 +1347,6 @@ var _ = Describe("initializing staged update runs", func() {
 			Eventually(resumedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to resume the staged update run")
 		})
 
-		It("should keep the stages as initialized", func() {
-			stageLayoutActual := stagedUpdateRunStageLayoutActual(appNamespaceName, runName, wantStages)
-			Eventually(stageLayoutActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to keep the stages as initialized")
-		})
-
 		It("should start rolling out to the member cluster in the first stage as initialized", func() {
 			// Member cluster 0 belongs to the canary stage only as initialized.
 			bindingUpdatedActual := placementBindingResourceSnapshotActual(appNamespaceName, bindingNames[0], snapshotName)
@@ -1344,6 +1357,14 @@ var _ = Describe("initializing staged update runs", func() {
 			// never rolled out to.
 			bindingsUntouchedActual := placementBindingsResourceSnapshotActual(appNamespaceName, bindingNames[1:], previousResourceSnapshotName)
 			Consistently(bindingsUntouchedActual, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out to other member clusters unexpectedly")
+		})
+
+		It("should keep the stages as initialized", func() {
+			// The check runs only once the rollout has started, i.e., once the controller has processed the resumed run
+			// (including its initialization step); the Resumed condition alone does not prove this, as the controller
+			// sets it before it gets to the initialization step.
+			stageLayoutActual := stagedUpdateRunStageLayoutActual(appNamespaceName, runName, wantStages)
+			Eventually(stageLayoutActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to keep the stages as initialized")
 		})
 
 		AfterAll(func() {
@@ -2045,7 +2066,7 @@ var _ = Describe("initializing cluster staged update runs", func() {
 		snapshotName := primaryPlacementResourceSnapshotName(policyName, 0)
 
 		// Member clusters 0 and 1 are bound to the cluster placement policy as usual; the others should be left out:
-		// * member cluster 2 is bound to another placement policy;
+		// * member cluster 2 is bound to another cluster placement policy;
 		// * the placement binding of member cluster 3 has been marked for deletion;
 		// * member cluster 4 does not exist; and
 		// * member cluster 5 has been marked for deletion.
@@ -2124,7 +2145,7 @@ var _ = Describe("initializing cluster staged update runs", func() {
 		runName := fmt.Sprintf(stagedUpdateRunNameTemplate, randStr)
 
 		// Member cluster 0 does not exist; member cluster 1 has been marked for deletion; member cluster 2 is bound
-		// to another placement policy.
+		// to another cluster placement policy.
 		memberClusterNames, bindingNames := memberClusterAndBindingNames(randStr, 3)
 
 		BeforeAll(func() {
@@ -2176,6 +2197,7 @@ var _ = Describe("initializing cluster staged update runs", func() {
 		policyName := fmt.Sprintf(placementPolicyNameTemplate, randStr)
 		strategyName := fmt.Sprintf(stagedUpdateStrategyNameTemplate, randStr)
 		runName := fmt.Sprintf(stagedUpdateRunNameTemplate, randStr)
+		triggerApprovalRequestName := fmt.Sprintf(triggerApprovalRequestNameTemplate, randStr)
 
 		memberClusterNames, bindingNames := memberClusterAndBindingNames(randStr, 1)
 
@@ -2197,6 +2219,13 @@ var _ = Describe("initializing cluster staged update runs", func() {
 			Eventually(failedToInitializeActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to report the initialization failure")
 		})
 
+		It("should release the binding manager role of the cluster placement policy", func() {
+			// The controller claims the role before it initializes the run, and releases it once the run has failed
+			// to initialize.
+			roleReleasedActual := bindingManagerRoleReleasedActual(clusterScopedNS, policyName)
+			Eventually(roleReleasedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to release the binding manager role")
+		})
+
 		It("can create the cluster staged update strategy", func() {
 			strategy := createStagedUpdateStrategy(clusterScopedNS, strategyName, []rolloutv1alpha1.Stage{
 				{
@@ -2208,22 +2237,32 @@ var _ = Describe("initializing cluster staged update runs", func() {
 		})
 
 		It("can trigger a new reconciliation of the cluster staged update run", func() {
-			// The controller does not watch staged update strategies; update the run spec (which bumps the run
-			// generation) so that the controller processes the run again.
-			updateStagedUpdateRunSuspended(clusterScopedNS, runName, true)
+			// The controller does not watch staged update strategies. The trigger leaves the run as is (in particular,
+			// the run is not suspended): had the controller initialized the run now that the strategy exists, it would
+			// go on to claim the binding manager role and roll out, which the check below would catch.
+			triggerStagedUpdateRunReconciliation(clusterScopedNS, runName, restStageName, triggerApprovalRequestName)
 		})
 
 		It("should not initialize the cluster staged update run again", func() {
-			// The check expects the conditions to be observed at the new generation of the run, i.e., the
-			// controller has processed the run again, but has kept it as failed to initialize.
 			failedToInitializeActual := stagedUpdateRunFailedToInitializeActual(clusterScopedNS, runName, strategyNotFoundMsgSubstr)
-			Eventually(failedToInitializeActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to keep the initialization failure")
+			roleReleasedActual := bindingManagerRoleReleasedActual(clusterScopedNS, policyName)
+			bindingUntouchedActual := placementBindingResourceSnapshotActual(clusterScopedNS, bindingNames[0], previousResourceSnapshotName)
+			Consistently(func() error {
+				if err := failedToInitializeActual(); err != nil {
+					return err
+				}
+				if err := roleReleasedActual(); err != nil {
+					return err
+				}
+				return bindingUntouchedActual()
+			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Initialized the cluster staged update run, claimed the binding manager role, or rolled out unexpectedly")
 		})
 
 		AfterAll(func() {
 			removeObjects(slices.Concat(
 				[]client.Object{
 					newStagedUpdateRunObj(clusterScopedNS, runName),
+					newApprovalRequestObj(clusterScopedNS, triggerApprovalRequestName),
 					newStagedUpdateStrategyObj(clusterScopedNS, strategyName),
 					newPlacementPolicyObj(clusterScopedNS, policyName),
 					newConfigMapObj(configMapName),
@@ -2345,7 +2384,7 @@ var _ = Describe("initializing cluster staged update runs", func() {
 		secondarySnapshotName := secondaryPlacementResourceSnapshotName(policyName, 0, 1)
 		// A primary snapshot of the cluster placement policy (index 1) that has been marked for deletion.
 		deletedSnapshotName := primaryPlacementResourceSnapshotName(policyName, 1)
-		// A primary snapshot of another placement policy.
+		// A primary snapshot of another cluster placement policy.
 		otherPolicySnapshotName := primaryPlacementResourceSnapshotName(otherPolicyName, 0)
 		// A snapshot that does not exist.
 		missingSnapshotName := primaryPlacementResourceSnapshotName(policyName, 2)
@@ -2420,7 +2459,7 @@ var _ = Describe("initializing cluster staged update runs", func() {
 			Eventually(failedToInitializeActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to report the initialization failure")
 		})
 
-		It("should fail to initialize the cluster staged update run if the specified resource snapshot belongs to another placement policy", func() {
+		It("should fail to initialize the cluster staged update run if the specified resource snapshot belongs to another cluster placement policy", func() {
 			createStagedUpdateRun(clusterScopedNS, runNames[3], rolloutv1alpha1.StagedUpdateRunSpec{
 				PlacementPolicyName:      policyName,
 				ResourceSnapshotName:     otherPolicySnapshotName,
@@ -2592,11 +2631,6 @@ var _ = Describe("initializing cluster staged update runs", func() {
 			Eventually(resumedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to resume the cluster staged update run")
 		})
 
-		It("should keep the stages as initialized", func() {
-			stageLayoutActual := stagedUpdateRunStageLayoutActual(clusterScopedNS, runName, wantStages)
-			Eventually(stageLayoutActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to keep the stages as initialized")
-		})
-
 		It("should start rolling out to the member cluster in the first stage as initialized", func() {
 			// Member cluster 0 belongs to the canary stage only as initialized.
 			bindingUpdatedActual := placementBindingResourceSnapshotActual(clusterScopedNS, bindingNames[0], snapshotName)
@@ -2607,6 +2641,14 @@ var _ = Describe("initializing cluster staged update runs", func() {
 			// never rolled out to.
 			bindingsUntouchedActual := placementBindingsResourceSnapshotActual(clusterScopedNS, bindingNames[1:], previousResourceSnapshotName)
 			Consistently(bindingsUntouchedActual, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out to other member clusters unexpectedly")
+		})
+
+		It("should keep the stages as initialized", func() {
+			// The check runs only once the rollout has started, i.e., once the controller has processed the resumed run
+			// (including its initialization step); the Resumed condition alone does not prove this, as the controller
+			// sets it before it gets to the initialization step.
+			stageLayoutActual := stagedUpdateRunStageLayoutActual(clusterScopedNS, runName, wantStages)
+			Eventually(stageLayoutActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to keep the stages as initialized")
 		})
 
 		AfterAll(func() {

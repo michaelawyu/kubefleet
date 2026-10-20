@@ -50,6 +50,9 @@ const (
 	// Member clusters are numbered from 0 (zero-padded), so that the lexical order of their names matches the
 	// numerical order of their indexes.
 	memberClusterNameTemplate = "cluster-%s-%02d"
+	// The approval requests that test cases create (and delete) only to trigger the processing of a staged update
+	// run (see triggerStagedUpdateRunReconciliation).
+	triggerApprovalRequestNameTemplate = "trigger-%s"
 
 	// The resource snapshot name that placement bindings point to before a staged update run rolls out
 	// a new one; no snapshot of this name needs to exist, as no work generator runs in the test environment.
@@ -419,8 +422,13 @@ func createStagedUpdateRun(runNS, runName string, spec rolloutv1alpha1.StagedUpd
 }
 
 // createPlacementResourceSnapshot creates a placement resource snapshot (with no resources) of the given index and
-// sub-index, controlled by the given placement policy, as the placement resource snapshot manager would do; it
-// returns the snapshot as written to the API server.
+// sub-index, controlled by the given placement policy; it returns the snapshot as written to the API server.
+//
+// The snapshot has the labels and the controller owner reference that the staged update run controller checks when
+// a staged update run names the snapshot to roll out explicitly. It does not have the annotations that the placement
+// resource snapshot manager adds (the resource contents hash and the owner), which the manager relies on when it
+// looks up the latest snapshot and when it garbage collects snapshots; use it only with staged update runs that
+// name their snapshot explicitly.
 //
 // The snapshot is created in the namespace of the placement policy (i.e., it is a ClusterPlacementResourceSnapshot
 // object if the placement policy is cluster-scoped). The count of snapshots sharing the same index is set (as a
@@ -603,7 +611,9 @@ func rejectApprovalRequest(requestNS, requestName string) {
 }
 
 // setApprovalRequestApproved sets the Approved condition of an approval request (cluster-scoped if the namespace is
-// empty) to the given status, observed at the current generation of the request.
+// empty) to the given status, observed at the current generation of the request, and waits until the cache (which
+// the controller shares) observes the new status; this way, test cases that check the approval request right
+// afterwards (which read from the cache too) do not see a stale copy.
 func setApprovalRequestApproved(requestNS, requestName string, status metav1.ConditionStatus) {
 	Eventually(func() error {
 		request := newApprovalRequestObj(requestNS, requestName)
@@ -615,6 +625,18 @@ func setApprovalRequestApproved(requestNS, requestName string, status metav1.Con
 		meta.SetStatusCondition(&request.GetStatus().Conditions, approvedCond)
 		return hubClient.Status().Update(ctx, request)
 	}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to set the Approved condition of the approval request")
+
+	Eventually(func() error {
+		request, err := getApprovalRequest(requestNS, requestName)
+		if err != nil {
+			return err
+		}
+		approvedCond := meta.FindStatusCondition(request.GetStatus().Conditions, rolloutv1alpha1.ApprovalRequestCondTypeApproved)
+		if approvedCond == nil || approvedCond.Status != status {
+			return fmt.Errorf("the Approved condition of the approval request is %+v, want status %s", approvedCond, status)
+		}
+		return nil
+	}, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to observe the Approved condition of the approval request in the cache")
 }
 
 // createManualApprovalRequest creates an approval request (cluster-scoped if the namespace is empty) for the given
@@ -627,6 +649,18 @@ func createManualApprovalRequest(requestNS, requestName, runName, stageName stri
 	})
 	Expect(hubClient.Create(ctx, request)).To(Succeed(), "Failed to create the approval request")
 	return request
+}
+
+// triggerStagedUpdateRunReconciliation makes the controller process a staged update run (cluster-scoped if the
+// namespace is empty) again, without changing the run itself. The controller does not watch most of the objects
+// that test cases change (e.g., placement policies and bindings), but it does process a staged update run when an
+// approval request that references the run is deleted; the function creates such an approval request (with the
+// given name, for the given stage) and deletes it, and returns once the cache has observed the deletion.
+func triggerStagedUpdateRunReconciliation(runNS, runName, stageName, requestName string) {
+	request := createManualApprovalRequest(runNS, requestName, runName, stageName)
+	waitForObjectsToBeCached(request)
+	Expect(hubClient.Delete(ctx, request)).To(Succeed(), "Failed to delete the approval request")
+	Eventually(objectRemovedActual(request), eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to observe the deletion of the approval request in the cache")
 }
 
 // getApprovalRequest retrieves an approval request (cluster-scoped if the namespace is empty).
@@ -764,16 +798,6 @@ func stagedUpdateRunStartedCond() metav1.Condition {
 		Type:   rolloutv1alpha1.StagedUpdateRunCondTypeStarted,
 		Status: metav1.ConditionTrue,
 		Reason: rolloutv1alpha1.StagedUpdateRunStartedCondReasonUpdateStarted,
-	}
-}
-
-// stagedUpdateRunFailedToStartDueToBindingManagerConflictsCond returns the Started condition of a staged update run
-// that cannot start as another controller holds the binding manager role of its placement policy.
-func stagedUpdateRunFailedToStartDueToBindingManagerConflictsCond() metav1.Condition {
-	return metav1.Condition{
-		Type:   rolloutv1alpha1.StagedUpdateRunCondTypeStarted,
-		Status: metav1.ConditionFalse,
-		Reason: rolloutv1alpha1.StagedUpdateRunStartedCondReasonFailedDueToBindingManagerConflicts,
 	}
 }
 
@@ -1071,7 +1095,7 @@ func stagedUpdateRunStageLastedAtLeastActual(runNS, runName, stageName string, m
 				continue
 			}
 			if stage.StartedTimestamp == nil || stage.CompletedTimestamp == nil {
-				return fmt.Errorf("stage %s has not both started and completed (started: %v, completed: %v)",
+				return fmt.Errorf("stage %s has not started or has not completed yet (started: %v, completed: %v)",
 					stageName, stage.StartedTimestamp, stage.CompletedTimestamp)
 			}
 			if lasted := stage.CompletedTimestamp.Sub(stage.StartedTimestamp.Time); lasted < minDuration {
@@ -1098,7 +1122,7 @@ func stagedUpdateRunStagesCompletedInOrderActual(runNS, runName string) func() e
 		var prevStageCompletedTimestamp *metav1.Time
 		for _, stage := range run.GetStatus().Stages {
 			if stage.StartedTimestamp == nil || stage.CompletedTimestamp == nil {
-				return fmt.Errorf("stage %s has not both started and completed (started: %v, completed: %v)",
+				return fmt.Errorf("stage %s has not started or has not completed yet (started: %v, completed: %v)",
 					stage.StageName, stage.StartedTimestamp, stage.CompletedTimestamp)
 			}
 			if stage.CompletedTimestamp.Before(stage.StartedTimestamp) {
@@ -1502,8 +1526,12 @@ func approvalRequestConditionsActual(requestNS, requestName string, wantConds []
 func approvalRequestAbsentActual(requestNS, requestName string) func() error {
 	return func() error {
 		request := newApprovalRequestObj(requestNS, requestName)
-		if err := hubClient.Get(ctx, client.ObjectKey{Namespace: requestNS, Name: requestName}, request); !apierrors.IsNotFound(err) {
-			return fmt.Errorf("approval request %s exists or an unexpected error occurred: %w", requestName, err)
+		err := hubClient.Get(ctx, client.ObjectKey{Namespace: requestNS, Name: requestName}, request)
+		switch {
+		case err == nil:
+			return fmt.Errorf("approval request %s still exists", requestName)
+		case !apierrors.IsNotFound(err):
+			return fmt.Errorf("failed to retrieve approval request %s: %w", requestName, err)
 		}
 		return nil
 	}
@@ -1545,7 +1573,7 @@ func perStageTaskTimedWaitLastedAtLeastActual(runNS, runName, stageName string, 
 				startedCond := meta.FindStatusCondition(task.Conditions, rolloutv1alpha1.StagedUpdateRunTaskCondTypeTimedWaitStarted)
 				elapsedCond := meta.FindStatusCondition(task.Conditions, rolloutv1alpha1.StagedUpdateRunTaskCondTypeWaitTimeElapsed)
 				if startedCond == nil || elapsedCond == nil {
-					return fmt.Errorf("the timed wait task of stage %s has not both started and elapsed (started: %+v, elapsed: %+v)",
+					return fmt.Errorf("the timed wait task of stage %s has not started or its wait time has not elapsed yet (started: %+v, elapsed: %+v)",
 						stageName, startedCond, elapsedCond)
 				}
 				if waited := elapsedCond.LastTransitionTime.Sub(startedCond.LastTransitionTime.Time); waited < minDuration {
@@ -1607,8 +1635,12 @@ func primaryPlacementResourceSnapshotCreatedActual(policy placementv1alpha1.Plac
 func objectRemovedActual(obj client.Object) func() error {
 	return func() error {
 		objCopy := obj.DeepCopyObject().(client.Object)
-		if err := hubClient.Get(ctx, client.ObjectKeyFromObject(obj), objCopy); !apierrors.IsNotFound(err) {
-			return fmt.Errorf("object %T %s still exists or an unexpected error occurred: %w", obj, client.ObjectKeyFromObject(obj), err)
+		err := hubClient.Get(ctx, client.ObjectKeyFromObject(obj), objCopy)
+		switch {
+		case err == nil:
+			return fmt.Errorf("object %T %s still exists", obj, client.ObjectKeyFromObject(obj))
+		case !apierrors.IsNotFound(err):
+			return fmt.Errorf("failed to retrieve object %T %s: %w", obj, client.ObjectKeyFromObject(obj), err)
 		}
 		return nil
 	}
@@ -1617,9 +1649,31 @@ func objectRemovedActual(obj client.Object) func() error {
 // removeObjects deletes the given objects, and waits until all of them are gone.
 //
 // The envtest environment does not run the garbage collector; test cases must remove all the objects they create
-// (including those created by the controller on their behalf) explicitly. All the deletions are issued before
-// any wait so that the cleanup does not take one polling interval per object.
+// (including those created by the controller on their behalf) explicitly.
+//
+// Approval requests are removed last, only after all the other objects (staged update runs in particular) are gone:
+// the deletion of an approval request makes the controller process the staged update run that the request
+// references, and a run that is still around (as far as the cache is concerned) might have its approval request
+// re-created, which would then never go away.
 func removeObjects(objs ...client.Object) {
+	approvalRequests := make([]client.Object, 0, len(objs))
+	others := make([]client.Object, 0, len(objs))
+	for _, obj := range objs {
+		switch obj.(type) {
+		case *rolloutv1alpha1.ApprovalRequest, *rolloutv1alpha1.ClusterApprovalRequest:
+			approvalRequests = append(approvalRequests, obj)
+		default:
+			others = append(others, obj)
+		}
+	}
+
+	deleteObjectsAndWaitForRemoval(others)
+	deleteObjectsAndWaitForRemoval(approvalRequests)
+}
+
+// deleteObjectsAndWaitForRemoval deletes the given objects, and waits until all of them are gone. All the deletions
+// are issued before any wait, so that the cleanup does not take one polling interval per object.
+func deleteObjectsAndWaitForRemoval(objs []client.Object) {
 	for _, obj := range objs {
 		Expect(client.IgnoreNotFound(hubClient.Delete(ctx, obj))).To(Succeed(), "Failed to delete object %T %s", obj, client.ObjectKeyFromObject(obj))
 	}

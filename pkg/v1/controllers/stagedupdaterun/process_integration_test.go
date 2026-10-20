@@ -33,12 +33,9 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 )
 
-// Substrings of the messages that the controller reports when it completes the update on a member cluster whose
-// placement binding is suspended.
-const (
-	bindingSuspendedBeforeUpdateMsgSubstr = "binding has been suspended"
-	bindingSuspendedDuringUpdateMsgSubstr = "binding is suspended"
-)
+// A substring of the message that the controller reports when it completes the update on a member cluster whose
+// placement binding is suspended (whether the binding is suspended before or during the update).
+const bindingSuspendedMsgSubstr = "binding is suspended"
 
 // Substrings of the messages that the controller reports when it fails to update a member cluster.
 const (
@@ -799,11 +796,11 @@ var _ = Describe("processing staged update runs", func() {
 
 		It("should report that the updates have completed as the placement bindings are suspended", func() {
 			clusterCompletedMsgActual := perClusterConditionMessageActual(appNamespaceName, runName, memberClusterNames[0],
-				rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted, bindingSuspendedBeforeUpdateMsgSubstr)
-			Expect(clusterCompletedMsgActual()).To(Succeed(), "Failed to report that the placement binding of member cluster 0 has been suspended")
+				rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted, bindingSuspendedMsgSubstr)
+			Expect(clusterCompletedMsgActual()).To(Succeed(), "Failed to report that the placement binding of member cluster 0 is suspended")
 
 			clusterCompletedMsgActual = perClusterConditionMessageActual(appNamespaceName, runName, memberClusterNames[1],
-				rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted, bindingSuspendedDuringUpdateMsgSubstr)
+				rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted, bindingSuspendedMsgSubstr)
 			Expect(clusterCompletedMsgActual()).To(Succeed(), "Failed to report that the placement binding of member cluster 1 is suspended")
 		})
 
@@ -1476,7 +1473,7 @@ var _ = Describe("processing staged update runs", func() {
 				},
 			}
 			rolloutStatusActual := stagedUpdateRunRolloutStatusActual(appNamespaceName, runName, wantStatus)
-			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to fail the staged update run")
+			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the staged update run as failed")
 		})
 
 		It("should report that the canary stage has failed as the cluster failures have exceeded the threshold", func() {
@@ -1682,7 +1679,7 @@ var _ = Describe("processing staged update runs", func() {
 				},
 			}
 			rolloutStatusActual := stagedUpdateRunRolloutStatusActual(appNamespaceName, runName, wantStatus)
-			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to fail the staged update run")
+			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the staged update run as failed")
 		})
 
 		It("should report that the prod stage has failed as the cluster failures across stages have exceeded the threshold", func() {
@@ -2574,11 +2571,11 @@ var _ = Describe("processing cluster staged update runs", func() {
 
 		It("should report that the updates have completed as the placement bindings are suspended", func() {
 			clusterCompletedMsgActual := perClusterConditionMessageActual(clusterScopedNS, runName, memberClusterNames[0],
-				rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted, bindingSuspendedBeforeUpdateMsgSubstr)
-			Expect(clusterCompletedMsgActual()).To(Succeed(), "Failed to report that the placement binding of member cluster 0 has been suspended")
+				rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted, bindingSuspendedMsgSubstr)
+			Expect(clusterCompletedMsgActual()).To(Succeed(), "Failed to report that the placement binding of member cluster 0 is suspended")
 
 			clusterCompletedMsgActual = perClusterConditionMessageActual(clusterScopedNS, runName, memberClusterNames[1],
-				rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted, bindingSuspendedDuringUpdateMsgSubstr)
+				rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted, bindingSuspendedMsgSubstr)
 			Expect(clusterCompletedMsgActual()).To(Succeed(), "Failed to report that the placement binding of member cluster 1 is suspended")
 		})
 
@@ -3251,7 +3248,7 @@ var _ = Describe("processing cluster staged update runs", func() {
 				},
 			}
 			rolloutStatusActual := stagedUpdateRunRolloutStatusActual(clusterScopedNS, runName, wantStatus)
-			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to fail the cluster staged update run")
+			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the cluster staged update run as failed")
 		})
 
 		It("should report that the canary stage has failed as the cluster failures have exceeded the threshold", func() {
@@ -3457,7 +3454,7 @@ var _ = Describe("processing cluster staged update runs", func() {
 				},
 			}
 			rolloutStatusActual := stagedUpdateRunRolloutStatusActual(clusterScopedNS, runName, wantStatus)
-			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to fail the cluster staged update run")
+			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the cluster staged update run as failed")
 		})
 
 		It("should report that the prod stage has failed as the cluster failures across stages have exceeded the threshold", func() {

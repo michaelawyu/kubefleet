@@ -772,6 +772,9 @@ var _ = Describe("processing stage tasks of staged update runs", func() {
 		})
 
 		It("should accept the approval, but keep waiting for the wait time to elapse", func() {
+			approvalAcceptedActual := approvalRequestApprovalAcceptedActual(appNamespaceName, canaryApprovalRequestName)
+			Eventually(approvalAcceptedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to accept the approval")
+
 			wantStatus := &rolloutv1alpha1.StagedUpdateRunStatus{
 				Conditions:                    []metav1.Condition{stagedUpdateRunInitializedCond(), stagedUpdateRunStartedCond()},
 				ResourceSnapshotNameToRollout: snapshotName,
@@ -849,6 +852,11 @@ var _ = Describe("processing stage tasks of staged update runs", func() {
 
 		It("can approve the approval request for the prod stage", func() {
 			approveApprovalRequest(appNamespaceName, prodApprovalRequestName)
+		})
+
+		It("should accept the approval for the prod stage", func() {
+			approvalAcceptedActual := approvalRequestApprovalAcceptedActual(appNamespaceName, prodApprovalRequestName)
+			Eventually(approvalAcceptedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to accept the approval")
 		})
 
 		It("should complete the staged update run", func() {
@@ -1965,6 +1973,9 @@ var _ = Describe("processing stage tasks of cluster staged update runs", func() 
 		})
 
 		It("should accept the approval, but keep waiting for the wait time to elapse", func() {
+			approvalAcceptedActual := approvalRequestApprovalAcceptedActual(clusterScopedNS, canaryApprovalRequestName)
+			Eventually(approvalAcceptedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to accept the approval")
+
 			wantStatus := &rolloutv1alpha1.StagedUpdateRunStatus{
 				Conditions:                    []metav1.Condition{stagedUpdateRunInitializedCond(), stagedUpdateRunStartedCond()},
 				ResourceSnapshotNameToRollout: snapshotName,
@@ -2042,6 +2053,11 @@ var _ = Describe("processing stage tasks of cluster staged update runs", func() 
 
 		It("can approve the cluster approval request for the prod stage", func() {
 			approveApprovalRequest(clusterScopedNS, prodApprovalRequestName)
+		})
+
+		It("should accept the approval for the prod stage", func() {
+			approvalAcceptedActual := approvalRequestApprovalAcceptedActual(clusterScopedNS, prodApprovalRequestName)
+			Eventually(approvalAcceptedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to accept the approval")
 		})
 
 		It("should complete the cluster staged update run", func() {
@@ -2348,7 +2364,7 @@ var _ = Describe("processing stage tasks of cluster staged update runs", func() 
 				},
 			})
 
-			// Create (and approve) an cluster approval request of the expected name manually, before the cluster staged update run is
+			// Create (and approve) a cluster approval request of the expected name manually, before the cluster staged update run is
 			// created. Note that the request references the cluster staged update run in its spec, so that its deletion
 			// triggers the processing of the run.
 			createManualApprovalRequest(clusterScopedNS, approvalRequestName, runName, canaryStageName)

@@ -33,17 +33,9 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/utils"
 )
 
-// The name template of the approval requests that test cases create (and delete) only to trigger the processing of
-// a staged update run; the placeholder is a random string.
-const triggerApprovalRequestNameTemplate = "trigger-%s"
-
-// Substrings of the messages that the controller reports when the placement policy of a staged update run cannot
-// be found, and when a staged update run cannot start as another controller holds the binding manager role of its
-// placement policy.
-const (
-	noLinkedPlacementPolicyMsgSubstr = "No linked placement policy"
-	bindingManagerConflictsMsgSubstr = "currently managed by another controller"
-)
+// A substring of the message that the controller reports when the placement policy of a staged update run cannot
+// be found.
+const noLinkedPlacementPolicyMsgSubstr = "No linked placement policy"
 
 // The binding manager claim details of another (fictional) controller.
 const (
@@ -103,6 +95,7 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 		runName := fmt.Sprintf(stagedUpdateRunNameTemplate, randStr)
 		snapshotName := primaryPlacementResourceSnapshotName(policyName, 0)
 		approvalRequestName := fmt.Sprintf(beforeStageApprovalRequestNameTemplate, runName, canaryStageName)
+		triggerApprovalRequestName := fmt.Sprintf(triggerApprovalRequestNameTemplate, randStr)
 
 		// The (only) stage has a before-stage approval task, which is never approved; the staged update run stays
 		// in progress throughout the test case.
@@ -139,17 +132,28 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 			Eventually(roleHeldActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to claim the binding manager role")
 		})
 
+		It("can trigger a reconciliation of the staged update run", func() {
+			// The run is not requeued while it waits for approval; trigger a reconciliation, so that the check below
+			// covers what the controller does when it processes the run again.
+			triggerStagedUpdateRunReconciliation(appNamespaceName, runName, canaryStageName, triggerApprovalRequestName)
+		})
+
 		It("should keep the cleanup finalizer and the binding manager role while waiting for approval", func() {
+			wantStatus := wantWaitingForBeforeStageApprovalStatus(snapshotName, memberClusterNames, bindingNames, approvalRequestName)
+			rolloutStatusActual := stagedUpdateRunRolloutStatusActual(appNamespaceName, runName, wantStatus)
 			finalizerAddedActual := stagedUpdateRunCleanupFinalizerAddedActual(appNamespaceName, runName)
 			roleHeldActual := bindingManagerRoleHeldActual(appNamespaceName, policyName, []placementv1alpha1.ObjectReference{
 				wantStagedUpdateRunObjectRef(appNamespaceName, runName),
 			})
 			Consistently(func() error {
+				if err := rolloutStatusActual(); err != nil {
+					return err
+				}
 				if err := finalizerAddedActual(); err != nil {
 					return err
 				}
 				return roleHeldActual()
-			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Failed to keep the cleanup finalizer and the binding manager role")
+			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Failed to keep the staged update run waiting for approval, with the cleanup finalizer and the binding manager role")
 		})
 
 		AfterAll(func() {
@@ -159,6 +163,7 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 				[]client.Object{
 					newStagedUpdateRunObj(appNamespaceName, runName),
 					newApprovalRequestObj(appNamespaceName, approvalRequestName),
+					newApprovalRequestObj(appNamespaceName, triggerApprovalRequestName),
 					newPlacementResourceSnapshotObj(appNamespaceName, snapshotName),
 					newStagedUpdateStrategyObj(appNamespaceName, strategyName),
 					newPlacementPolicyObj(appNamespaceName, policyName),
@@ -242,13 +247,6 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 			Eventually(roleReleasedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to release the binding manager role")
 		})
 
-		It("should keep the staged update run object", func() {
-			Consistently(func() error {
-				_, err := getStagedUpdateRun(appNamespaceName, runName)
-				return err
-			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "The staged update run object is gone unexpectedly")
-		})
-
 		It("can point the placement binding to another resource snapshot and mark it as unavailable", func() {
 			updatePlacementBindingSpec(appNamespaceName, bindingNames[0], func(spec *placementv1alpha1.PlacementBindingSpec) {
 				spec.ResourceSnapshotName = conflictingResourceSnapshotName
@@ -257,11 +255,8 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 		})
 
 		It("can trigger a reconciliation of the completed staged update run", func() {
-			// The controller does not watch placement bindings; the deletion of an approval request that references
-			// the staged update run triggers a reconciliation of the run, without changing the run itself.
-			request := createManualApprovalRequest(appNamespaceName, triggerApprovalRequestName, runName, restStageName)
-			waitForObjectsToBeCached(request)
-			Expect(hubClient.Delete(ctx, request)).To(Succeed(), "Failed to delete the approval request")
+			// The controller does not watch placement bindings.
+			triggerStagedUpdateRunReconciliation(appNamespaceName, runName, restStageName, triggerApprovalRequestName)
 		})
 
 		It("should not process the completed staged update run again", func() {
@@ -296,6 +291,7 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 		policyName := fmt.Sprintf(placementPolicyNameTemplate, randStr)
 		strategyName := fmt.Sprintf(stagedUpdateStrategyNameTemplate, randStr)
 		runName := fmt.Sprintf(stagedUpdateRunNameTemplate, randStr)
+		triggerApprovalRequestName := fmt.Sprintf(triggerApprovalRequestNameTemplate, randStr)
 
 		memberClusterNames, bindingNames := memberClusterAndBindingNames(randStr, 1)
 
@@ -333,31 +329,32 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 		})
 
 		It("can trigger a new reconciliation of the staged update run", func() {
-			// The controller does not watch placement policies; update the run spec (which bumps the run
-			// generation) so that the controller processes the run again.
-			updateStagedUpdateRunSuspended(appNamespaceName, runName, true)
+			// The controller does not watch placement policies. The trigger leaves the run as is (in particular, the
+			// run is not suspended): had the controller initialized the run now that the policy exists, it would go on
+			// to claim the binding manager role and roll out, which the check below would catch.
+			triggerStagedUpdateRunReconciliation(appNamespaceName, runName, restStageName, triggerApprovalRequestName)
 		})
 
 		It("should not initialize the staged update run again", func() {
-			// The check expects the conditions to be observed at the new generation of the run, i.e., the
-			// controller has processed the run again, but has kept it as failed to initialize.
 			failedToInitializeActual := stagedUpdateRunFailedToInitializeActual(appNamespaceName, runName, noLinkedPlacementPolicyMsgSubstr)
-			Eventually(failedToInitializeActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to keep the initialization failure")
-
 			roleReleasedActual := bindingManagerRoleReleasedActual(appNamespaceName, policyName)
 			bindingUntouchedActual := placementBindingResourceSnapshotActual(appNamespaceName, bindingNames[0], previousResourceSnapshotName)
 			Consistently(func() error {
+				if err := failedToInitializeActual(); err != nil {
+					return err
+				}
 				if err := roleReleasedActual(); err != nil {
 					return err
 				}
 				return bindingUntouchedActual()
-			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Claimed the binding manager role or rolled out unexpectedly")
+			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Initialized the staged update run, claimed the binding manager role, or rolled out unexpectedly")
 		})
 
 		AfterAll(func() {
 			removeObjects(slices.Concat(
 				[]client.Object{
 					newStagedUpdateRunObj(appNamespaceName, runName),
+					newApprovalRequestObj(appNamespaceName, triggerApprovalRequestName),
 					newStagedUpdateStrategyObj(appNamespaceName, strategyName),
 					newPlacementPolicyObj(appNamespaceName, policyName),
 					newConfigMapObj(configMapName),
@@ -429,7 +426,7 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 				},
 			}
 			rolloutStatusActual := stagedUpdateRunRolloutStatusActual(appNamespaceName, runName, wantStatus)
-			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to fail the staged update run")
+			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the staged update run as failed")
 
 			completedMsgActual := stagedUpdateRunConditionMessageActual(appNamespaceName, runName,
 				rolloutv1alpha1.StagedUpdateRunCondTypeCompleted, noLinkedPlacementPolicyMsgSubstr)
@@ -486,11 +483,6 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 			},
 		}
 
-		// The status of the staged update run while another controller holds the binding manager role.
-		wantFailedToStartDueToBindingManagerConflictsStatus := &rolloutv1alpha1.StagedUpdateRunStatus{
-			Conditions: []metav1.Condition{stagedUpdateRunFailedToStartDueToBindingManagerConflictsCond()},
-		}
-
 		BeforeAll(func() {
 			createConfigMap(configMapName)
 			policy := createPlacementPolicy(appNamespaceName, policyName, configMapName)
@@ -514,21 +506,12 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 			Eventually(finalizerAddedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to add the cleanup finalizer")
 		})
 
-		It("should report that the staged update run fails to start as another controller holds the binding manager role", func() {
-			// The staged update run fails to claim the role before it is initialized; its status has only the Started
-			// condition, set to False.
-			statusUpdatedActual := stagedUpdateRunStatusUpdatedActual(appNamespaceName, runName, wantFailedToStartDueToBindingManagerConflictsStatus)
-			Eventually(statusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to report the binding manager conflicts")
-
-			startedMsgActual := stagedUpdateRunConditionMessageActual(appNamespaceName, runName,
-				rolloutv1alpha1.StagedUpdateRunCondTypeStarted, bindingManagerConflictsMsgSubstr)
-			Expect(startedMsgActual()).To(Succeed(), "Failed to report why the staged update run cannot start")
-		})
-
 		It("should not initialize the staged update run while another controller holds the binding manager role", func() {
-			// The staged update run keeps retrying (with backoff) to claim the role; in the meantime, its status
-			// stays the same, the role stays with the other controller, and the placement binding stays untouched.
-			statusUnchangedActual := stagedUpdateRunStatusUpdatedActual(appNamespaceName, runName, wantFailedToStartDueToBindingManagerConflictsStatus)
+			// The controller adds the cleanup finalizer right before it tries to claim the role, and keeps retrying
+			// (with backoff) afterwards; in the meantime, the status of the staged update run stays empty (binding
+			// manager conflicts are not reported in the status), the role stays with the other controller, and the
+			// placement binding stays untouched.
+			statusUnchangedActual := stagedUpdateRunStatusUpdatedActual(appNamespaceName, runName, &rolloutv1alpha1.StagedUpdateRunStatus{})
 			otherRoleHeldActual := bindingManagerActual(appNamespaceName, policyName, otherBindingManager)
 			bindingUntouchedActual := placementBindingResourceSnapshotActual(appNamespaceName, bindingNames[0], previousResourceSnapshotName)
 			Consistently(func() error {
@@ -1067,6 +1050,7 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 		strategyName := fmt.Sprintf(stagedUpdateStrategyNameTemplate, randStr)
 		runName := fmt.Sprintf(stagedUpdateRunNameTemplate, randStr)
 		snapshotName := primaryPlacementResourceSnapshotName(policyName, 0)
+		triggerApprovalRequestName := fmt.Sprintf(triggerApprovalRequestNameTemplate, randStr)
 
 		// The (only) stage updates member cluster 0 and then member cluster 1. The staged update run is created at
 		// generation 1, suspended at generation 2 (while member cluster 0 is being updated), and resumed at
@@ -1164,6 +1148,12 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 			markPlacementBindingAsAvailable(appNamespaceName, bindingNames[0], snapshotName)
 		})
 
+		It("can trigger a reconciliation of the suspended staged update run", func() {
+			// The controller does not watch placement bindings; without a reconciliation, the check below would pass
+			// even if the controller ignored the suspension.
+			triggerStagedUpdateRunReconciliation(appNamespaceName, runName, restStageName, triggerApprovalRequestName)
+		})
+
 		It("should not process the staged update run while it is suspended", func() {
 			rolloutStatusActual := stagedUpdateRunRolloutStatusAsIsActual(appNamespaceName, runName, wantSuspendedStatus)
 			bindingUntouchedActual := placementBindingResourceSnapshotActual(appNamespaceName, bindingNames[1], previousResourceSnapshotName)
@@ -1238,6 +1228,7 @@ var _ = Describe("managing the lifecycle of staged update runs", func() {
 			removeObjects(slices.Concat(
 				[]client.Object{
 					newStagedUpdateRunObj(appNamespaceName, runName),
+					newApprovalRequestObj(appNamespaceName, triggerApprovalRequestName),
 					newPlacementResourceSnapshotObj(appNamespaceName, snapshotName),
 					newStagedUpdateStrategyObj(appNamespaceName, strategyName),
 					newPlacementPolicyObj(appNamespaceName, policyName),
@@ -1393,6 +1384,7 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 		runName := fmt.Sprintf(stagedUpdateRunNameTemplate, randStr)
 		snapshotName := primaryPlacementResourceSnapshotName(policyName, 0)
 		approvalRequestName := fmt.Sprintf(beforeStageApprovalRequestNameTemplate, runName, canaryStageName)
+		triggerApprovalRequestName := fmt.Sprintf(triggerApprovalRequestNameTemplate, randStr)
 
 		// The (only) stage has a before-stage approval task, which is never approved; the cluster staged update run stays
 		// in progress throughout the test case.
@@ -1429,17 +1421,28 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 			Eventually(roleHeldActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to claim the binding manager role")
 		})
 
+		It("can trigger a reconciliation of the cluster staged update run", func() {
+			// The run is not requeued while it waits for approval; trigger a reconciliation, so that the check below
+			// covers what the controller does when it processes the run again.
+			triggerStagedUpdateRunReconciliation(clusterScopedNS, runName, canaryStageName, triggerApprovalRequestName)
+		})
+
 		It("should keep the cleanup finalizer and the binding manager role while waiting for approval", func() {
+			wantStatus := wantWaitingForBeforeStageApprovalStatus(snapshotName, memberClusterNames, bindingNames, approvalRequestName)
+			rolloutStatusActual := stagedUpdateRunRolloutStatusActual(clusterScopedNS, runName, wantStatus)
 			finalizerAddedActual := stagedUpdateRunCleanupFinalizerAddedActual(clusterScopedNS, runName)
 			roleHeldActual := bindingManagerRoleHeldActual(clusterScopedNS, policyName, []placementv1alpha1.ObjectReference{
 				wantStagedUpdateRunObjectRef(clusterScopedNS, runName),
 			})
 			Consistently(func() error {
+				if err := rolloutStatusActual(); err != nil {
+					return err
+				}
 				if err := finalizerAddedActual(); err != nil {
 					return err
 				}
 				return roleHeldActual()
-			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Failed to keep the cleanup finalizer and the binding manager role")
+			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Failed to keep the cluster staged update run waiting for approval, with the cleanup finalizer and the binding manager role")
 		})
 
 		AfterAll(func() {
@@ -1449,6 +1452,7 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 				[]client.Object{
 					newStagedUpdateRunObj(clusterScopedNS, runName),
 					newApprovalRequestObj(clusterScopedNS, approvalRequestName),
+					newApprovalRequestObj(clusterScopedNS, triggerApprovalRequestName),
 					newPlacementResourceSnapshotObj(clusterScopedNS, snapshotName),
 					newStagedUpdateStrategyObj(clusterScopedNS, strategyName),
 					newPlacementPolicyObj(clusterScopedNS, policyName),
@@ -1532,13 +1536,6 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 			Eventually(roleReleasedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to release the binding manager role")
 		})
 
-		It("should keep the cluster staged update run object", func() {
-			Consistently(func() error {
-				_, err := getStagedUpdateRun(clusterScopedNS, runName)
-				return err
-			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "The cluster staged update run object is gone unexpectedly")
-		})
-
 		It("can point the placement binding to another resource snapshot and mark it as unavailable", func() {
 			updatePlacementBindingSpec(clusterScopedNS, bindingNames[0], func(spec *placementv1alpha1.PlacementBindingSpec) {
 				spec.ResourceSnapshotName = conflictingResourceSnapshotName
@@ -1547,11 +1544,8 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 		})
 
 		It("can trigger a reconciliation of the completed cluster staged update run", func() {
-			// The controller does not watch placement bindings; the deletion of an cluster approval request that references
-			// the cluster staged update run triggers a reconciliation of the run, without changing the run itself.
-			request := createManualApprovalRequest(clusterScopedNS, triggerApprovalRequestName, runName, restStageName)
-			waitForObjectsToBeCached(request)
-			Expect(hubClient.Delete(ctx, request)).To(Succeed(), "Failed to delete the cluster approval request")
+			// The controller does not watch placement bindings.
+			triggerStagedUpdateRunReconciliation(clusterScopedNS, runName, restStageName, triggerApprovalRequestName)
 		})
 
 		It("should not process the completed cluster staged update run again", func() {
@@ -1586,6 +1580,7 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 		policyName := fmt.Sprintf(placementPolicyNameTemplate, randStr)
 		strategyName := fmt.Sprintf(stagedUpdateStrategyNameTemplate, randStr)
 		runName := fmt.Sprintf(stagedUpdateRunNameTemplate, randStr)
+		triggerApprovalRequestName := fmt.Sprintf(triggerApprovalRequestNameTemplate, randStr)
 
 		memberClusterNames, bindingNames := memberClusterAndBindingNames(randStr, 1)
 
@@ -1600,7 +1595,7 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 			})
 			waitForObjectsToBeCached(append(fixtures, strategy)...)
 
-			// The placement policy has not been created yet.
+			// The cluster placement policy has not been created yet.
 			createStagedUpdateRun(clusterScopedNS, runName, rolloutv1alpha1.StagedUpdateRunSpec{
 				PlacementPolicyName:      policyName,
 				StagedUpdateStrategyName: strategyName,
@@ -1623,31 +1618,32 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 		})
 
 		It("can trigger a new reconciliation of the cluster staged update run", func() {
-			// The controller does not watch placement policies; update the run spec (which bumps the run
-			// generation) so that the controller processes the run again.
-			updateStagedUpdateRunSuspended(clusterScopedNS, runName, true)
+			// The controller does not watch placement policies. The trigger leaves the run as is (in particular, the
+			// run is not suspended): had the controller initialized the run now that the policy exists, it would go on
+			// to claim the binding manager role and roll out, which the check below would catch.
+			triggerStagedUpdateRunReconciliation(clusterScopedNS, runName, restStageName, triggerApprovalRequestName)
 		})
 
 		It("should not initialize the cluster staged update run again", func() {
-			// The check expects the conditions to be observed at the new generation of the run, i.e., the
-			// controller has processed the run again, but has kept it as failed to initialize.
 			failedToInitializeActual := stagedUpdateRunFailedToInitializeActual(clusterScopedNS, runName, noLinkedPlacementPolicyMsgSubstr)
-			Eventually(failedToInitializeActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to keep the initialization failure")
-
 			roleReleasedActual := bindingManagerRoleReleasedActual(clusterScopedNS, policyName)
 			bindingUntouchedActual := placementBindingResourceSnapshotActual(clusterScopedNS, bindingNames[0], previousResourceSnapshotName)
 			Consistently(func() error {
+				if err := failedToInitializeActual(); err != nil {
+					return err
+				}
 				if err := roleReleasedActual(); err != nil {
 					return err
 				}
 				return bindingUntouchedActual()
-			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Claimed the binding manager role or rolled out unexpectedly")
+			}, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Initialized the cluster staged update run, claimed the binding manager role, or rolled out unexpectedly")
 		})
 
 		AfterAll(func() {
 			removeObjects(slices.Concat(
 				[]client.Object{
 					newStagedUpdateRunObj(clusterScopedNS, runName),
+					newApprovalRequestObj(clusterScopedNS, triggerApprovalRequestName),
 					newStagedUpdateStrategyObj(clusterScopedNS, strategyName),
 					newPlacementPolicyObj(clusterScopedNS, policyName),
 					newConfigMapObj(configMapName),
@@ -1719,7 +1715,7 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 				},
 			}
 			rolloutStatusActual := stagedUpdateRunRolloutStatusActual(clusterScopedNS, runName, wantStatus)
-			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to fail the cluster staged update run")
+			Eventually(rolloutStatusActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the cluster staged update run as failed")
 
 			completedMsgActual := stagedUpdateRunConditionMessageActual(clusterScopedNS, runName,
 				rolloutv1alpha1.StagedUpdateRunCondTypeCompleted, noLinkedPlacementPolicyMsgSubstr)
@@ -1738,7 +1734,7 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 
 		AfterAll(func() {
 			// The envtest environment does not run the garbage collector; the resource snapshot that the deleted
-			// placement policy owns must be removed explicitly.
+			// cluster placement policy owns must be removed explicitly.
 			removeObjects(slices.Concat(
 				[]client.Object{
 					newStagedUpdateRunObj(clusterScopedNS, runName),
@@ -1776,11 +1772,6 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 			},
 		}
 
-		// The status of the cluster staged update run while another controller holds the binding manager role.
-		wantFailedToStartDueToBindingManagerConflictsStatus := &rolloutv1alpha1.StagedUpdateRunStatus{
-			Conditions: []metav1.Condition{stagedUpdateRunFailedToStartDueToBindingManagerConflictsCond()},
-		}
-
 		BeforeAll(func() {
 			createConfigMap(configMapName)
 			policy := createPlacementPolicy(clusterScopedNS, policyName, configMapName)
@@ -1804,21 +1795,12 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 			Eventually(finalizerAddedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to add the cleanup finalizer")
 		})
 
-		It("should report that the cluster staged update run fails to start as another controller holds the binding manager role", func() {
-			// The cluster staged update run fails to claim the role before it is initialized; its status has only the Started
-			// condition, set to False.
-			statusUpdatedActual := stagedUpdateRunStatusUpdatedActual(clusterScopedNS, runName, wantFailedToStartDueToBindingManagerConflictsStatus)
-			Eventually(statusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to report the binding manager conflicts")
-
-			startedMsgActual := stagedUpdateRunConditionMessageActual(clusterScopedNS, runName,
-				rolloutv1alpha1.StagedUpdateRunCondTypeStarted, bindingManagerConflictsMsgSubstr)
-			Expect(startedMsgActual()).To(Succeed(), "Failed to report why the cluster staged update run cannot start")
-		})
-
 		It("should not initialize the cluster staged update run while another controller holds the binding manager role", func() {
-			// The cluster staged update run keeps retrying (with backoff) to claim the role; in the meantime, its status
-			// stays the same, the role stays with the other controller, and the placement binding stays untouched.
-			statusUnchangedActual := stagedUpdateRunStatusUpdatedActual(clusterScopedNS, runName, wantFailedToStartDueToBindingManagerConflictsStatus)
+			// The controller adds the cleanup finalizer right before it tries to claim the role, and keeps retrying
+			// (with backoff) afterwards; in the meantime, the status of the cluster staged update run stays empty
+			// (binding manager conflicts are not reported in the status), the role stays with the other controller,
+			// and the placement binding stays untouched.
+			statusUnchangedActual := stagedUpdateRunStatusUpdatedActual(clusterScopedNS, runName, &rolloutv1alpha1.StagedUpdateRunStatus{})
 			otherRoleHeldActual := bindingManagerActual(clusterScopedNS, policyName, otherBindingManager)
 			bindingUntouchedActual := placementBindingResourceSnapshotActual(clusterScopedNS, bindingNames[0], previousResourceSnapshotName)
 			Consistently(func() error {
@@ -1871,7 +1853,7 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 		strategyName := fmt.Sprintf(stagedUpdateStrategyNameTemplate, randStr)
 		snapshotName := primaryPlacementResourceSnapshotName(policyName, 0)
 
-		// Both cluster staged update runs roll out to the same placement policy, and wait for approval.
+		// Both cluster staged update runs roll out to the same cluster placement policy, and wait for approval.
 		runNames := []string{
 			fmt.Sprintf(stagedUpdateRunNameTemplate, randStr+"-0"),
 			fmt.Sprintf(stagedUpdateRunNameTemplate, randStr+"-1"),
@@ -2357,6 +2339,7 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 		strategyName := fmt.Sprintf(stagedUpdateStrategyNameTemplate, randStr)
 		runName := fmt.Sprintf(stagedUpdateRunNameTemplate, randStr)
 		snapshotName := primaryPlacementResourceSnapshotName(policyName, 0)
+		triggerApprovalRequestName := fmt.Sprintf(triggerApprovalRequestNameTemplate, randStr)
 
 		// The (only) stage updates member cluster 0 and then member cluster 1. The cluster staged update run is created at
 		// generation 1, suspended at generation 2 (while member cluster 0 is being updated), and resumed at
@@ -2454,6 +2437,12 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 			markPlacementBindingAsAvailable(clusterScopedNS, bindingNames[0], snapshotName)
 		})
 
+		It("can trigger a reconciliation of the suspended cluster staged update run", func() {
+			// The controller does not watch placement bindings; without a reconciliation, the check below would pass
+			// even if the controller ignored the suspension.
+			triggerStagedUpdateRunReconciliation(clusterScopedNS, runName, restStageName, triggerApprovalRequestName)
+		})
+
 		It("should not process the cluster staged update run while it is suspended", func() {
 			rolloutStatusActual := stagedUpdateRunRolloutStatusAsIsActual(clusterScopedNS, runName, wantSuspendedStatus)
 			bindingUntouchedActual := placementBindingResourceSnapshotActual(clusterScopedNS, bindingNames[1], previousResourceSnapshotName)
@@ -2528,6 +2517,7 @@ var _ = Describe("managing the lifecycle of cluster staged update runs", func() 
 			removeObjects(slices.Concat(
 				[]client.Object{
 					newStagedUpdateRunObj(clusterScopedNS, runName),
+					newApprovalRequestObj(clusterScopedNS, triggerApprovalRequestName),
 					newPlacementResourceSnapshotObj(clusterScopedNS, snapshotName),
 					newStagedUpdateStrategyObj(clusterScopedNS, strategyName),
 					newPlacementPolicyObj(clusterScopedNS, policyName),

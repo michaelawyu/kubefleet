@@ -63,7 +63,8 @@ const (
 
 	// The number of max. concurrent reconciliations for the staged update run controller.
 	maxConcurrentReconciles = 4
-	// The count of workers for the staged update run controller.
+	// The number of workers in the parallelizer that the staged update run controller uses (e.g., to retrieve the
+	// member clusters referenced by placement bindings in parallel).
 	workerCount = 4
 
 	// The number of mutex slots used by the placement resource snapshot manager.
@@ -143,7 +144,9 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).Should(Succeed())
 
-	// Use the same (cache-backed) client as the controller to avoid cache delays when verifying results.
+	// Use the same (cache-backed) client as the controller, so that test cases read objects the same way the
+	// controller does; a test case that has waited for the cache to observe a change can be sure that the controller
+	// observes it too.
 	By("Setting the hub client to the one used by the controller manager")
 	hubClient = hubMgr.GetClient()
 

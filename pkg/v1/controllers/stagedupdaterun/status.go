@@ -69,26 +69,6 @@ func (r *Reconciler) markStagedUpdateRunAsInTerminalState(
 	return nil
 }
 
-func (r *Reconciler) markStagedUpdateRunAsFailedToStartDueToBindingManagerConflicts(
-	ctx context.Context,
-	stagedUpdateRun rolloutv1alpha1.StagedUpdateRunAccessor,
-) error {
-	stagedUpdateRunStatus := stagedUpdateRun.GetStatus()
-
-	meta.SetStatusCondition(&stagedUpdateRunStatus.Conditions, metav1.Condition{
-		Type:               rolloutv1alpha1.StagedUpdateRunCondTypeStarted,
-		Status:             metav1.ConditionFalse,
-		Reason:             rolloutv1alpha1.StagedUpdateRunStartedCondReasonFailedDueToBindingManagerConflicts,
-		Message:            "Failed to start the run as the policy and its selected clusters are currently managed by another controller; will retry later",
-		ObservedGeneration: stagedUpdateRun.GetGeneration(),
-	})
-
-	if err := r.hubClient.Status().Update(ctx, stagedUpdateRun); err != nil {
-		return errors.NewAPIServerError(err, "failed to update the staged update run status", false)
-	}
-	return nil
-}
-
 func (r *Reconciler) markStagedUpdateRunAsFailedToInitialize(
 	ctx context.Context,
 	stagedUpdateRun rolloutv1alpha1.StagedUpdateRunAccessor,

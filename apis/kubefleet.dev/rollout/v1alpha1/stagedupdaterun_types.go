@@ -48,8 +48,7 @@ const (
 	StagedUpdateRunInitializedCondReasonPreppedResourceSnapshotAndAllStages = "PreppedResourceSnapshotAndAllStages"
 	StagedUpdateRunInitializedCondReasonFailed                              = "Failed"
 
-	StagedUpdateRunStartedCondReasonUpdateStarted                      = "UpdateStarted"
-	StagedUpdateRunStartedCondReasonFailedDueToBindingManagerConflicts = "FailedDueToBindingManagerConflicts"
+	StagedUpdateRunStartedCondReasonUpdateStarted = "UpdateStarted"
 
 	StagedUpdateRunCompletedCondReasonSucceeded          = "Succeeded"
 	StagedUpdateRunCompletedCondReasonPartiallySucceeded = "PartiallySucceeded"
@@ -70,7 +69,7 @@ const (
 
 	StagedUpdateRunPerClusterCompletedCondReasonSucceeded = "UpdateSucceeded"
 	StagedUpdateRunPerClusterCompletedCondReasonFailed    = "FailedToUpdate"
-	StagedUpdateRunPerClusterCompletedCondReasonCanceled  = "Canceled"
+	StagedUpdateRunPerClusterCompletedCondReasonCanceled  = "UpdateCanceled"
 
 	// The reasons for the per-task condition types.
 	StagedUpdateRunTaskApprovalRequestCreatedCondReasonCreated           = "RequestCreated"
@@ -165,12 +164,12 @@ type StagedUpdateRunSpec struct {
 	// i.e., decide on the resource snapshot to roll out and determine the stages and the clusters in each stage,
 	// but will not start rolling out resource changes until the field is set back to false.
 	//
-	// When a staged update run is suspended after the rollout starts, KubeFleet will pause the rollout at the current
-	// or closest stage as applicable. If a cluster in the stage has started updating but has not yet completed, its
-	// wait timer will be reset (i.e., maxWaitTimePerClusterMinutes does not apply to suspended cluster updates).
-	// However, the time spent in suspension will still count towards any timed wait tasks you have configured;
-	// those tasks will proceed or even complete, accounting for the time spent in suspension, once the suspension
-	// is lifted.
+	// When a staged update run is suspended after the rollout starts, KubeFleet will pause the rollout as soon as
+	// possible. If a cluster has started updating but has not yet completed, KubeFleet will not consider
+	// its update a failure even if the maximum wait time for the cluster has been exceeded during the suspension.
+	// The wait timer will be reset once the suspension is lifted. However, the time spent in suspension will
+	// still count towards any timed wait tasks you have configured; those tasks will proceed or even complete,
+	// accounting for the time spent in suspension, once the suspension is lifted.
 	//
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=false

@@ -1,8 +1,9 @@
 # Staged Update Run Controller (v1) Integration Test Plan
 
 **Date**: October 20, 2026 17:23 AEDT
-**Task**: Plan the integration tests for `pkg/v1/controllers/stagedupdaterun`, built on the envtest suite in
-[suite_test.go](../../../pkg/v1/controllers/stagedupdaterun/suite_test.go). No tests are written yet.
+**Task**: Plan and implement the integration tests for `pkg/v1/controllers/stagedupdaterun`, built on the envtest
+suite in [suite_test.go](../../../pkg/v1/controllers/stagedupdaterun/suite_test.go). All planned scenarios are
+implemented; see [Status](#status) for the progress log and the follow-ups from the review.
 
 ## Requirements
 
@@ -49,8 +50,8 @@ Reconcile flow (see `controller.go`):
      `maxWaitTimePerClusterMinutes` → `FailedToUpdate` (timeout);
    - failures are counted across stages; more than `maxAllowedClusterFailures` (default 1) → cancel in-flight
      clusters, stage `Failed`, run `Completed=True/Failed`. Every cluster in the failing stage with `Started` but no
-     `Completed` is marked `Completed=True/Canceled` (`markAllOngoingUpdatesInStageAsCanceled`); clusters that never
-     started get no conditions;
+     `Completed` is marked `Completed=True/UpdateCanceled` (`markAllOngoingUpdatesInStageAsCanceled`); clusters that
+     never started get no conditions;
    - then after-stage tasks (approval and/or timed wait, both must clear); stage and run complete as
      `Succeeded` or `PartiallySucceeded`.
 9. Status is written **once at the end of Reconcile** (also on errors). Requeue: 200ms by default, the remaining
@@ -94,8 +95,12 @@ Bindings, policies, strategies, member clusters and snapshots are **not** watche
 10. **Unblocking in-flight rollouts at cleanup.** A run waiting on an unavailable binding holds its reconcile for up
     to `refreshPeriod`, which would delay its deletion. Deleting the bindings unblocks it: the wait loop fails to
     find the binding on its next poll (≤2s with the suite's rate limiters), the reconcile returns, and the deletion
-    is processed. `removeObjects` issues all deletions up front, so contexts that leave a run mid-rollout (e.g., B9)
-    need no extra steps.
+    is processed. `removeObjects` deletes runs and bindings together (in its first phase), so contexts that leave a
+    run mid-rollout (e.g., B9) need no extra steps.
+12. **Approval requests go last at cleanup.** Deleting an approval request makes the controller process the run it
+    references; if the cache still has the run, the controller may re-create the request, which then never goes
+    away (no GC). `removeObjects` therefore removes (and confirms the removal of) everything else, runs included,
+    before it deletes any approval request; the request's delete event then finds no run to process.
 11. **Injecting snapshot conflicts.** A reconcile that reads a run whose cached copy has yet to record a cluster's
     `Started` treats that cluster's binding as not yet updated, and points it back at the snapshot to roll out. Before
     changing a binding's snapshot behind the controller's back (C7, C10), wait for the persisted status to show the
@@ -160,9 +165,10 @@ Implemented (all of A1–A10, B1–B10, C1–C13, D1–D8, E1–E3):
   snapshot name to assert bindings are untouched).
 - **Message substrings**: the initialization failure substrings are constants in `initialize_integration_test.go`
   (e.g., `strategyNotFoundMsgSubstr`), so the cluster-scoped copy of the tests cannot alter them.
-- **Cleanup**: `removeObjects(objs...)` issues all deletions first, then waits for each to be gone, so cleanup does
-  not cost one polling interval per object. `AfterAll` blocks build the list with `slices.Concat` (keeps the
-  `prealloc` linter quiet).
+- **Cleanup**: `removeObjects(objs...)` works in two phases (everything but approval requests, then approval
+  requests; see constraint 12); within each phase, it issues all deletions first, then waits for each to be gone, so
+  cleanup does not cost one polling interval per object. `AfterAll` blocks build the list with `slices.Concat`
+  (keeps the `prealloc` linter quiet).
 - **Unique names** per context (random suffix via `utils.RandStr()`), so leftovers never collide; member clusters
   are cluster-scoped, so their names carry the suffix too.
 - **Rollout (C1)**:
@@ -183,8 +189,8 @@ Implemented (all of A1–A10, B1–B10, C1–C13, D1–D8, E1–E3):
   - `updatePlacementBindingSuspended(ns, name, suspended)` waits until the cache observes the flag, so that the
     controller deterministically takes the "suspended before the update" shortcut (C5);
   - checkers `placementBindingGenerationActual(ns, name, gen)` (C4: spec never updated) and
-    `perClusterConditionMessageActual(ns, run, cluster, condType, substr)` (C5: tells the two suspended shortcuts
-    apart; the substrings are constants in `process_integration_test.go`).
+    `perClusterConditionMessageActual(ns, run, cluster, condType, substr)` (C5: both suspended shortcuts report
+    "binding is suspended"; the substring is a constant in `process_integration_test.go`).
 - **Rollout (C6–C9)**:
   - `updatePlacementBindingSpec(ns, name, mutate)` updates a binding spec and waits until the cache observes the new
     generation; `updatePlacementBindingSuspended` is now a wrapper around it. C7 uses it for conflict injection
@@ -215,7 +221,8 @@ Implemented (all of A1–A10, B1–B10, C1–C13, D1–D8, E1–E3):
     `tasks_integration_test.go`), not from the controller's own formatter.
 - **Stage tasks (D2–D8)**:
   - `approveApprovalRequest` / `rejectApprovalRequest` now share `setApprovalRequestApproved(ns, name, status)`
-    (reasons `markedAsApprovedReason` / `markedAsRejectedReason`); `createManualApprovalRequest(ns, name, run,
+    (reasons `markedAsApprovedReason` / `markedAsRejectedReason`; waits until the cache observes the new status, so
+    that checks right afterwards, e.g., D3's and E1's Consistently checks, do not read a stale copy); `createManualApprovalRequest(ns, name, run,
     stage)` (no owner refs) and `getApprovalRequest(ns, name)`;
   - checkers `approvalRequestConditionsActual(ns, name, conds)` (exact conditions at the request's generation;
     `approvalRequestApprovalAcceptedActual` now wraps it), `approvalRequestAbsentActual`,
@@ -242,16 +249,14 @@ Implemented (all of A1–A10, B1–B10, C1–C13, D1–D8, E1–E3):
     released role right away; A6 waits for the other controller's claim explicitly before creating the run);
   - `wantStagedUpdateRunOwnerRefs(ns, name, uid)` (now shared by `approvalRequestCreatedActual`) and
     `approvalRequestOwnerRefsActual(ns, name, wantRefs)` (A8 checks the owner ref survives the run's deletion);
-  - `stagedUpdateRunConditionMessageActual(ns, name, condType, substr)` (A5's `Completed` message; A6's `Started`
-    message);
-  - builder `stagedUpdateRunFailedToStartDueToBindingManagerConflictsCond()` (`Started=False/
-    FailedDueToBindingManagerConflicts`, A6) and `bindingManagerConflictsMsgSubstr` ("currently managed by another
-    controller") in `lifecycle_integration_test.go`;
+  - `stagedUpdateRunConditionMessageActual(ns, name, condType, substr)` (A5's `Completed` message);
   - in `lifecycle_integration_test.go`: `beforeStageApprovalStages()`, `wantWaitingForBeforeStageApprovalStatus(...)`
     (A1 refactored onto both), `triggerApprovalRequestNameTemplate`, `noLinkedPlacementPolicyMsgSubstr`, and the
     `otherBindingManager*` constants.
-  - Triggering a reconcile without changing a run: create an approval request whose spec names the run, wait for
-    the cache to see it, then delete it (the delete handler enqueues the named run). Used by A3.
+  - Triggering a reconcile without changing a run: `triggerStagedUpdateRunReconciliation(ns, run, stage,
+    requestName)` creates an approval request whose spec names the run, waits for the cache to see it, deletes it
+    (the delete handler enqueues the named run), and waits for the cache to see the deletion. Used by A1, A3, A4,
+    and E2, before Consistently checks that would otherwise pass without the controller ever looking at the run.
 - **Suspension (E1–E3)**:
   - `stagedUpdateRunRolloutStatusAsIsActual(ns, name, want)`: like `stagedUpdateRunRolloutStatusActual`, but
     compares condition `ObservedGeneration`s as given in the want (the shared core now takes a
@@ -281,9 +286,9 @@ scopes unless a scope note says otherwise.
   creating the policy later does not revive the run.
 - **A5** Policy deleted mid-run (while waiting on an approval) → `Completed=True/Failed` "No linked placement policy",
   finalizer removed.
-- **A6** Claim contention: `bindingManager` pre-set to another controller → finalizer added, the run's only
-  condition is `Started=False/FailedDueToBindingManagerConflicts` (no `Initialized`), bindings untouched
-  (Consistently ~5s); clear it → the run initializes, claims, and `Started` flips to `True/UpdateStarted`.
+- **A6** Claim contention: `bindingManager` pre-set to another controller → finalizer added, the run's status stays
+  empty (binding manager conflicts are not reported in the status), the other claim stays, bindings untouched
+  (Consistently ~5s); clear it → the run initializes, claims, and gets `Started=True/UpdateStarted`.
 - **A7** Co-holding: two runs on one policy (both waiting on approvals) → both refs listed; deleting one removes only
   its ref, and the other continues.
 - **A8** Delete while a cluster update is in flight → the run is gone, the claim is released, and bindings keep their
@@ -342,8 +347,8 @@ the claim), then compare the full status.
   `Synchronized` without `Available` do not count; both True at the current generation do.
 - **C4** A binding already on the target snapshot and available → completes without a spec update (generation
   unchanged).
-- **C5** Binding suspended: before processing → immediate success "(binding has been suspended)"; suspended during
-  the wait → success "(binding is suspended)".
+- **C5** Binding suspended: before processing → immediate success; suspended during the wait → success. Both report
+  "(binding is suspended)".
 - **C6** Empty stage (`nil` selector) between two stages → `Started` and `Completed/Succeeded` with no clusters; its
   after-stage tasks still run.
 - **C7** Conflict: while waiting on cluster X, change its binding's snapshot → X `FailedToUpdate` (conflict);
@@ -354,7 +359,7 @@ the claim), then compare the full status.
   wait until A's and B's bindings are on the target snapshot (C still on the old one), keep B unavailable, then fail
   A (conflict injection) →
   - stage `Failed` (its message counts only `FailedToUpdate` clusters: "1 out of 3"), run `Completed/Failed`;
-  - A `Completed=True/FailedToUpdate`; B (in flight) `Started` plus `Completed=True/Canceled`;
+  - A `Completed=True/FailedToUpdate`; B (in flight) `Started` plus `Completed=True/UpdateCanceled`;
   - C (never started) has no conditions, and its binding stays on the old snapshot (Consistently);
   - the next stage's bindings are untouched;
   - claim released, finalizer removed.
@@ -422,9 +427,9 @@ the claim), then compare the full status.
 - The pre-loop quorum-read conflict path (racy to hit via envtest).
 - Approval event handler filtering (`eventhandler.go`).
 - Rejecting a before-stage `TimedWait` (the CRD already forbids it).
-- The `Canceled` branches in `refreshOneCluster` (treated as failed) and `countClusterUpdateFailures` (counted as a
-  failure). The controller never reaches them: `Canceled` is only written into a stage that is marked `Failed`, and
-  failed stages are skipped before their clusters are looked at.
+- The `UpdateCanceled` branches in `refreshOneCluster` (treated as failed) and `countClusterUpdateFailures` (counted
+  as a failure). The controller never reaches them: `UpdateCanceled` is only written into a stage that is marked
+  `Failed`, and failed stages are skipped before their clusters are looked at.
 
 ## Old tests → new plan
 
@@ -480,11 +485,11 @@ The tests should assert the current behavior below as-is. None of these items is
    stages.
 5. A missing policy at creation is terminal, even if the policy appears later.
 6. **Resolved (October 20, 2026).** Previously, in a run that failed on the threshold, in-flight clusters kept
-   `Started` without `Completed`. They are now marked `Completed=True/Canceled` (C10). Verified against envtest with
-   a throwaway test (A conflict → `FailedToUpdate`, in-flight B → `Canceled`, unstarted C untouched). Remaining
-   nuances, documented only:
+   `Started` without `Completed`. They are now marked `Completed=True/UpdateCanceled` (C10). Verified against envtest
+   with a throwaway test (A conflict → `FailedToUpdate`, in-flight B → `UpdateCanceled`, unstarted C untouched).
+   Remaining nuances, documented only:
    - An in-flight cluster whose binding becomes available right as the cancel happens may finish as
-     `UpdateSucceeded` instead of `Canceled`.
+     `UpdateSucceeded` instead of `UpdateCanceled`.
    - Narrow, pre-existing race: if a binding spec update is on the wire when the context is canceled, the API server
      may apply it while the controller sees an error. That cluster then has no conditions even though its binding
      moved. Not reliably testable via envtest.
@@ -777,3 +782,45 @@ implemented**; see the last entry below for the final validation.
     "cluster staged update run".
   - Validation: `ginkgo -p --race ./pkg/v1/controllers/stagedupdaterun`: 606 of 606 specs pass (~99s spec time,
     ~1m51s wall); go vet and golangci-lint: no findings in the test files.
+- October 20, 2026: **tests updated for the review follow-up controller changes**:
+  - binding manager conflicts are no longer reported as a condition (the `Started=False/
+    FailedDueToBindingManagerConflicts` condition, its builder, and `bindingManagerConflictsMsgSubstr` are gone). A6
+    is back to asserting that the run's status stays empty while it retries the claim (one `It` fewer per scope);
+  - the per-cluster cancellation reason is now `UpdateCanceled` (C10 picks it up through the constant);
+  - both suspended-binding shortcuts now report "(binding is suspended)"; C5 checks one substring
+    (`bindingSuspendedMsgSubstr`) for both clusters, which also removes its dependence on which shortcut is taken;
+  - the strategy-not-found message is now "staged update strategy cannot be found" (`strategyNotFoundMsgSubstr`).
+  - Validation: `ginkgo -p --race --focus=...` on A6 and C5 (18 specs) and on C10 and C11 (38 specs): all pass; go
+    vet and golangci-lint: no findings in the test files (604 specs in total).
+  - The cluster worker loop in `processOneStage` then moved into `doClusterProcessingWork` (with a shared
+    `perStageClusterProcessingTracker`), as the added cancellation check had pushed `processOneStage` over the
+    `gocyclo` limit. `ginkgo -p --race --label-filter='!slow'`: 600 of 600 specs pass (~104s spec time, ~2m wall).
+- October 20, 2026: **review follow-up: Consistently checks that could not fail, and a stale-cache race**:
+  - A1 and E2: nothing reconciles a run that waits for approval or is suspended, so their Consistently checks held
+    regardless of what the controller would do. Both now trigger a reconciliation first (A1 also checks the run
+    status). Mutation check: with the controller changed to ignore a suspension after marking it, E2 fails at
+    "should not process ... while it is suspended" in both scopes, and passes without the trigger.
+  - A4: the reconciliation is now triggered without suspending the run (a suspension would also stop a run that the
+    controller wrongly re-initialized), and the Consistently check covers the run status as well; the Eventually
+    check that could pass on a stale (generation 1) cached copy is gone.
+  - A3 uses the new `triggerStagedUpdateRunReconciliation` helper.
+  - D3 and E1: `setApprovalRequestApproved` now waits for the cache, so their Consistently checks no longer race
+    with the informer.
+  - B6 had the same problem as A4 and got the same fix (trigger without suspending, Consistently check on the run
+    status, the binding manager role, and the binding), plus an explicit check that the role claimed for the failed
+    initialization is released. `triggerApprovalRequestNameTemplate` moved to `utils_integration_test.go`, as two
+    files use it now. `ginkgo -p --race --focus=...` on B6 (10 specs): all pass (610 specs in total).
+  - `removeObjects` now removes approval requests last, after everything else (runs included) is gone, so that a
+    run that the cache still has cannot re-create a request that cleanup has just deleted (constraint 12).
+    `ginkgo -p --race --label-filter='!slow'`: 606 of 606 specs pass (~96s spec time, ~1m49s wall).
+  - B9: the stage layout is now checked after the rollout has started (the Resumed condition is set before the
+    initialization step, so checking right after it could pass before the controller re-checks the stages).
+  - A2: dropped the check that the run object stays around (nothing reconciled the run during that check, and the
+    controller never deletes runs); A3's checks read the run anyway.
+  - D5: both approval requests (canary and prod) are now checked for `ApprovalAccepted`, like the other approvals.
+  - `createPlacementResourceSnapshot`'s comment no longer claims to match the snapshot manager's output (the
+    snapshots lack the manager's annotations, so they suit only runs that name their snapshot explicitly).
+  - Validation: `ginkgo -p --race ./pkg/v1/controllers/stagedupdaterun` (including the `slow` context): 610 of 610
+    specs pass (~106s spec time, ~2m01s wall); go vet and golangci-lint: no findings in the test files.
+  - Validation: `ginkgo -p --race --focus=...` on A1, A3, A4, E1, E2, and D3 (108 specs): all pass; go vet and
+    golangci-lint: no findings in the test files (608 specs in total).
