@@ -515,8 +515,8 @@ func (r *Reconciler) refreshOneAppliedWorkStatus(
 
 		if isManifestObjectApplied(manifestProcessingState.applyRes) {
 			appliedResources = append(appliedResources, placementv1alpha1.AppliedResource{
-				ManifestIdentifier: *manifestProcessingState.id,
-				UID:                manifestProcessingState.inMemberClusterObj.GetUID(),
+				AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier(*manifestProcessingState.id),
+				UID:                       manifestProcessingState.inMemberClusterObj.GetUID(),
 			})
 		}
 	}

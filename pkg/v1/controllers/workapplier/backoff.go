@@ -21,13 +21,11 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
-	"github.com/kubefleet-dev/kubefleet/pkg/utils/condition"
-	"github.com/kubefleet-dev/kubefleet/pkg/utils/controller"
+	kferrors "github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/resource"
 )
 
@@ -53,54 +51,54 @@ const (
 )
 
 const (
-	defaultInitialSlowBackoffDelaySeconds = 2
-	defaultBaseForExponentialBackoff      = 1.2
-	defaultMaxSlowBackoffDelaySeconds     = 30
-	defaultMaxFastBackoffDelaySeconds     = 900 // 15 minutes
-)
-
-const (
 	gcTriggeringForgetThreshold = 100000
 )
 
 const (
 	manifestProcessingStateStrTmpl = "%s,%s"
+	linkedWorkObjGenStrTmpl        = "%s,%d"
 )
 
-var defaultRequeueRateLimiter *MultiStageRequeueWithExponentialBackoffRateLimiter = NewMultiStageRequeueWithExponentialBackoffRateLimiter(
-	// Allow 1 attempt of fixed delay; this helps give objects a bit of headroom to get available (or have
-	// diffs reported).
-	1,
-	// Use a fixed delay of 5 seconds for the first attempt.
-	//
-	// Important (chenyu1): before the introduction of the requeue rate limiter, the work
-	// applier uses static requeue intervals, specifically 5 seconds (if the work object is unavailable),
-	// and 15 seconds (if the work object is available). There are a number of test cases that
-	// implicitly assume this behavior (e.g., a test case might expect that the availability check completes
-	// w/in 10 seconds), which is why the rate limiter uses the 5 seconds fast requeue delay by default.
-	// If you need to change this value and see that some test cases begin to fail, update the test
-	// cases accordingly.
-	5,
-	// Then switch to slow exponential backoff with a base of 1.2 with an initial delay of 2 seconds
-	// and a cap of 15 seconds (12 requeues in total, ~90 seconds in total).
-	// This is to allow fast checkups in cases where objects are not yet available or have not yet reported diffs.
-	1.2,
-	2,
-	15,
-	// Eventually, switch to a fast exponential backoff with a base of 1.5 with an initial delay of 15 seconds
-	// and a cap of 15 minutes (10 requeues in total, ~42 minutes in total).
-	1.5,
-	900,
-	// Allow skipping to the fast exponential backoff stage if the Work object becomes available
-	// or has reported diffs.
-	true,
-	// When the Work object spec does not change and the processing result remains the same (unavailable or failed
-	// to report diffs), the requeue pattern is essentially:
-	// * 1 attempt of requeue with fixed delays (5 seconds); then
-	// * 12 attempts of requeues with slow exponential backoff (factor of 1.2, ~90 seconds in total); then
-	// * 10 attempts of requeues with fast exponential backoff (factor of 1.5, ~42 minutes in total);
-	// * afterwards, requeue with a delay of 15 minutes indefinitely.
-)
+var defaultRequeueRateLimiter *MultiStageRequeueWithExponentialBackoffRateLimiter
+
+func init() {
+	var err error
+	defaultRequeueRateLimiter, err = NewMultiStageRequeueWithExponentialBackoffRateLimiter(
+		// Allow 1 attempt of fixed delay; this helps give objects a bit of headroom to become available.
+		1,
+		// Use a fixed delay of 5 seconds for the first attempt.
+		//
+		// Important (chenyu1): before the introduction of the requeue rate limiter, the work
+		// applier uses static requeue intervals, specifically 5 seconds (if the work object is unavailable),
+		// and 15 seconds (if the work object is available). There are a number of test cases that
+		// implicitly assume this behavior (e.g., a test case might expect that the availability check completes
+		// w/in 10 seconds), which is why the rate limiter uses the 5 seconds fast requeue delay by default.
+		// If you need to change this value and see that some test cases begin to fail, update the test
+		// cases accordingly.
+		5,
+		// Then switch to slow exponential backoff with a base of 1.2 with an initial delay of 2 seconds
+		// and a cap of 15 seconds (12 requeues in total, ~90 seconds in total).
+		// This is to allow fast checkups in cases where objects are not yet available.
+		1.2,
+		2,
+		15,
+		// Eventually, switch to a fast exponential backoff with a base of 1.5 with an initial delay of 15 seconds
+		// and a cap of 15 minutes (10 requeues in total, ~42 minutes in total).
+		1.5,
+		900,
+		// Allow skipping to the fast exponential backoff stage if all the applied manifests are available.
+		true,
+		// When the linked Work objects do not change and the processing result remains the same (e.g., some
+		// manifests stay unavailable), the requeue pattern is essentially:
+		// * 1 attempt of requeue with fixed delays (5 seconds); then
+		// * 12 attempts of requeues with slow exponential backoff (factor of 1.2, ~90 seconds in total); then
+		// * 10 attempts of requeues with fast exponential backoff (factor of 1.5, ~42 minutes in total);
+		// * afterwards, requeue with a delay of 15 minutes indefinitely.
+	)
+	if err != nil {
+		klog.Fatalf("Failed to initialize default requeue rate limiter: %v", err)
+	}
+}
 
 // MultiStageRequeueWithExponentialBackoffRateLimiter is a rate limiter that allows requeues of various
 // delays in multiple stages; it helps to control the rate of requeues for Work objects while keeping
@@ -119,12 +117,12 @@ var defaultRequeueRateLimiter *MultiStageRequeueWithExponentialBackoffRateLimite
 //     this is a stage where the system no longer expects the work objects to have a status change
 //     and chooses to requeue (relatively) slowly to avoid overwhelming the system.
 //
-// For work objects that are known to be available immediately, the rate
-// limiter can be set to skip to the fast backoff stage to save unnecessary fast requeues.
+// When all the applied manifests are available, the rate limiter can be set to skip to the fast
+// backoff stage to save unnecessary fast requeues.
 //
-// Note that the implementation distinguishes between work objects of different generations and
-// processing results, so that work object spec change and/or processing result change
-// will reset the requeue counter.
+// Note that the implementation tracks the names and generations of all the linked work objects, along
+// with the processing results, so that a spec change on any linked work object, a change to the set
+// of linked work objects, and/or a processing result change will reset the requeue counter.
 //
 // TO-DO (chenyu1): the current implementation tracks processing results as strings, which incurs
 // additional overhead when doing comparison (albeit small); evaluate if we need to switch to a more
@@ -133,7 +131,7 @@ type MultiStageRequeueWithExponentialBackoffRateLimiter struct {
 	mu                              sync.Mutex
 	requeueCounter                  map[types.NamespacedName]int
 	lastRequeueDelayTracker         map[types.NamespacedName]time.Duration
-	lastTrackedGeneration           map[types.NamespacedName]int64
+	lastTrackedLinkedWorksGenHash   map[types.NamespacedName]string
 	lastTrackedProcessingResultHash map[types.NamespacedName]string
 	forgets                         int
 
@@ -147,7 +145,7 @@ type MultiStageRequeueWithExponentialBackoffRateLimiter struct {
 	exponentialBaseForFastBackoff float64
 	maxFastBackoffDelay           time.Duration
 
-	skipToFastBackoffForAvailableOrDiffReportedWorkObjs bool
+	skipToFastBackoffWhenAllAppliedManifestsAreAvailable bool
 }
 
 // NewMultiStageRequeueWithExponentialBackoffRateLimiter creates a MultiStageRequeueWithExponentialBackoffRateLimiter.
@@ -159,103 +157,112 @@ func NewMultiStageRequeueWithExponentialBackoffRateLimiter(
 	maxSlowBackoffDelaySeconds int,
 	exponentialBaseForFastBackoff float64,
 	maxFastBackoffDelaySeconds int,
-	skipToFastBackoffForAvailableOrDiffReportedWorkObjs bool,
-) *MultiStageRequeueWithExponentialBackoffRateLimiter {
-	// Validate the input parameters and reset values as necessary.
+	skipToFastBackoffWhenAllAppliedManifestsAreAvailable bool,
+) (*MultiStageRequeueWithExponentialBackoffRateLimiter, error) {
+	// Validate the input parameters.
 	if !(attemptsWithFixedDelay >= attemptsWithFixedDelayLowerBound &&
 		attemptsWithFixedDelay <= attemptsWithFixedDelayUpperBound) {
-		// Reset the value.
-		attemptsWithFixedDelay = attemptsWithFixedDelayLowerBound
-		klog.Errorf("attemptsWithFixedDelay is not set to a valid value; set it to the minimum allowed value (%d) instead", attemptsWithFixedDelayLowerBound)
+		return nil, kferrors.NewUserError(nil, "attemptsWithFixedDelay is not set to a valid value",
+			"observedValue", attemptsWithFixedDelay,
+			"lowerBound", attemptsWithFixedDelayLowerBound, "upperBound", attemptsWithFixedDelayUpperBound)
 	}
 	if fixedDelaySeconds < fixedDelaySecondsLowerBound {
-		// Reset the value.
-		fixedDelaySeconds = fixedDelaySecondsLowerBound
-		klog.Errorf("fixedDelaySeconds is below the minimum allowed value (%d seconds); set it to the minimum allowed value instead", fixedDelaySecondsLowerBound)
+		return nil, kferrors.NewUserError(nil, "fixedDelaySeconds is below the minimum allowed value",
+			"observedValue", fixedDelaySeconds,
+			"lowerBound", fixedDelaySecondsLowerBound)
+	}
+	if fixedDelaySeconds > maxFastBackoffDelaySeconds {
+		return nil, kferrors.NewUserError(nil, "fixedDelaySeconds exceeds maxFastBackoffDelaySeconds",
+			"observedValue", fixedDelaySeconds,
+			"upperBound", maxFastBackoffDelaySeconds)
 	}
 
 	if !(exponentialBaseForSlowBackoff >= exponentialBaseLowerBound &&
 		exponentialBaseForSlowBackoff <= exponentialBaseForFastBackoff &&
 		exponentialBaseForFastBackoff <= exponentialBaseUpperBound) {
-		klog.Errorf(
-			"exponentialBaseForSlowBackoff (%f) and exponentialBaseForFastBackoff (%f) are not set to valid values; using the default values instead (%f and %f)",
-			exponentialBaseForSlowBackoff, exponentialBaseForFastBackoff,
-			defaultBaseForExponentialBackoff, defaultBaseForExponentialBackoff)
-		// Reset the values.
-		exponentialBaseForSlowBackoff = defaultBaseForExponentialBackoff
-		exponentialBaseForFastBackoff = defaultBaseForExponentialBackoff
+		return nil, kferrors.NewUserError(nil,
+			"exponentialBaseForSlowBackoff and exponentialBaseForFastBackoff are not set to valid values",
+			"observedValueForSlowBackoff", exponentialBaseForSlowBackoff,
+			"observedValueForFastBackoff", exponentialBaseForFastBackoff,
+			"lowerBound", exponentialBaseLowerBound,
+			"upperBound", exponentialBaseUpperBound)
 	}
 
 	if !(initialSlowBackoffDelaySeconds >= initialSlowBackoffDelaySecondsLowerBound &&
 		initialSlowBackoffDelaySeconds <= maxSlowBackoffDelaySeconds &&
 		maxSlowBackoffDelaySeconds <= maxFastBackoffDelaySeconds &&
 		maxFastBackoffDelaySeconds <= maxFastBackoffDelaySecondsUpperBound) {
-		klog.Errorf(
-			"initialSlowBackoffDelaySeconds (%d), maxSlowBackoffDelaySeconds (%d), and maxFastBackoffDelaySeconds (%d) are not set to valid values; using the default values instead (%d seconds, %d seconds, and %d seconds)",
-			initialSlowBackoffDelaySeconds, maxSlowBackoffDelaySeconds, maxFastBackoffDelaySeconds,
-			defaultInitialSlowBackoffDelaySeconds, defaultMaxSlowBackoffDelaySeconds, defaultMaxFastBackoffDelaySeconds)
-		// Reset the values.
-		initialSlowBackoffDelaySeconds = defaultInitialSlowBackoffDelaySeconds
-		maxSlowBackoffDelaySeconds = defaultMaxSlowBackoffDelaySeconds
-		maxFastBackoffDelaySeconds = defaultMaxFastBackoffDelaySeconds
+		return nil, kferrors.NewUserError(nil,
+			"initialSlowBackoffDelaySeconds, maxSlowBackoffDelaySeconds, and maxFastBackoffDelaySeconds are not set to valid values",
+			"observedInitialSlowBackoffDelaySeconds", initialSlowBackoffDelaySeconds,
+			"observedMaxSlowBackoffDelaySeconds", maxSlowBackoffDelaySeconds,
+			"observedMaxFastBackoffDelaySeconds", maxFastBackoffDelaySeconds,
+			"lowerBoundForInitialSlowBackoffDelaySeconds", initialSlowBackoffDelaySecondsLowerBound,
+			"upperBoundForMaxFastBackoffDelaySeconds", maxFastBackoffDelaySecondsUpperBound)
 	}
 
 	return &MultiStageRequeueWithExponentialBackoffRateLimiter{
-		requeueCounter:                                      make(map[types.NamespacedName]int),
-		lastRequeueDelayTracker:                             make(map[types.NamespacedName]time.Duration),
-		lastTrackedGeneration:                               make(map[types.NamespacedName]int64),
-		lastTrackedProcessingResultHash:                     make(map[types.NamespacedName]string),
-		attemptsWithFixedDelay:                              attemptsWithFixedDelay,
-		fixedDelay:                                          time.Duration(fixedDelaySeconds) * time.Second,
-		exponentialBaseForSlowBackoff:                       exponentialBaseForSlowBackoff,
-		initialSlowBackoffDelay:                             time.Duration(initialSlowBackoffDelaySeconds) * time.Second,
-		maxSlowBackoffDelay:                                 time.Duration(maxSlowBackoffDelaySeconds) * time.Second,
-		exponentialBaseForFastBackoff:                       exponentialBaseForFastBackoff,
-		maxFastBackoffDelay:                                 time.Duration(maxFastBackoffDelaySeconds) * time.Second,
-		skipToFastBackoffForAvailableOrDiffReportedWorkObjs: skipToFastBackoffForAvailableOrDiffReportedWorkObjs,
-	}
+		requeueCounter:                                       make(map[types.NamespacedName]int),
+		lastRequeueDelayTracker:                              make(map[types.NamespacedName]time.Duration),
+		lastTrackedLinkedWorksGenHash:                        make(map[types.NamespacedName]string),
+		lastTrackedProcessingResultHash:                      make(map[types.NamespacedName]string),
+		attemptsWithFixedDelay:                               attemptsWithFixedDelay,
+		fixedDelay:                                           time.Duration(fixedDelaySeconds) * time.Second,
+		exponentialBaseForSlowBackoff:                        exponentialBaseForSlowBackoff,
+		initialSlowBackoffDelay:                              time.Duration(initialSlowBackoffDelaySeconds) * time.Second,
+		maxSlowBackoffDelay:                                  time.Duration(maxSlowBackoffDelaySeconds) * time.Second,
+		exponentialBaseForFastBackoff:                        exponentialBaseForFastBackoff,
+		maxFastBackoffDelay:                                  time.Duration(maxFastBackoffDelaySeconds) * time.Second,
+		skipToFastBackoffWhenAllAppliedManifestsAreAvailable: skipToFastBackoffWhenAllAppliedManifestsAreAvailable,
+	}, nil
 }
 
 // When returns the duration to wait before requeuing the item.
 //
 // The implementation borrows from the workqueue package's various rate limiter implementations.
 func (r *MultiStageRequeueWithExponentialBackoffRateLimiter) When(
-	work *placementv1alpha1.Work, manifestProcessingStates []*manifestProcessingState) time.Duration {
+	linkedWorks []*placementv1alpha1.Work, manifestProcessingStates []*manifestProcessingState) time.Duration {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	namespacedName := types.NamespacedName{
-		Namespace: work.Namespace,
-		Name:      work.Name,
+	primaryWork := linkedWorks[0]
+	primaryWorkNamespacedName := types.NamespacedName{
+		Namespace: primaryWork.Namespace,
+		Name:      primaryWork.Name,
 	}
+
+	curLinkedWorksGenHash, genHashErr := computeLinkedWorksObjectGenHash(linkedWorks)
+	curProcessingResHash, resHashErr := computeProcessingResultHash(manifestProcessingStates)
 
 	// Check if the Work object has been processed before, and check if the rate limiter needs
 	// to reset the requeue counter.
-	lastTrackedGen := r.lastTrackedGeneration[namespacedName]
-	lastTrackedProcessingResHash := r.lastTrackedProcessingResultHash[namespacedName]
-	curProcessingResHash, hashErr := computeProcessingResultHash(work, manifestProcessingStates)
+	lastTrackedLinkedWorksGenHash := r.lastTrackedLinkedWorksGenHash[primaryWorkNamespacedName]
+	lastTrackedProcessingResHash := r.lastTrackedProcessingResultHash[primaryWorkNamespacedName]
 
 	// Reset the requeue counter under the following conditions:
-	// * A new generation of the Work object is being processed.
-	// * Cannot compute the hash of the processing result; normally this should never occur.
+	// * The set of linked work objects, or the generation of any linked work object, has changed
+	//   since last observation.
+	// * Cannot compute the hash of the linked work object generations or the processing result;
+	//   normally this should never occur.
 	// * The processing result has changed since last observation.
-	if lastTrackedGen != work.Generation ||
-		hashErr != nil ||
-		lastTrackedProcessingResHash != curProcessingResHash {
-		r.requeueCounter[namespacedName] = 0
-		r.lastRequeueDelayTracker[namespacedName] = 0
+	if lastTrackedLinkedWorksGenHash != curLinkedWorksGenHash ||
+		genHashErr != nil ||
+		lastTrackedProcessingResHash != curProcessingResHash ||
+		resHashErr != nil {
+		r.requeueCounter[primaryWorkNamespacedName] = 0
+		r.lastRequeueDelayTracker[primaryWorkNamespacedName] = 0
 	}
 
-	// Always update the last tracked generation and processing result hash
+	// Always update the last tracked linked work object generation hash and processing result hash
 	// for the Work object, regardless of whether the requeue counter is reset or not.
-	r.lastTrackedGeneration[namespacedName] = work.Generation
-	r.lastTrackedProcessingResultHash[namespacedName] = curProcessingResHash
+	r.lastTrackedLinkedWorksGenHash[primaryWorkNamespacedName] = curLinkedWorksGenHash
+	r.lastTrackedProcessingResultHash[primaryWorkNamespacedName] = curProcessingResHash
 
-	numRequeues := r.requeueCounter[namespacedName]
-	lastRequeueDelayWithBackoff := r.lastRequeueDelayTracker[namespacedName]
+	numRequeues := r.requeueCounter[primaryWorkNamespacedName]
+	lastRequeueDelayWithBackoff := r.lastRequeueDelayTracker[primaryWorkNamespacedName]
 	var requeueDelay time.Duration
 
-	availableCond := meta.FindStatusCondition(work.Status.Conditions, placementv1alpha1.WorkCondTypeAvailable)
+	allProcessedManifestsAvailable := areAllProcessedManifestsAvailable(manifestProcessingStates)
 
 	switch {
 	case numRequeues < r.attemptsWithFixedDelay:
@@ -267,10 +274,10 @@ func (r *MultiStageRequeueWithExponentialBackoffRateLimiter) When(
 	case lastRequeueDelayWithBackoff >= r.maxFastBackoffDelay:
 		// The requeue delay has reached the cap; no need to backoff anymore.
 		requeueDelay = r.maxFastBackoffDelay
-	case r.skipToFastBackoffForAvailableOrDiffReportedWorkObjs &&
-		condition.IsConditionStatusTrue(availableCond, work.Generation):
-		// The Work object is already in an available or diff reported state,
-		// and the rate limiter is configured to skip to the fast backoff stage under such conditions.
+	case r.skipToFastBackoffWhenAllAppliedManifestsAreAvailable &&
+		allProcessedManifestsAvailable:
+		// All the applied manifests are available, and the rate limiter is configured to skip to the fast
+		// backoff stage under such conditions.
 		requeueDelay = time.Duration(float64(lastRequeueDelayWithBackoff) * r.exponentialBaseForFastBackoff)
 	case lastRequeueDelayWithBackoff >= r.maxSlowBackoffDelay:
 		// The requeue delay has reached the cap for the slow backoff stage;
@@ -293,9 +300,9 @@ func (r *MultiStageRequeueWithExponentialBackoffRateLimiter) When(
 
 	// Update the requeue counter and last requeue delay tracker.
 	if numRequeues+1 < maxNumOfRequeuesToTrack {
-		r.requeueCounter[namespacedName] = numRequeues + 1
+		r.requeueCounter[primaryWorkNamespacedName] = numRequeues + 1
 	}
-	r.lastRequeueDelayTracker[namespacedName] = requeueDelay
+	r.lastRequeueDelayTracker[primaryWorkNamespacedName] = requeueDelay
 	return requeueDelay
 }
 
@@ -311,7 +318,7 @@ func (r *MultiStageRequeueWithExponentialBackoffRateLimiter) Forget(work *placem
 	}
 	delete(r.requeueCounter, namespacedName)
 	delete(r.lastRequeueDelayTracker, namespacedName)
-	delete(r.lastTrackedGeneration, namespacedName)
+	delete(r.lastTrackedLinkedWorksGenHash, namespacedName)
 	delete(r.lastTrackedProcessingResultHash, namespacedName)
 
 	r.forgets++
@@ -322,6 +329,24 @@ func (r *MultiStageRequeueWithExponentialBackoffRateLimiter) Forget(work *placem
 	}
 }
 
+// computeLinkedWorksObjectGenHash returns the hash of the names and generations of a set of linked work objects.
+func computeLinkedWorksObjectGenHash(linkedWorks []*placementv1alpha1.Work) (string, error) {
+	// The order of linked work objects is stable (the primary work object first, followed by the
+	// other linked work objects sorted by their names).
+	linkedWorkObjGens := make([]string, 0, len(linkedWorks))
+	for _, linkedWork := range linkedWorks {
+		linkedWorkObjGens = append(linkedWorkObjGens,
+			fmt.Sprintf(linkedWorkObjGenStrTmpl, linkedWork.Name, linkedWork.Generation))
+	}
+
+	linkedWorkObjGenHash, err := resource.HashOf(linkedWorkObjGens)
+	if err != nil {
+		wrappedErr := kferrors.NewUnexpectedError(err, "failed to marshal linked work object generations as JSON")
+		return "", wrappedErr
+	}
+	return linkedWorkObjGenHash, nil
+}
+
 // computeProcessingResultHash returns the hash of the result of a work object processing attempt,
 // specifically the apply result and the availability check result of each manifest.
 //
@@ -329,7 +354,7 @@ func (r *MultiStageRequeueWithExponentialBackoffRateLimiter) Forget(work *placem
 // manifest remains unchanged, the cause of the result have changed (e.g., an apply op first failed
 // due to an API server error, then it failed again because a webhook denied it). At this moment
 // the rate limiter does not distinguish between the two cases.
-func computeProcessingResultHash(work *placementv1alpha1.Work, manifestProcessingStates []*manifestProcessingState) (string, error) {
+func computeProcessingResultHash(manifestProcessingStates []*manifestProcessingState) (string, error) {
 	// The order of manifests is stable in a bundle.
 	manifestProcessingResults := make([]string, 0, len(manifestProcessingStates))
 	for _, manifestProcessingState := range manifestProcessingStates {
@@ -339,12 +364,25 @@ func computeProcessingResultHash(work *placementv1alpha1.Work, manifestProcessin
 
 	processingResHash, err := resource.HashOf(manifestProcessingResults)
 	if err != nil {
-		wrappedErr := fmt.Errorf("failed to marshal processing results as JSON: %w", err)
-		_ = controller.NewUnexpectedBehaviorError(wrappedErr)
-		klog.ErrorS(wrappedErr, "Failed to compute processing result hash", "work", klog.KObj(work))
+		wrappedErr := kferrors.NewUnexpectedError(err, "failed to marshal processing results as JSON")
 		return "", wrappedErr
 	}
 	return processingResHash, nil
+}
+
+// areAllProcessedManifestsAvailable returns whether all the processed manifests are available.
+//
+// A manifest is considered to be available if its availability check result is either Available or
+// NotTrackable; this is consistent with how the Available condition is set on a Work object. If no
+// manifest has been processed, all processed manifests are considered to be available, also
+// consistent with the Available condition behavior.
+func areAllProcessedManifestsAvailable(manifestProcessingStates []*manifestProcessingState) bool {
+	for _, manifestProcessingState := range manifestProcessingStates {
+		if !isAppliedObjectAvailable(manifestProcessingState.availabilityCheckRes) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *MultiStageRequeueWithExponentialBackoffRateLimiter) garbageCollect() {
@@ -360,11 +398,11 @@ func (r *MultiStageRequeueWithExponentialBackoffRateLimiter) garbageCollect() {
 	}
 	r.lastRequeueDelayTracker = rebuiltLastRequeueDelayTracker
 
-	rebuiltLastTrackedGeneration := make(map[types.NamespacedName]int64, len(r.lastTrackedGeneration))
-	for k, v := range r.lastTrackedGeneration {
-		rebuiltLastTrackedGeneration[k] = v
+	rebuiltLastTrackedLinkedWorksGenHash := make(map[types.NamespacedName]string, len(r.lastTrackedLinkedWorksGenHash))
+	for k, v := range r.lastTrackedLinkedWorksGenHash {
+		rebuiltLastTrackedLinkedWorksGenHash[k] = v
 	}
-	r.lastTrackedGeneration = rebuiltLastTrackedGeneration
+	r.lastTrackedLinkedWorksGenHash = rebuiltLastTrackedLinkedWorksGenHash
 
 	rebuiltLastTrackedProcessingResultHash := make(map[types.NamespacedName]string, len(r.lastTrackedProcessingResultHash))
 	for k, v := range r.lastTrackedProcessingResultHash {

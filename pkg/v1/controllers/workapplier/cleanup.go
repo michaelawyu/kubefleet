@@ -196,7 +196,7 @@ func (r *Reconciler) cleanupWhenBindingDeleted(ctx context.Context,
 func shouldCleanUpManifest(manifestStatus *placementv1alpha1.PerManifestStatus) bool {
 	// Skip manifests that cannot be identified in the member cluster; attempting to clean them up would always fail.
 	id := &manifestStatus.Identifier
-	if id.Kind == "" || id.Resource == "" || id.Name == "" {
+	if id.APIVersion == "" || id.Kind == "" || id.Resource == "" || id.Name == "" {
 		return false
 	}
 

@@ -246,7 +246,7 @@ var _ = Describe("partial failures", func() {
 			// Only the applied manifests are reported.
 			appliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -257,7 +257,7 @@ var _ = Describe("partial failures", func() {
 					UID: regularNS.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    3,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -396,7 +396,7 @@ var _ = Describe("partial failures", func() {
 			// The config map object is the same one as before (i.e., it has not been re-created).
 			appliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -407,7 +407,7 @@ var _ = Describe("partial failures", func() {
 					UID: regularNS.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    1,
 						APIGroup:   "apps",
 						APIVersion: "v1",
@@ -419,7 +419,7 @@ var _ = Describe("partial failures", func() {
 					UID: regularDeploy.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    2,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -632,7 +632,7 @@ var _ = Describe("partial failures", func() {
 			// Only the applied manifests are reported.
 			appliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -643,7 +643,7 @@ var _ = Describe("partial failures", func() {
 					UID: regularNS.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    2,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -769,7 +769,7 @@ var _ = Describe("partial failures", func() {
 		It("should update the appliedWork object status", func() {
 			appliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -780,7 +780,7 @@ var _ = Describe("partial failures", func() {
 					UID: regularNS.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    1,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -792,7 +792,7 @@ var _ = Describe("partial failures", func() {
 					UID: secondConfigMap.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    2,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -995,7 +995,7 @@ var _ = Describe("partial failures", func() {
 		It("should update the appliedWork object status", func() {
 			appliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -1006,7 +1006,7 @@ var _ = Describe("partial failures", func() {
 					UID: regularNS.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    1,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -1154,7 +1154,7 @@ var _ = Describe("partial failures", func() {
 			// The config map object is the same one as before (i.e., it has not been re-created).
 			appliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -1165,7 +1165,7 @@ var _ = Describe("partial failures", func() {
 					UID: regularNS.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    1,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -1399,7 +1399,7 @@ var _ = Describe("partial failures", func() {
 		It("should update the appliedWork object status", func() {
 			appliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -1410,7 +1410,7 @@ var _ = Describe("partial failures", func() {
 					UID: regularNS.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    1,
 						APIGroup:   "autoscaling",
 						APIVersion: "v2",
@@ -1646,7 +1646,7 @@ var _ = Describe("partial failures", func() {
 		It("should update the appliedWork object status", func() {
 			appliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -1893,7 +1893,7 @@ var _ = Describe("partial failures", func() {
 		It("should update the appliedWork object statuses", func() {
 			primaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -1904,7 +1904,7 @@ var _ = Describe("partial failures", func() {
 					UID: regularNS.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    1,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2027,7 +2027,7 @@ var _ = Describe("partial failures", func() {
 		It("should update the appliedWork object statuses", func() {
 			primaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2044,7 +2044,7 @@ var _ = Describe("partial failures", func() {
 			// The config map object is the same one as before (i.e., it has not been re-created).
 			secondaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2337,7 +2337,7 @@ var _ = Describe("partial failures", func() {
 		It("should update the appliedWork object statuses", func() {
 			primaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2353,7 +2353,7 @@ var _ = Describe("partial failures", func() {
 
 			secondaryAAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2602,7 +2602,7 @@ var _ = Describe("partial failures", func() {
 		It("should update the appliedWork object statuses", func() {
 			primaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2618,7 +2618,7 @@ var _ = Describe("partial failures", func() {
 
 			secondaryAAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2636,7 +2636,7 @@ var _ = Describe("partial failures", func() {
 			// The config map object is the same one as before (i.e., it has not been re-created).
 			secondaryBAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2864,7 +2864,7 @@ var _ = Describe("partial failures", func() {
 		It("should update the appliedWork object status", func() {
 			appliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",

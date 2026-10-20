@@ -375,7 +375,11 @@ spec:
                         resource:
                           type: string
                       required:
+                      - apiVersion
+                      - kind
+                      - name
                       - ordinal
+                      - resource
                       type: object
                   required:
                   - identifier

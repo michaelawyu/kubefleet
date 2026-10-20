@@ -161,7 +161,7 @@ var _ = Describe("single work object", func() {
 			// Prepare the status information.
 			appliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -172,7 +172,7 @@ var _ = Describe("single work object", func() {
 					UID: regularNS.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    1,
 						APIGroup:   "apps",
 						APIVersion: "v1",
@@ -802,7 +802,7 @@ var _ = Describe("multiple work objects", func() {
 			// Each appliedWork object reports the resources applied from its own work object.
 			primaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -813,7 +813,7 @@ var _ = Describe("multiple work objects", func() {
 					UID: regularNS.UID,
 				},
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    1,
 						APIGroup:   "apps",
 						APIVersion: "v1",
@@ -830,7 +830,7 @@ var _ = Describe("multiple work objects", func() {
 
 			secondaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -1556,7 +1556,7 @@ var _ = Describe("multiple work objects", func() {
 		It("should update the appliedWork object statuses", func() {
 			primaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -1573,7 +1573,7 @@ var _ = Describe("multiple work objects", func() {
 			// The deployment object is the same one as before (i.e., it has not been re-created).
 			secondaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "apps",
 						APIVersion: "v1",
@@ -1833,7 +1833,7 @@ var _ = Describe("multiple work objects", func() {
 		It("should update the appliedWork object statuses", func() {
 			primaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -1850,7 +1850,7 @@ var _ = Describe("multiple work objects", func() {
 
 			secondaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2209,7 +2209,7 @@ var _ = Describe("multiple work objects", func() {
 			// The existing config map objects are the same ones as before (i.e., they have not been re-created).
 			primaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2226,7 +2226,7 @@ var _ = Describe("multiple work objects", func() {
 
 			secondaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2243,7 +2243,7 @@ var _ = Describe("multiple work objects", func() {
 
 			thirdAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2545,7 +2545,7 @@ var _ = Describe("multiple work objects", func() {
 		It("should update the appliedWork object statuses", func() {
 			primaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2562,7 +2562,7 @@ var _ = Describe("multiple work objects", func() {
 
 			secondaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2579,7 +2579,7 @@ var _ = Describe("multiple work objects", func() {
 
 			thirdAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -2987,7 +2987,7 @@ var _ = Describe("multiple work objects", func() {
 			// The remaining config map objects are the same ones as before (i.e., they have not been re-created).
 			primaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",
@@ -3004,7 +3004,7 @@ var _ = Describe("multiple work objects", func() {
 
 			secondaryAppliedResources := []placementv1alpha1.AppliedResource{
 				{
-					ManifestIdentifier: placementv1alpha1.ManifestIdentifier{
+					AppliedResourceIdentifier: placementv1alpha1.AppliedResourceIdentifier{
 						Ordinal:    0,
 						APIGroup:   "",
 						APIVersion: "v1",

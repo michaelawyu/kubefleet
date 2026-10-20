@@ -377,7 +377,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	// Requeue the work object with a delay based on the given multi-stage requeue with exponential backoff
 	// rate limiter.
-	requeueAfter := r.periodicRequeueRateLimiter.When(work, manifestProcessingStates)
+	requeueAfter := r.periodicRequeueRateLimiter.When(linkedWorks, manifestProcessingStates)
 	klog.V(2).InfoS("Requeue the work object for re-processing", "requeueAfter", requeueAfter, "work", klog.KObj(work), "controller", controllerName)
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
