@@ -69,6 +69,26 @@ func (r *Reconciler) markStagedUpdateRunAsInTerminalState(
 	return nil
 }
 
+func (r *Reconciler) markStagedUpdateRunAsFailedToStartDueToBindingManagerConflicts(
+	ctx context.Context,
+	stagedUpdateRun rolloutv1alpha1.StagedUpdateRunAccessor,
+) error {
+	stagedUpdateRunStatus := stagedUpdateRun.GetStatus()
+
+	meta.SetStatusCondition(&stagedUpdateRunStatus.Conditions, metav1.Condition{
+		Type:               rolloutv1alpha1.StagedUpdateRunCondTypeStarted,
+		Status:             metav1.ConditionFalse,
+		Reason:             rolloutv1alpha1.StagedUpdateRunStartedCondReasonFailedDueToBindingManagerConflicts,
+		Message:            "Failed to start the run as the policy and its selected clusters are currently managed by another controller; will retry later",
+		ObservedGeneration: stagedUpdateRun.GetGeneration(),
+	})
+
+	if err := r.hubClient.Status().Update(ctx, stagedUpdateRun); err != nil {
+		return errors.NewAPIServerError(err, "failed to update the staged update run status", false)
+	}
+	return nil
+}
+
 func (r *Reconciler) markStagedUpdateRunAsFailedToInitialize(
 	ctx context.Context,
 	stagedUpdateRun rolloutv1alpha1.StagedUpdateRunAccessor,
@@ -211,6 +231,25 @@ func resyncPerStageCondWithNoCommit(
 	updatedCond := *cond
 	updatedCond.ObservedGeneration = stagedUpdateRun.GetGeneration()
 	meta.SetStatusCondition(&stage.Conditions, updatedCond)
+}
+
+func markAllOngoingUpdatesInStageAsCanceled(
+	stagedUpdateRun rolloutv1alpha1.StagedUpdateRunAccessor,
+	stage *rolloutv1alpha1.PerStageStatus,
+) {
+	for i := range stage.Clusters {
+		startedCond := meta.FindStatusCondition(stage.Clusters[i].Conditions, rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeStarted)
+		completedCond := meta.FindStatusCondition(stage.Clusters[i].Conditions, rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted)
+		if startedCond != nil && completedCond == nil {
+			meta.SetStatusCondition(&stage.Clusters[i].Conditions, metav1.Condition{
+				Type:               rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted,
+				Status:             metav1.ConditionTrue,
+				Reason:             rolloutv1alpha1.StagedUpdateRunPerClusterCompletedCondReasonCanceled,
+				Message:            "The update on the cluster has been canceled due to stage-level failures",
+				ObservedGeneration: stagedUpdateRun.GetGeneration(),
+			})
+		}
+	}
 }
 
 func resyncPerClusterCondWithNoCommit(

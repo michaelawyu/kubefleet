@@ -48,7 +48,8 @@ const (
 	StagedUpdateRunInitializedCondReasonPreppedResourceSnapshotAndAllStages = "PreppedResourceSnapshotAndAllStages"
 	StagedUpdateRunInitializedCondReasonFailed                              = "Failed"
 
-	StagedUpdateRunStartedCondReasonUpdateStarted = "UpdateStarted"
+	StagedUpdateRunStartedCondReasonUpdateStarted                      = "UpdateStarted"
+	StagedUpdateRunStartedCondReasonFailedDueToBindingManagerConflicts = "FailedDueToBindingManagerConflicts"
 
 	StagedUpdateRunCompletedCondReasonSucceeded          = "Succeeded"
 	StagedUpdateRunCompletedCondReasonPartiallySucceeded = "PartiallySucceeded"
@@ -69,6 +70,7 @@ const (
 
 	StagedUpdateRunPerClusterCompletedCondReasonSucceeded = "UpdateSucceeded"
 	StagedUpdateRunPerClusterCompletedCondReasonFailed    = "FailedToUpdate"
+	StagedUpdateRunPerClusterCompletedCondReasonCanceled  = "Canceled"
 
 	// The reasons for the per-task condition types.
 	StagedUpdateRunTaskApprovalRequestCreatedCondReasonCreated           = "RequestCreated"
@@ -162,6 +164,13 @@ type StagedUpdateRunSpec struct {
 	// If the staged update run is created with this field set to true, KubeFleet will initialize the staged update run,
 	// i.e., decide on the resource snapshot to roll out and determine the stages and the clusters in each stage,
 	// but will not start rolling out resource changes until the field is set back to false.
+	//
+	// When a staged update run is suspended after the rollout starts, KubeFleet will pause the rollout at the current
+	// or closest stage as applicable. If a cluster in the stage has started updating but has not yet completed, its
+	// wait timer will be reset (i.e., maxWaitTimePerClusterMinutes does not apply to suspended cluster updates).
+	// However, the time spent in suspension will still count towards any timed wait tasks you have configured;
+	// those tasks will proceed or even complete, accounting for the time spent in suspension, once the suspension
+	// is lifted.
 	//
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:default=false

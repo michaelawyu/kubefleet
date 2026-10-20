@@ -185,6 +185,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	if !claimed {
 		backoffDuration := r.bindingManagerClaimRateLimiter.When(req)
+		if err := r.markStagedUpdateRunAsFailedToStartDueToBindingManagerConflicts(ctx, stagedUpdateRun); err != nil {
+			wrappedErr := errors.Wraps(err, "", "stagedUpdateRun", klog.KObj(stagedUpdateRun), "controller", controllerName)
+			klog.ErrorS(wrappedErr, "Failed to mark staged update run as failed to start due to binding manager conflicts", errors.Args(wrappedErr)...)
+		}
 		return ctrl.Result{RequeueAfter: backoffDuration}, nil
 	}
 	// Reset the binding manager claim rate limiter for the staged update run object.

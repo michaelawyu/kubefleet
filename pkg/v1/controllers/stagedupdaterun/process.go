@@ -136,7 +136,7 @@ func (r *Reconciler) process(ctx context.Context, stagedUpdateRun rolloutv1alpha
 	// Check if the staged update run has been marked as started; if not, add the Started condition.
 	stagedUpdateRunStatus := stagedUpdateRun.GetStatus()
 	startedCond := meta.FindStatusCondition(stagedUpdateRunStatus.Conditions, rolloutv1alpha1.StagedUpdateRunCondTypeStarted)
-	if startedCond == nil || startedCond.ObservedGeneration != stagedUpdateRun.GetGeneration() {
+	if startedCond == nil || startedCond.Status != metav1.ConditionTrue || startedCond.ObservedGeneration != stagedUpdateRun.GetGeneration() {
 		meta.SetStatusCondition(&stagedUpdateRunStatus.Conditions, metav1.Condition{
 			Type:               rolloutv1alpha1.StagedUpdateRunCondTypeStarted,
 			Status:             metav1.ConditionTrue,
@@ -383,6 +383,8 @@ func (r *Reconciler) processOneStage(
 				failedClusterCnt.Load(), len(stage.Clusters)),
 			ObservedGeneration: stagedUpdateRun.GetGeneration(),
 		})
+		// Mark all ongoing updates in the stage as canceled due to the stage-level failure.
+		markAllOngoingUpdatesInStageAsCanceled(stagedUpdateRun, stage)
 		stage.CompletedTimestamp = ptr.To(metav1.Now())
 		return stageProcessingResultFailed, nil, nil
 	case succeededClusterCnt.Load() == int32(len(stage.Clusters)):
@@ -446,6 +448,9 @@ func countClusterUpdateFailures(stage *rolloutv1alpha1.PerStageStatus, clusterUp
 		case completedCond.Reason == rolloutv1alpha1.StagedUpdateRunPerClusterCompletedCondReasonFailed:
 			// Register a cluster update failure.
 			clusterUpdateTotalFailures.Add(1)
+		case completedCond.Reason == rolloutv1alpha1.StagedUpdateRunPerClusterCompletedCondReasonCanceled:
+			// Register a cluster update cancellation.
+			clusterUpdateTotalFailures.Add(1)
 		default:
 			// The cluster has completed its update successfully.
 		}
@@ -470,6 +475,11 @@ func (r *Reconciler) refreshOneCluster(
 		return clusterProcessingResultSucceeded, nil
 	case completedCond.Reason == rolloutv1alpha1.StagedUpdateRunPerClusterCompletedCondReasonFailed:
 		// The update attempt has failed before.
+		resyncPerClusterCondWithNoCommit(stagedUpdateRun, cluster, rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted)
+		return clusterProcessingResultFailed, nil
+	case completedCond.Reason == rolloutv1alpha1.StagedUpdateRunPerClusterCompletedCondReasonCanceled:
+		// The update attempt has been canceled before. This branch is added for completeness reasons; normally this
+		// will never be encountered.
 		resyncPerClusterCondWithNoCommit(stagedUpdateRun, cluster, rolloutv1alpha1.StagedUpdateRunPerClusterCondTypeCompleted)
 		return clusterProcessingResultFailed, nil
 	default:
