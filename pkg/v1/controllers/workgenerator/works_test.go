@@ -20,7 +20,11 @@ import (
 	"strings"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/utils/ptr"
+
+	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 )
 
 // TestWorkOwnerLabelValue tests the workOwnerLabelValue function.
@@ -99,5 +103,198 @@ func TestWorkOwnerLabelValueDistinct(t *testing.T) {
 			t.Errorf("workOwnerLabelValue(%q) = %q, which collides with the value for %q", ownerName, got, other)
 		}
 		seen[got] = ownerName
+	}
+}
+
+// TestAreWorksInSync tests the areWorksInSync function.
+func TestAreWorksInSync(t *testing.T) {
+	const (
+		primarySnapshotName = "policy-0-snapshot"
+		staleSnapshotName   = "policy-0-old-snapshot"
+	)
+	serverSideApplyStrategy := &placementv1alpha1.SyncStrategy{
+		ApplyMethod: placementv1alpha1.ApplyMethodServerSideApply,
+	}
+
+	// A work object linked to the given snapshot; the linked work count annotation is set only if the count is
+	// not empty (i.e., for the primary work object).
+	newWork := func(name, linkedSnapshotName, linkedWorkCount string, syncStrategy *placementv1alpha1.SyncStrategy) placementv1alpha1.Work {
+		annotations := map[string]string{
+			placementv1alpha1.WorkLinkedToPrimaryPlacementResourceSnapshotAnnotationKey: linkedSnapshotName,
+		}
+		if len(linkedWorkCount) > 0 {
+			annotations[placementv1alpha1.LinkedWorkCountAnnotationKey] = linkedWorkCount
+		}
+		return placementv1alpha1.Work{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        name,
+				Annotations: annotations,
+			},
+			Spec: placementv1alpha1.WorkSpec{
+				SyncStrategy: syncStrategy,
+			},
+		}
+	}
+	newBinding := func(lastProcessedSnapshotName *string, syncStrategy *placementv1alpha1.SyncStrategy) placementv1alpha1.PlacementBindingAccessor {
+		binding := &placementv1alpha1.PlacementBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "app",
+				Name:      "binding",
+			},
+			Spec: placementv1alpha1.PlacementBindingSpec{
+				ClusterName:          "member-1",
+				ResourceSnapshotName: primarySnapshotName,
+				SyncStrategy:         syncStrategy,
+			},
+		}
+		binding.Status.LastProcessedResourceSnapshotName = lastProcessedSnapshotName
+		return binding
+	}
+
+	testCases := []struct {
+		name       string
+		binding    placementv1alpha1.PlacementBindingAccessor
+		works      []placementv1alpha1.Work
+		wantStatus workSyncStatus
+		wantErr    bool
+	}{
+		{
+			name:    "last processed snapshot is not set",
+			binding: newBinding(nil, nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "1", nil),
+			},
+			wantStatus: workSyncStatusOutOfSync,
+		},
+		{
+			name:    "last processed snapshot differs from the primary snapshot",
+			binding: newBinding(ptr.To(staleSnapshotName), nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "1", nil),
+			},
+			wantStatus: workSyncStatusOutOfSync,
+		},
+		{
+			name:       "no work objects",
+			binding:    newBinding(ptr.To(primarySnapshotName), nil),
+			wantStatus: workSyncStatusOutOfSync,
+		},
+		{
+			name:    "a work object is linked to another snapshot",
+			binding: newBinding(ptr.To(primarySnapshotName), nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "2", nil),
+				newWork("work-1", staleSnapshotName, "", nil),
+			},
+			wantStatus: workSyncStatusOutOfSync,
+		},
+		{
+			name:    "a work object has no link annotation",
+			binding: newBinding(ptr.To(primarySnapshotName), nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "2", nil),
+				{ObjectMeta: metav1.ObjectMeta{Name: "work-1"}},
+			},
+			wantStatus: workSyncStatusOutOfSync,
+		},
+		{
+			name:    "the primary work object is missing (no linked work count)",
+			binding: newBinding(ptr.To(primarySnapshotName), nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-1", primarySnapshotName, "", nil),
+			},
+			wantStatus: workSyncStatusOutOfSync,
+		},
+		{
+			name:    "fewer work objects than the linked work count",
+			binding: newBinding(ptr.To(primarySnapshotName), nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "2", nil),
+			},
+			wantStatus: workSyncStatusOutOfSync,
+		},
+		{
+			name:    "more work objects than the linked work count",
+			binding: newBinding(ptr.To(primarySnapshotName), nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "1", nil),
+				newWork("work-1", primarySnapshotName, "", nil),
+			},
+			wantStatus: workSyncStatusOutOfSync,
+		},
+		{
+			name:    "sync strategy is set on the binding but not on the work objects",
+			binding: newBinding(ptr.To(primarySnapshotName), serverSideApplyStrategy),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "1", nil),
+			},
+			wantStatus: workSyncStatusOutOfSync,
+		},
+		{
+			name:    "sync strategy is unset on the binding but set on a secondary work object",
+			binding: newBinding(ptr.To(primarySnapshotName), nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "2", nil),
+				newWork("work-1", primarySnapshotName, "", serverSideApplyStrategy),
+			},
+			wantStatus: workSyncStatusOutOfSync,
+		},
+		{
+			name:    "multiple work objects have the linked work count annotation",
+			binding: newBinding(ptr.To(primarySnapshotName), nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "2", nil),
+				newWork("work-1", primarySnapshotName, "2", nil),
+			},
+			wantStatus: workSyncStatusErred,
+			wantErr:    true,
+		},
+		{
+			name:    "linked work count annotation is not a number",
+			binding: newBinding(ptr.To(primarySnapshotName), nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "two", nil),
+			},
+			wantStatus: workSyncStatusErred,
+			wantErr:    true,
+		},
+		{
+			name:    "linked work count annotation is not positive",
+			binding: newBinding(ptr.To(primarySnapshotName), nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "0", nil),
+			},
+			wantStatus: workSyncStatusErred,
+			wantErr:    true,
+		},
+		{
+			name:    "in sync (single work object)",
+			binding: newBinding(ptr.To(primarySnapshotName), nil),
+			works: []placementv1alpha1.Work{
+				newWork("work-0", primarySnapshotName, "1", nil),
+			},
+			wantStatus: workSyncStatusInSync,
+		},
+		{
+			name:    "in sync (multiple work objects, with sync strategy)",
+			binding: newBinding(ptr.To(primarySnapshotName), serverSideApplyStrategy),
+			works: []placementv1alpha1.Work{
+				newWork("work-1", primarySnapshotName, "", serverSideApplyStrategy.DeepCopy()),
+				newWork("work-0", primarySnapshotName, "2", serverSideApplyStrategy.DeepCopy()),
+			},
+			wantStatus: workSyncStatusInSync,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotStatus, err := areWorksInSync(tc.binding, tc.works)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("areWorksInSync() = (%q, %v), want error: %t", gotStatus, err, tc.wantErr)
+			}
+			if gotStatus != tc.wantStatus {
+				t.Errorf("areWorksInSync() = %q, want %q", gotStatus, tc.wantStatus)
+			}
+		})
 	}
 }

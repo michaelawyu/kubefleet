@@ -66,6 +66,7 @@ const (
 	// primary placement resource snapshot, or have an inconsistent sync strategy.
 	workSyncStatusOutOfSync workSyncStatus = "OutOfSync"
 	// workSyncStatusErred signals that there was an error while checking the synchronization status of the work objects.
+	// This is a value added for completeness reasons only; it is not checked.
 	workSyncStatusErred workSyncStatus = "Erred"
 )
 

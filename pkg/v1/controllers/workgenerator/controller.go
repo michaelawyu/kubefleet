@@ -176,6 +176,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	// Create or update the work objects.
+	//
+	// Note that if any of the work objects we have checked are stale, the refreshing would fail with an error.
 	createdOrUpdatedWorks, workSpecsChanged, err := r.refreshWorks(ctx, placementBinding, placementResourceSnapshots, works)
 	if err != nil {
 		wrappedErr := errors.Wraps(err, "failed to refresh work objects",
