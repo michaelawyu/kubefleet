@@ -135,7 +135,7 @@ var _ = Describe("waves", func() {
 			Eventually(workStatusUpdatedActual, 2*eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update work status")
 		})
 
-		It("should create the objects in parallel", func() {
+		It("should create the objects in the same wave", func() {
 			nsCreationTimestamp := retrieveCreationTimestamp(memberClient1, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: nsName}})
 			priorityClassCreationTimestamp := retrieveCreationTimestamp(memberClient1, &schedulingv1.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: priorityClassName}})
 			gap := priorityClassCreationTimestamp.Sub(nsCreationTimestamp)

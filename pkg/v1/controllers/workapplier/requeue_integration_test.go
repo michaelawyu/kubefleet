@@ -571,10 +571,17 @@ var _ = Describe("requeues and status updates", func() {
 			nudgeWork(workName, memberReservedNSNameInstrumented)
 		})
 
-		It("should requeue with the fixed delay again, as the work object changes", func() {
+		It("should requeue after 2 seconds again, as the work object changes", func() {
 			// The update triggers a reconciliation right away, which finds the work object changed and resets the
-			// requeue counter. Without the reset, the work object would have been requeued after 8 seconds again.
-			requeueGapsActual := requeueGapsActual(hubClientRecorderInstrumented, workKey, nudgedAt, 0, []time.Duration{time.Second * 2})
+			// requeue counter; the work object is then requeued with the fixed delay (2s), and then with the initial
+			// slow backoff delay (also 2s). Without the reset, the work object would have been requeued after 8
+			// seconds again.
+			//
+			// A periodic requeue might start right after nudgedAt is recorded, yet still read the previous generation
+			// of the work object from the cache; the reconciliation triggered by the update would then follow it
+			// immediately. To stay robust, the gap is checked after skipping the first reconciliation at or after
+			// nudgedAt; it is 2 seconds either way.
+			requeueGapsActual := requeueGapsActual(hubClientRecorderInstrumented, workKey, nudgedAt, 1, []time.Duration{time.Second * 2})
 			Eventually(requeueGapsActual, 2*eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to reset the requeue counter")
 		})
 

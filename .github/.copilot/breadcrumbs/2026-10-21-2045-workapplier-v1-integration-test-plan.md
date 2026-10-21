@@ -8,7 +8,9 @@ envtest suite in [suite_test.go](../../../pkg/v1/controllers/workapplier/suite_t
 applier ITs (`pkg/controllers/workapplier`) are used as a reference only; many do not apply as-is because of API and
 behavior changes (see [Old tests → new plan](#old-tests--new-plan)).
 
-**Status**: Plan drafted; awaiting approval of the [Decisions](#decisions-pending-approval). No tests added yet.
+**Status**: In progress. The [Decisions](#decisions) are adopted. All P0 contexts are implemented, plus W1–W3, R2, R3,
+L2, L3 (P1) and L5 (P2); the remaining P1/P2 contexts (including the V section and W4) are pending. See
+[Status](#status) for details.
 
 ## Requirements
 
@@ -315,7 +317,7 @@ Exhaustive per-kind rules belong in unit tests (see below).
 | W2 | P1 | two consecutive waves (NS → ConfigMap) | Gap ≥ delay, < 2×delay |
 | W3 | P1 | two non-consecutive waves (NS → Role) | Gap ≥ delay, < 2×delay (empty wave adds nothing) |
 | W4 | P2 | all waves (shuffled manifests incl. EndpointSlice as unknown) | Waves 0–5 + last all present; intra-wave ≤ 2s; adjacent waves ≥ delay |
-| W5 | P0 | waves span linked works (runs on reconciler 2, whose hub client also counts status writes) | NS in the **secondary**, ConfigMap in the **primary**, `WhenNamespaceDoesNotExist=ReportError` | ConfigMap applied in the first pass: the primary's work status is written exactly twice (write-ahead + final `Applied=True`). A failed first pass would add a third write. Deterministic; creation-timestamp gaps cannot tell a single pass from fail + retry |
+| W5 | P0 | waves span linked works (runs on reconciler 2, whose hub client also counts status writes) | NS in the **secondary**, ConfigMap in the **primary**, `WhenNamespaceDoesNotExist=ReportError` | ConfigMap applied in the first pass: the primary's work status is written exactly twice (write-ahead + final `Applied=True`). A failed first pass would add a third write. The creation-timestamp gap (NS → ConfigMap: ≥ delay, < 2×delay) also catches a failed first pass: the ConfigMap would then be applied in a later reconciliation, at least one requeue delay (5s) plus wave delays later, beyond the upper bound |
 
 ### R. `requeue_integration_test.go`: requeue and status writes (reconciler 3)
 
@@ -323,7 +325,7 @@ Exhaustive per-kind rules belong in unit tests (see below).
 | --- | --- | --- | --- |
 | R1 | P0 | status writes are skipped at steady state | NS + ConfigMap single work: exactly 2 work status writes (write-ahead + final) and 1 appliedWork status write; none over ≥2 more reconciles; same per work for a primary + secondary set |
 | R2 | P1 | backoff progression (unavailable) + reset on result change | Deployment never available: delays 2s, 2s, 3s, 6s, 8s, 8s; gaps checked from the 2nd reconcile: 2s, 3s, 6s, 8s, 8s. Marking it available → next gap is the fixed delay (2s) |
-| R3 | P1 | skip to fast backoff (available) + reset on change | ConfigMap: delays 2s, 2s, 4s, 8s, 8s; gaps checked from the 2nd reconcile: 2s, 4s, 8s, 8s. `nudgeWork` → next gap is the fixed delay (2s) |
+| R3 | P1 | skip to fast backoff (available) + reset on change | ConfigMap: delays 2s, 2s, 4s, 8s, 8s; gaps checked from the 2nd reconcile: 2s, 4s, 8s, 8s. `nudgeWork` → after skipping the first reconcile at or after the nudge, the next gap is 2s (the fixed delay or the initial slow backoff delay; the skip guards against a periodic reconcile that reads the pre-nudge generation from the cache) |
 
 Gaps are derived from `When()` with the proposed limiter (fixed 2s ×1; slow ×1.5 from 2s, cap 4s; fast ×2, cap 8s).
 They are measured between reconcile starts, so they include the reconcile duration (tolerance −250ms/+1.5s). The
@@ -379,23 +381,25 @@ old package:
 | `waves_integration_test.go` | → W1–W4, plus W5 (cross-work waves, new) |
 | Priority queue runs (`KUBEFLEET_CI_WORK_APPLIER_RUN_WITH_PRIORITY_QUEUE`), metrics | Dropped (no priority queue or metrics in the new package) |
 
-## Decisions (pending approval)
+## Decisions
+
+All the decisions below are adopted; the implemented test cases follow them.
 
 1. **Extra reconcilers share member env 1** (separate hub managers and reserved namespaces) rather than starting extra
    member API servers per Ginkgo process, as the old suite did (4 member envs). This keeps `-p` runs light. The
    constraint in [Test environment constraints](#test-environment-constraints-and-design-implications) item 9 applies.
-   Applied to the lifecycle reconciler (October 21, 2026); still to be confirmed for the waves and instrumented
-   reconcilers.
+   Applied to the lifecycle, waves, and instrumented reconcilers (October 21, 2026).
 2. **`Join`/`Leave` (L1) runs on a dedicated lifecycle reconciler**, with `DeferCleanup(workApplierLifecycle.Join)`.
    No `Serial` decorator is needed (see constraint 8). **Adopted (October 21, 2026)**, replacing the earlier choice of
    `Serial` on reconciler 1. L4 does not call `Join`/`Leave`, so it stays on reconciler 1.
 3. **Include R2/R3 (backoff timing), labeled `slow`**, on the instrumented reconciler with a fast custom limiter. The
    limiter math is already covered by `backoff_test.go`; these specs only check the wiring (counter reset on spec and
-   result changes, skip-to-fast). Alternative: drop R2/R3 and keep R1 only.
+   result changes, skip-to-fast). **Adopted (October 21, 2026)**; the alternative (drop R2/R3 and keep R1 only) is not
+   taken.
 4. **Wave delay 3s** (old: 5s), with assertions `gap ≥ 3s` and `gap < 6s` (creation timestamps have 1s granularity).
 5. **Gate the package in `make local-unit-test` and add a dedicated Ginkgo CI step** (`TestMain` +
-   `KUBEFLEET_CI_TEST_RUNNER_NAME`), as for `stagedupdaterun`. Today the package runs under `go test` in
-   `make local-unit-test` with no `-p`.
+   `KUBEFLEET_CI_TEST_RUNNER_NAME`), as for `stagedupdaterun`. Previously the package ran under `go test` in
+   `make local-unit-test` with no `-p`. **Implemented (October 22, 2026)**; see [Suite changes](#suite-changes) item 5.
 6. **Unit-test gaps** (previous section) are a follow-up, not part of this IT work.
 
 ## Behaviors to note (documented only; tests assert current behavior)
@@ -451,7 +455,7 @@ today).
 
 - [x] Surveyed the new package source, the existing ITs, and the old ITs (October 21, 2026).
 - [x] Baseline run: 155/155 pass with `ginkgo -p --race` (61.7s spec time).
-- [ ] Decisions approved.
+- [x] Decisions adopted (see [Decisions](#decisions)).
 - [ ] Suite changes + shared utilities (Suite changes items 0–3 and 5 done; the P1/P2 fixtures pending).
 - [x] **T1** (October 21, 2026): `takeover_integration_test.go`, context `pre-existing objects with the default sync
   strategy (report error, no takeover)`, 10 specs. Beyond the plan row, the work deletion does **not** simulate GC, so
@@ -486,10 +490,11 @@ today).
   [Suite changes](#suite-changes)).
   - W1–W3 compare the creation timestamps of the applied objects (same wave: within 1s; next wave: ≥ delay and
     < 2×delay). W5 checks that each linked work status is written exactly twice, i.e., the config map in the primary
-    work is applied in the same pass as the namespace in the secondary work.
+    work is applied in the same pass as the namespace in the secondary work; it also checks that the config map is
+    created in the wave right after the namespace.
   - R1 checks 2 work status writes and 1 appliedWork status write per work, then no more writes over ≥2 further
-    reconciles. R2/R3 check the requeue gaps between reconcile starts, then the reset to the fixed delay after the
-    deployment is marked available (R2) or the work is updated (R3).
+    reconciles. R2/R3 check the requeue gaps between reconcile starts, then the reset to 2s delays after the
+    deployment is marked available (R2) or the work is updated (R3; see the review fixes below).
   - New in `utils_integration_test.go`: `parallelizerWithFixedDelay`, `recordingClient` (with
     `recordingStatusWriter`), `requeueGapsActual`, `retrieveCreationTimestamp`, and the constants
     `requeueGapLowerTolerance`/`requeueGapUpperTolerance` (−250ms/+1.5s).
@@ -641,5 +646,21 @@ today).
 
     The full package runs 256/256 with `ginkgo -p --race` (78.8s spec time, 1m27s wall); lint, gofmt and goimports
     are clean.
+- [x] **Review fixes** (October 22, 2026). Not yet re-run; pending verification.
+  - T1 `pre-existing objects with the default sync strategy (report error, no takeover)`: the `AfterAll` now deletes
+    the work itself (ignoring NotFound) and waits for it to be removed. Previously a failed spec skipped the delete
+    spec, so the `AfterAll` timed out on the appliedWork and left the work behind on reconciler 1.
+  - T9 `objects placed by another work object (duplicate placement)`: the `AfterAll` deletes both works A and B
+    ignoring NotFound (work B might not exist yet if the test case fails early).
+  - R3: the reset spec skips the first reconcile at or after the nudge (`skip: 1`). A periodic reconcile that starts
+    right after `nudgedAt` might still read the pre-nudge generation from the cache, and the reconcile that the update
+    triggers would then follow it immediately (a gap of ~0s). The checked gap is 2s either way (the fixed delay or the
+    initial slow backoff delay), and 8s without the reset. Renamed to
+    `should requeue after 2 seconds again, as the work object changes`.
+  - L4: the `Consistently` check compares the UID of work B2's appliedWork (`objectNotRecreatedActual`) instead of
+    only checking that it exists. Otherwise a cleanup that wrongly touched B2 could be masked: work B's next periodic
+    reconcile adds the finalizer back and re-creates the appliedWork.
+  - W1: renamed the spec to `should create the objects in the same wave`; the timestamp check shows that the objects
+    share a wave, not that they are processed in parallel.
 - [ ] P1 contexts.
 - [ ] P2 contexts.

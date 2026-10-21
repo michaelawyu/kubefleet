@@ -195,9 +195,21 @@ var _ = Describe("takeover", func() {
 		})
 
 		AfterAll(func() {
+			// The work object might still exist if the test case fails before the work object is deleted.
+			work := &placementv1alpha1.Work{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      workName,
+					Namespace: memberReservedNSName1,
+				},
+			}
+			Expect(client.IgnoreNotFound(hubClient.Delete(ctx, work))).To(Succeed(), "Failed to delete the work object")
+
 			// Simulate the GC controller by removing the foreground deletion finalizer from the appliedWork object.
 			appliedWorkRemovedActual := appliedWorkRemovedActual(memberClient1, workName)
 			Eventually(appliedWorkRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove the appliedWork object")
+
+			workRemovedActual := workRemovedActual(memberReservedNSName1, workName)
+			Eventually(workRemovedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to remove the work object")
 
 			// Remove the pre-existing objects; the work applier never manages them.
 			regularConfigMapRemovedActual := regularConfigMapRemovedActual(memberClient1, nsName, configMapName)
@@ -1755,15 +1767,17 @@ var _ = Describe("takeover", func() {
 		})
 
 		AfterAll(func() {
-			// Work A might still exist if the test case fails before work A is deleted.
-			workA := &placementv1alpha1.Work{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      workNameA,
-					Namespace: memberReservedNSName1,
-				},
+			// Work A might still exist if the test case fails before work A is deleted, and work B might not exist yet
+			// if the test case fails before work B is created.
+			for _, workName := range []string{workNameA, workNameB} {
+				work := &placementv1alpha1.Work{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      workName,
+						Namespace: memberReservedNSName1,
+					},
+				}
+				Expect(client.IgnoreNotFound(hubClient.Delete(ctx, work))).To(Succeed(), "Failed to delete work %s", workName)
 			}
-			Expect(client.IgnoreNotFound(hubClient.Delete(ctx, workA))).To(Succeed(), "Failed to delete work A")
-			deleteWorkObject(workNameB, memberReservedNSName1)
 
 			// Remove the config map manually, as there is no GC controller in the test environment.
 			regularConfigMapRemovedActual := regularConfigMapRemovedActual(memberClient1, nsName, configMapName)

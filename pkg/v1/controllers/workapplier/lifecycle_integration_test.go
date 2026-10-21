@@ -52,6 +52,8 @@ var _ = Describe("lifecycle", func() {
 
 		var appliedWorkOwnerRefA *metav1.OwnerReference
 		var appliedWorkOwnerRefB *metav1.OwnerReference
+		// The appliedWork object of work B2 before work A is deleted.
+		var appliedWorkB2 *placementv1alpha1.AppliedWork
 
 		// Each work object features one config map, which is applied and available.
 		singleConfigMapStatus := func(configMapName string) []placementv1alpha1.PerManifestStatus {
@@ -144,6 +146,8 @@ var _ = Describe("lifecycle", func() {
 			}
 			appliedWorkOwnerRefA = prepareAppliedWorkOwnerRef(memberClient1, workAName)
 			appliedWorkOwnerRefB = prepareAppliedWorkOwnerRef(memberClient1, workBName)
+			appliedWorkB2 = &placementv1alpha1.AppliedWork{}
+			Expect(memberClient1.Get(ctx, client.ObjectKey{Name: workB2Name}, appliedWorkB2)).To(Succeed(), "Failed to retrieve the appliedWork object of work B2")
 
 			// The config map from work A is owned by the appliedWork object of work A; the config maps from work B
 			// and work B2 are both owned by the appliedWork object of work B (the primary work object).
@@ -196,15 +200,18 @@ var _ = Describe("lifecycle", func() {
 			// The cleanup of work A concerns only the work objects of the cluster-scoped placement binding; the
 			// secondary work object of the namespace-scoped placement binding keeps its cleanup finalizer and
 			// appliedWork object, and the applied config maps stay with the appliedWork object of work B.
+			//
+			// Had the cleanup touched work B2, the next periodic reconciliation of work B would add the finalizer
+			// back and re-create the appliedWork object; the appliedWork object is hence checked by its UID.
 			finalizerAddedActual := workFinalizerAddedActual(memberReservedNSName1, workB2Name)
-			appliedWorkCreatedActual := appliedWorkCreatedActual(memberClient1, memberReservedNSName1, workB2Name)
+			appliedWorkNotRecreatedActual := objectNotRecreatedActual(memberClient1, appliedWorkB2)
 			configMapBAppliedActual := regularConfigMapObjectAppliedActual(memberClient1, nsName, configMapBName, appliedWorkOwnerRefB)
 			configMapB2AppliedActual := regularConfigMapObjectAppliedActual(memberClient1, nsName, configMapB2Name, appliedWorkOwnerRefB)
 			Consistently(func() error {
 				if err := finalizerAddedActual(); err != nil {
 					return err
 				}
-				if err := appliedWorkCreatedActual(); err != nil {
+				if err := appliedWorkNotRecreatedActual(); err != nil {
 					return err
 				}
 				if err := configMapBAppliedActual(); err != nil {
