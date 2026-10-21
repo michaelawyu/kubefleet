@@ -67,6 +67,12 @@ const (
 
 	// The number of mutex slots used by the placement resource snapshot manager.
 	placementResourceSnapshotMuSlotCnt = 256
+	// The max. size (in bytes) of the resource data in a single placement resource snapshot.
+	//
+	// The limit is far lower than the default (~1.2 MiB), so that test cases can select a resource too large to
+	// snapshot (a user error) without writing megabytes of data; the resources that test cases select otherwise are
+	// a few hundred bytes each.
+	maxPerSnapshotResourceDataSizeBytes = 16 * 1024
 
 	// The base and max. delays of the rate limiter for binding manager claims used by the auto-rollout controller.
 	//
@@ -161,7 +167,7 @@ var _ = BeforeSuite(func() {
 		resourceeligibility.Baseline(hubMgr.GetRESTMapper()),
 		hubMgr.GetRESTMapper(),
 		placementResourceSnapshotMuSlotCnt,
-		placementresourcesnapshot.DefaultMaxPerSnapshotResourceDataSizeBytes,
+		maxPerSnapshotResourceDataSizeBytes,
 		placementresourcesnapshot.DefaultMaxPerSnapshotResourceCnt,
 	)
 	Expect(err).Should(Succeed())
@@ -174,6 +180,7 @@ var _ = BeforeSuite(func() {
 		placementResourceSnapshotManager,
 		parallelizer.NewParallelizer(workerCount),
 		workqueue.NewTypedItemExponentialFailureRateLimiter[ctrl.Request](rateLimiterBaseDelay, rateLimiterMaxDelay),
+		hubMgr.GetEventRecorder(controllerName),
 	)
 	Expect(err).Should(Succeed())
 	Expect(reconciler.SetupWithManager(hubMgr, maxConcurrentReconciles)).Should(Succeed())

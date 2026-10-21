@@ -1,7 +1,7 @@
 /*
 Copyright 2026 The KubeFleet Authors.
 
-Licensed under the Apache License, Version 2.0 (the "License");
+Licensed under the Apache License, Version 2.0 (the "License");f
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
@@ -330,18 +330,18 @@ func touchPlacementPolicy(policyNSName, policyName string) {
 	})
 }
 
-// backdatedTimestamp returns a timestamp (in the format of the last rolled out timestamp annotation) of the given
-// duration ago, e.g., to simulate a placement policy that was last rolled out a while ago.
+// backdatedTimestamp returns a timestamp (in the format of the last rollout attempt timestamp annotation) of the given
+// duration ago, e.g., to simulate a placement policy whose last rollout attempt was a while ago.
 func backdatedTimestamp(ago time.Duration) string {
 	return time.Now().Add(-ago).UTC().Format(time.RFC3339)
 }
 
-// lastRolledOutTimestamp returns the value of the last rolled out timestamp annotation of a placement policy (empty
-// if the annotation is absent).
-func lastRolledOutTimestamp(policyNSName, policyName string) string {
+// lastRolloutAttemptTimestamp returns the value of the last rollout attempt timestamp annotation of a placement policy
+// (empty if the annotation is absent).
+func lastRolloutAttemptTimestamp(policyNSName, policyName string) string {
 	policy, err := getPlacementPolicy(policyNSName, policyName)
 	Expect(err).To(Succeed())
-	return policy.GetAnnotations()[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey]
+	return policy.GetAnnotations()[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey]
 }
 
 // resourceCollectedCond returns a ResourceCollected condition of a placement policy, as the placement policy controller
@@ -644,9 +644,9 @@ func placementBindingsActual(bindingNS string, bindingNames []string, wantSnapsh
 	}
 }
 
-// placementPolicyRolledOutActual verifies that a placement policy has been rolled out at or after the given time
-// (per its last rolled out timestamp annotation, which must be in RFC 3339 format and in UTC), and that no one holds
-// its binding manager role afterwards.
+// placementPolicyRolledOutActual verifies that a placement policy has been rolled out (or has had a rollout fail due
+// to a user error) at or after the given time (per its last rollout attempt timestamp annotation, which must be in
+// RFC 3339 format and in UTC), and that no one holds its binding manager role afterwards.
 //
 // Both are checked on the same read of the placement policy: the controller writes the timestamp after it claims the
 // role, so a read that has the timestamp but no binding manager reflects a released role, rather than a cache that
@@ -658,20 +658,20 @@ func placementPolicyRolledOutActual(policyNSName, policyName string, notBefore t
 			return err
 		}
 
-		val, found := policy.GetAnnotations()[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey]
+		val, found := policy.GetAnnotations()[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey]
 		if !found {
-			return fmt.Errorf("the placement policy has no last rolled out timestamp annotation")
+			return fmt.Errorf("the placement policy has no last rollout attempt timestamp annotation")
 		}
 		if !strings.HasSuffix(val, "Z") {
-			return fmt.Errorf("the last rolled out timestamp %q is not in UTC", val)
+			return fmt.Errorf("the last rollout attempt timestamp %q is not in UTC", val)
 		}
-		lastRolledOut, err := time.Parse(time.RFC3339Nano, val)
+		lastRolloutAttempt, err := time.Parse(time.RFC3339Nano, val)
 		if err != nil {
-			return fmt.Errorf("failed to parse the last rolled out timestamp %q: %w", val, err)
+			return fmt.Errorf("failed to parse the last rollout attempt timestamp %q: %w", val, err)
 		}
-		if now := time.Now(); lastRolledOut.Before(notBefore) || lastRolledOut.After(now) {
-			return fmt.Errorf("the last rolled out timestamp is %s, want a time within [%s, %s]",
-				lastRolledOut.Format(time.RFC3339Nano), notBefore.UTC().Format(time.RFC3339Nano), now.UTC().Format(time.RFC3339Nano))
+		if now := time.Now(); lastRolloutAttempt.Before(notBefore) || lastRolloutAttempt.After(now) {
+			return fmt.Errorf("the last rollout attempt timestamp is %s, want a time within [%s, %s]",
+				lastRolloutAttempt.Format(time.RFC3339Nano), notBefore.UTC().Format(time.RFC3339Nano), now.UTC().Format(time.RFC3339Nano))
 		}
 
 		if bindingManager := policy.GetStatus().BindingManager; bindingManager != nil {
@@ -683,7 +683,7 @@ func placementPolicyRolledOutActual(policyNSName, policyName string, notBefore t
 
 // rolledOutActual verifies that an auto-rollout of a placement policy has completed at or after the given time:
 // the primary placement resource snapshot of the given index has been created, all the given placement bindings
-// point to it, the last rolled out timestamp has been written, and the binding manager role has been released.
+// point to it, the last rollout attempt timestamp has been written, and the binding manager role has been released.
 func rolledOutActual(
 	policy placementv1alpha1.PlacementPolicyAccessor,
 	bindingNames []string,
@@ -698,19 +698,19 @@ func rolledOutActual(
 }
 
 // placementPolicyAtRestActual verifies that the auto-rollout controller has left a placement policy at rest: no one
-// holds its binding manager role, and its last rolled out timestamp annotation has the given value (empty if the
+// holds its binding manager role, and its last rollout attempt timestamp annotation has the given value (empty if the
 // annotation should be absent).
-func placementPolicyAtRestActual(policyNSName, policyName, wantLastRolledOutTimestamp string) func() error {
-	return placementPolicyAutoRolloutStateActual(policyNSName, policyName, nil, wantLastRolledOutTimestamp)
+func placementPolicyAtRestActual(policyNSName, policyName, wantLastRolloutAttemptTimestamp string) func() error {
+	return placementPolicyAutoRolloutStateActual(policyNSName, policyName, nil, wantLastRolloutAttemptTimestamp)
 }
 
 // placementPolicyAutoRolloutStateActual verifies, on one read of a placement policy, that its binding manager is the
-// given one (nil if no one should hold the role) and that its last rolled out timestamp annotation has the given
+// given one (nil if no one should hold the role) and that its last rollout attempt timestamp annotation has the given
 // value (empty if the annotation should be absent).
 func placementPolicyAutoRolloutStateActual(
 	policyNSName, policyName string,
 	wantBindingManager *placementv1alpha1.BindingManager,
-	wantLastRolledOutTimestamp string,
+	wantLastRolloutAttemptTimestamp string,
 ) func() error {
 	return func() error {
 		policy, err := getPlacementPolicy(policyNSName, policyName)
@@ -720,12 +720,12 @@ func placementPolicyAutoRolloutStateActual(
 		if diff := cmp.Diff(policy.GetStatus().BindingManager, wantBindingManager); diff != "" {
 			return fmt.Errorf("binding manager diff (-got +want):\n%s", diff)
 		}
-		val, found := policy.GetAnnotations()[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey]
+		val, found := policy.GetAnnotations()[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey]
 		switch {
-		case wantLastRolledOutTimestamp == "" && found:
-			return fmt.Errorf("the placement policy has a last rolled out timestamp annotation (%q), want none", val)
-		case val != wantLastRolledOutTimestamp:
-			return fmt.Errorf("the last rolled out timestamp is %q, want %q", val, wantLastRolledOutTimestamp)
+		case wantLastRolloutAttemptTimestamp == "" && found:
+			return fmt.Errorf("the placement policy has a last rollout attempt timestamp annotation (%q), want none", val)
+		case val != wantLastRolloutAttemptTimestamp:
+			return fmt.Errorf("the last rollout attempt timestamp is %q, want %q", val, wantLastRolloutAttemptTimestamp)
 		}
 		return nil
 	}
@@ -744,6 +744,30 @@ func bindingManagerReleasedOnAPIServerActual(policyNSName, policyName string) fu
 		}
 		if bindingManager := policy.GetStatus().BindingManager; bindingManager != nil {
 			return fmt.Errorf("the binding manager role is still held: %+v", *bindingManager)
+		}
+		return nil
+	}
+}
+
+// placementPolicyResourceVersionOnAPIServer returns the resource version of a placement policy, reading the placement
+// policy from the API server directly.
+func placementPolicyResourceVersionOnAPIServer(policyNSName, policyName string) string {
+	policy := newPlacementPolicyObj(policyNSName, policyName)
+	Expect(hubAPIReader.Get(ctx, client.ObjectKey{Namespace: policyNSName, Name: policyName}, policy)).To(Succeed(), "Failed to retrieve the placement policy from the API server")
+	return policy.GetResourceVersion()
+}
+
+// placementPolicyUnwrittenOnAPIServerActual verifies that no one has written to a placement policy since it was at the
+// given resource version (e.g., that the controller has not claimed and released its binding manager role again),
+// reading the placement policy from the API server directly.
+func placementPolicyUnwrittenOnAPIServerActual(policyNSName, policyName, wantResourceVersion string) func() error {
+	return func() error {
+		policy := newPlacementPolicyObj(policyNSName, policyName)
+		if err := hubAPIReader.Get(ctx, client.ObjectKey{Namespace: policyNSName, Name: policyName}, policy); err != nil {
+			return fmt.Errorf("failed to retrieve the placement policy from the API server: %w", err)
+		}
+		if gotResourceVersion := policy.GetResourceVersion(); gotResourceVersion != wantResourceVersion {
+			return fmt.Errorf("the placement policy is at resource version %s, want %s (it has been written to)", gotResourceVersion, wantResourceVersion)
 		}
 		return nil
 	}

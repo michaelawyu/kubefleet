@@ -51,24 +51,27 @@ func retrieveMinimumWaitPeriod(placementPolicy placementv1alpha1.PlacementPolicy
 	return min(max(period, autoRolloutMinimumWaitPeriodLowerBound), autoRolloutMinimumWaitPeriodUpperBound)
 }
 
-// remainingWaitPeriod returns how much longer the controller must wait before evaluating the placement policy
-// again; zero or a negative value means that the minimum wait period has passed since the last evaluation.
+// remainingWaitPeriod returns how much longer the controller must wait before it can roll out the placement policy
+// again; zero or a negative value means that the minimum wait period has passed since the last rollout.
 //
-// A missing or malformed last rolled out timestamp is treated as if the placement policy has never been rolled out.
+// A missing or malformed last rollout attempt timestamp is treated as if the placement policy has never been rolled
+// out. A timestamp in the future (e.g., set by hand, or written by a controller instance with a skewed clock) is
+// treated as if the placement policy has just been rolled out, i.e., the remaining wait period never exceeds the
+// minimum wait period.
 func remainingWaitPeriod(placementPolicy placementv1alpha1.PlacementPolicyAccessor, minWaitPeriod time.Duration, now time.Time) time.Duration {
-	val, found := placementPolicy.GetAnnotations()[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey]
+	val, found := placementPolicy.GetAnnotations()[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey]
 	if !found {
 		return 0
 	}
-	lastEvaluated, err := time.Parse(time.RFC3339, val)
+	lastRolloutAttempt, err := time.Parse(time.RFC3339, val)
 	if err != nil {
-		klog.V(2).InfoS("Failed to parse the last rolled out timestamp annotation; treating the placement policy as never rolled out",
+		klog.V(2).InfoS("Failed to parse the last rollout attempt timestamp annotation; treating the placement policy as never rolled out",
 			"placementPolicy", klog.KObj(placementPolicy),
 			"observedValue", val, "err", err,
 			"controller", controllerName)
 		return 0
 	}
-	return minWaitPeriod - now.Sub(lastEvaluated)
+	return min(minWaitPeriod-now.Sub(lastRolloutAttempt), minWaitPeriod)
 }
 
 // isAutoRolloutEnabled returns true if auto-rollout is enabled for the placement policy.
@@ -78,11 +81,11 @@ func isAutoRolloutEnabled(placementPolicy placementv1alpha1.PlacementPolicyAcces
 
 // shouldSkipProcessing checks if the placement policy should not be processed for an auto-rollout right now, which
 // is the case if auto-rollout is not enabled, no rollout is needed, or the minimum wait period since the last
-// evaluation has not passed.
+// rollout has not passed.
 //
 // If the processing should be skipped, a non-zero requeue-after duration is returned when the controller should come
 // back to the placement policy after that duration (i.e., when only the minimum wait period is holding processing back).
-func shouldSkipProcessing(placementPolicy placementv1alpha1.PlacementPolicyAccessor, now time.Time) (skip bool, requeueAfter time.Duration) {
+func shouldSkipProcessing(placementPolicy placementv1alpha1.PlacementPolicyAccessor, minWaitPeriod time.Duration) (skip bool, requeueAfter time.Duration) {
 	if !isAutoRolloutEnabled(placementPolicy) {
 		klog.V(2).InfoS("Auto-rollout is not enabled for the placement policy, skipping processing",
 			"placementPolicy", klog.KObj(placementPolicy), "controller", controllerName)
@@ -95,9 +98,8 @@ func shouldSkipProcessing(placementPolicy placementv1alpha1.PlacementPolicyAcces
 		return true, 0
 	}
 
-	minWaitPeriod := retrieveMinimumWaitPeriod(placementPolicy)
-	if remaining := remainingWaitPeriod(placementPolicy, minWaitPeriod, now); remaining > 0 {
-		klog.V(2).InfoS("The minimum wait period since the last evaluation has not passed, skipping processing",
+	if remaining := remainingWaitPeriod(placementPolicy, minWaitPeriod, time.Now()); remaining > 0 {
+		klog.V(2).InfoS("The minimum wait period since the last rollout has not passed, skipping processing",
 			"placementPolicy", klog.KObj(placementPolicy), "minimumWaitPeriod", minWaitPeriod, "remaining", remaining, "controller", controllerName)
 		return true, remaining
 	}
@@ -119,14 +121,14 @@ func isRolloutNeeded(placementPolicy placementv1alpha1.PlacementPolicyAccessor) 
 			synchronizedCond.Reason == placementv1alpha1.PlacementPolicySynchronizedCondReasonSomeClustersOnOlderResourceRevision)
 }
 
-// bookkeepLastRolledOutTimestamp writes the current time to the last rolled out timestamp annotation of the
-// placement policy.
+// bookkeepLastRolloutAttemptTimestamp writes the current time to the last rollout attempt timestamp annotation of the
+// placement policy, after a successful rollout or one that failed due to a user error.
 //
 // The annotation is written with a JSON merge patch that carries only this annotation (and no resource version),
 // so that the write does not conflict with, or overwrite, changes made to the placement policy since it was
 // retrieved; in particular, the status updates that the placement policy controller makes in reaction to the
 // binding refreshes of the rollout.
-func (r *Reconciler) bookkeepLastRolledOutTimestamp(ctx context.Context,
+func (r *Reconciler) bookkeepLastRolloutAttemptTimestamp(ctx context.Context,
 	placementPolicy placementv1alpha1.PlacementPolicyAccessor, now time.Time) error {
 	// Take the copy before the annotations are modified, as the annotation map is shared with the object.
 	patch := client.MergeFrom(placementPolicy.DeepCopyObject().(placementv1alpha1.PlacementPolicyAccessor))
@@ -135,11 +137,11 @@ func (r *Reconciler) bookkeepLastRolledOutTimestamp(ctx context.Context,
 	if annotations == nil {
 		annotations = make(map[string]string, 1)
 	}
-	annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = now.UTC().Format(time.RFC3339Nano)
+	annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = now.UTC().Format(time.RFC3339Nano)
 	placementPolicy.SetAnnotations(annotations)
 
 	if err := r.hubClient.Patch(ctx, placementPolicy, patch); err != nil {
-		return errors.NewAPIServerError(err, "failed to patch the last rolled out timestamp annotation", false,
+		return errors.NewAPIServerError(err, "failed to patch the last rollout attempt timestamp annotation", false,
 			"placementPolicy", klog.KObj(placementPolicy))
 	}
 	return nil
@@ -161,6 +163,9 @@ func (r *Reconciler) rollout(ctx context.Context, placementPolicy placementv1alp
 	resourceSnapshots, _, err := r.placementResourceSnapshotManager.SnapshotResourcesIfStale(ctx, placementPolicy)
 	if err != nil {
 		return errors.Wraps(err, "failed to retrieve or create the latest resource snapshot")
+	}
+	if len(resourceSnapshots) == 0 {
+		return errors.NewUnexpectedError(nil, "no resource snapshots returned")
 	}
 	// The first snapshot returned is always the primary snapshot.
 	latestPrimarySnapshot := resourceSnapshots[0]

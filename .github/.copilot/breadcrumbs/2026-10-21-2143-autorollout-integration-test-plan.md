@@ -20,36 +20,45 @@ Reconcile flow (see [controller.go](../../../pkg/v1/controllers/autorollout/cont
 
 1. Get the policy from the cache (`ClusterPlacementPolicy` if the request has no namespace). Not found → forget the
    request, done.
-2. Deleting → relinquish the binding manager role (if held), done. No finalizer is ever added.
-3. `shouldSkipProcessing` → relinquish the role (if held) and stop when:
+2. Deleting → relinquish the binding manager role if the cached policy shows it held (no API call otherwise; the event
+   handler always enqueues a policy whose role this controller holds, so a cache that has yet to show the claim is
+   followed by another reconcile), done. No finalizer is ever added.
+3. `shouldSkipProcessing` → relinquish the role (if held, as in step 2) and stop when:
    - auto-rollout is disabled (`kubefleet.dev/auto-rollout-enabled` is not exactly `"true"`) → no requeue;
    - no rollout is needed → no requeue. A rollout is needed iff `ResourceCollected=True` **and** `Synchronized=False`
      with reason `ResourcesChangedPendingRollout` or `SomeClustersOnOlderResourceRevision`, both with
      `observedGeneration == generation`;
-   - the minimum wait period since `kubefleet.dev/auto-rollout-last-rolled-out-timestamp` has not passed → requeue
+   - the minimum wait period since `kubefleet.dev/auto-rollout-last-rollout-attempt-timestamp` has not passed → requeue
      after the remaining time. The period comes from `kubefleet.dev/auto-rollout-minimum-wait-period` (default 3m;
-     unparsable → default; clamped to [1m, 1h]). A missing or malformed timestamp counts as never rolled out.
+     unparsable → default; clamped to [1m, 1h]). A missing or malformed timestamp counts as never rolled out; one in
+     the future counts as just rolled out (the remaining time never exceeds the period).
 4. Claim the binding manager role (`status.bindingManager = {controllerName: auto-rollout, objectRefs: [the policy
    itself]}`). Held by another controller → requeue with the claim rate limiter; nothing is written.
 5. Rollout: list bindings by the `spec.placementPolicyName` field index (in the policy's namespace for namespaced
    policies), keep only those not being deleted **and** controlled by this policy instance (`IsControlledBy`, i.e.
-   UID match); `SnapshotResourcesIfStale` (create index 0 / reuse the latest / create the next index); set
-   `spec.resourceSnapshotName` to the latest primary snapshot on every binding that does not already point to it
-   (parallelizer, fail fast on the first error). Failure → return the error **with the role still held**;
-   controller-runtime retries with its default backoff (5ms doubling, up to ~16m), and no timestamp is written.
-6. Success only → write `last-rolled-out-timestamp` (RFC3339Nano, UTC) with a JSON merge patch that carries only
-   that annotation and no resource version (changed on October 21, 2026: this used to be a resource-version-guarded
-   `Update` made **before** the rollout).
-7. Requeue after 200ms; that reconcile hits the wait period skip (step 3) and relinquishes the role.
+   UID match); `SnapshotResourcesIfStale` (create index 0 / reuse the latest / create the next index; an empty result
+   is an unexpected error); set `spec.resourceSnapshotName` to the latest primary snapshot on every binding that does
+   not already point to it (parallelizer, fail fast on the first error). Failure:
+   - a **user error** (in practice from snapshotting, e.g., a selected resource too large for a snapshot) → a Warning
+     event regarding the policy (reason `FailedToSnapshotResourcesDuringAutoRollout`, action `SnapshotResources`),
+     write `last-rollout-attempt-timestamp` (as in step 6), relinquish the role, and requeue after the minimum wait period
+     with no error, so that the wait period spaces out the retries (C6; behavior 8);
+   - any other error → return the error **with the role still held**; controller-runtime retries with its default
+     backoff (5ms doubling, up to ~16m), and no timestamp is written (C8).
+6. Success, or a user error (step 5) → write `last-rollout-attempt-timestamp` (RFC3339Nano, UTC) with a JSON merge patch
+   that carries only that annotation and no resource version (changed on October 21, 2026: this used to be a
+   resource-version-guarded `Update` made **before** the rollout).
+7. On success, requeue after 200ms; that reconcile hits the wait period skip (step 3) and relinquishes the role.
 
 Watches: `ClusterPlacementPolicy` and `PlacementPolicy` only (see
 [eventhandler.go](../../../pkg/v1/controllers/autorollout/eventhandler.go)):
 
 - Create: enqueue if enabled or holding the role (the latter is only reachable on a controller restart).
-- Update: always enqueue if the new object holds the role; otherwise only if old or new is enabled **and**
+- Update: always enqueue if the new object holds the role (the controller's own claim included, which is why a
+  user-error failure must write the timestamp; behavior 8); otherwise only if old or new is enabled **and**
   `autoRolloutRelevantChange` (deletion timestamp, the enabled/min-wait annotations, or — when the new object needs a
   rollout — a change in status/reason/observedGeneration of `ResourceCollected` or `Synchronized`).
-- Not watched: bindings, snapshots, selected resources (e.g., ConfigMaps), and the last-rolled-out annotation.
+- Not watched: bindings, snapshots, selected resources (e.g., ConfigMaps), and the last-rollout-attempt annotation.
 
 ## Test environment constraints and design implications
 
@@ -64,7 +73,7 @@ Watches: `ClusterPlacementPolicy` and `PlacementPolicy` only (see
    pre-set annotations, `waitForObjectsToBeCached`, and only then write the conditions that call for a rollout (the
    trigger).
 3. **Only relevant changes trigger a reconcile** (see Watches). Hence:
-   - backdate `last-rolled-out-timestamp` **before** the trigger; changing it afterwards does nothing;
+   - backdate `last-rollout-attempt-timestamp` **before** the trigger; changing it afterwards does nothing;
    - for a second rollout, flip `Synchronized` to `True/AllClustersSynchronized` and back to `False` (as the
      placement policy controller would); rewriting identical conditions does not enqueue;
    - a "nothing happens" `Consistently` check after a non-triggering write proves little; where a test needs the
@@ -79,13 +88,16 @@ Watches: `ClusterPlacementPolicy` and `PlacementPolicy` only (see
    finish well within 3m; contexts that continue past a rollout first mark the policy `Synchronized=True`.
 6. **The claim is transient on success.** Claim → refresh → timestamp → 200ms → relinquish; the held state is not
    reliably observable, so tests assert the end state (role released, i.e. `bindingManager == nil`). Two states are
-   observable: claim-blocked (no timestamp is written, since the timestamp comes last) and a failing rollout (the role
-   stays held across retries, C8).
+   observable: claim-blocked (no timestamp is written, since the timestamp comes last) and a rollout failing with a
+   non-user error (the role stays held across retries, C8). A user-error failure is transient too (claim → snapshot
+   fails → event → timestamp → relinquish), so C6 asserts its end state and the event.
 7. **Fast claim retries.** Releasing another controller's claim is not a relevant change; the retry comes from the
    claim rate limiter, which the suite sets to 250ms–2s (vs. 5s–180s by default).
 8. **Snapshots.** Names are deterministic (`primaryPlacementResourceSnapshotName(policyName, idx)`); the default
    revision history limit is 3, so no snapshot is garbage collected with ≤ 3 snapshots per policy. Hand-made
-   snapshots are not used: the manager relies on annotations (resource hash) that only it writes.
+   snapshots are not used: the manager relies on annotations (resource hash) that only it writes. To cause a user
+   error, the suite caps the resource data per snapshot at 16 KiB (the default is ~1.2 MiB), and C6 grows its
+   ConfigMap past it; the manager checks the cap only when it creates a snapshot, so nothing is created on failure.
 9. **Write conflicts.** Test writes to a policy (annotations, status) can race with the controller's claim and
    timestamp write; helpers re-read and retry in `Eventually`, and the controller retries on conflict by itself. No
    placement policy controller runs here, so the production race in behavior 1 (a status write between the claim
@@ -99,14 +111,17 @@ Mirror [the staged update run suite](../../../pkg/v1/controllers/stagedupdaterun
   needed: no member clusters are involved, and the auto-rollout API items are plain annotation keys).
 - Manager (metrics off); `hubClient = hubMgr.GetClient()` (cache-backed, shared with the controller);
   `fieldindexers.SetupWithHubAgentControllerManager`; the placement resource snapshot manager (dynamic client, empty
-  informer manager, baseline eligibility checker), added to the manager.
+  informer manager, baseline eligibility checker, and a 16 KiB cap on the resource data per snapshot, see constraint
+  8), added to the manager.
 - `New(hubMgr.GetClient(), snapshotManager, parallelizer.NewParallelizer(workerCount /* 4 */),
-  workqueue.NewTypedItemExponentialFailureRateLimiter[ctrl.Request](250ms, 2s))`;
+  workqueue.NewTypedItemExponentialFailureRateLimiter[ctrl.Request](250ms, 2s), hubMgr.GetEventRecorder(controllerName))`;
   `SetupWithManager(hubMgr, maxConcurrentReconciles /* 4 */)`.
 - Namespaces `app` and `other-app`, created once per process.
 - No `TestMain` CI skip: the package runs in `make test` (decision 2).
 - `hubAPIReader = hubMgr.GetAPIReader()` (uncached), used only where a read must reflect a write the test case has
   just made, e.g., that the controller released a claim the test wrote (A5); a cached read might predate the claim.
+  C6 also reads the policy's resource version and the `events.k8s.io/v1` events through it (the cache does not watch
+  events).
 
 Implemented with group A ([suite_test.go](../../../pkg/v1/controllers/autorollout/suite_test.go)).
 
@@ -142,8 +157,8 @@ extracting a shared package is out of scope), scope picked by the namespace (`cl
   `placementBindingsResourceSnapshotActual`; `placementBindingGenerationActual`;
   `placementBindingsUntouchedActual(ns, names)` (previous snapshot and generation 1); `bindingManagerActual`;
   `bindingManagerRoleReleasedActual`; `wantAutoRolloutObjectRef(ns, name)` (the policy itself);
-  `lastRolledOutTimestampActual(ns, name, notBefore)` (present, RFC3339Nano-parsable, UTC, within
-  `[notBefore, now]`); `lastRolledOutTimestampUnchangedActual(ns, name, wantVal)` (`""` = absent).
+  `lastRolloutAttemptTimestampActual(ns, name, notBefore)` (present, RFC3339Nano-parsable, UTC, within
+  `[notBefore, now]`); `lastRolloutAttemptTimestampUnchangedActual(ns, name, wantVal)` (`""` = absent).
 - **Composites**: `rolledOutActual(policy, bindingNames, idx, notBefore)` (snapshot `idx` created, bindings point to
   it, timestamp ≥ `notBefore`, role released) and `notRolledOutActual(policy, bindingNames, nextIdx, wantTimestamp,
   wantBindingManager)` for `Consistently`.
@@ -162,8 +177,19 @@ deviations from the list above:
   (`""` = absent).
 - `bindingManagerReleasedOnAPIServerActual(ns, name)` (via `hubAPIReader`), for releases of claims the test wrote.
 - `forcePlacementPolicyReconciliation(ns, name)` switches the min-wait annotation between `"1m"` and `"2m"`
-  (constraint 3); `lastRolledOutTimestamp(ns, name)` captures the current value for exact comparisons.
+  (constraint 3); `lastRolloutAttemptTimestamp(ns, name)` captures the current value for exact comparisons.
 - `placementPolicySpecAndAnnotationsUntouchedActual` (A1 only) lives in `lifecycle_integration_test.go`.
+
+**Added with the C6 user-error steps (October 22, 2026):**
+
+- In `utils_integration_test.go`: `placementPolicyResourceVersionOnAPIServer(ns, name)` and
+  `placementPolicyUnwrittenOnAPIServerActual(ns, name, wantResourceVersion)` (both via `hubAPIReader`; a retry claims
+  and releases the role, i.e., writes the policy, so an unchanged resource version shows that no retry happened).
+  `placementPolicyRolledOutActual` now also covers a user-error failure, which writes the timestamp too.
+- In `rollout_integration_test.go`: `oversizedConfigMapData()` (twice the suite's 16 KiB cap);
+  `snapshotFailedEventActual(policy)` (lists `events.k8s.io/v1` events in the policy's namespace, or `default` for a
+  cluster-scoped policy, and checks the type, reason, action, reporting controller, and regarding object of the one
+  regarding the policy in one `cmp.Diff`, plus that its note mentions the too-large resource).
 
 **Added with group C:**
 
@@ -275,9 +301,14 @@ placement policies"), each usable with `--focus`:
   ownership (UID) check as well, so without it dropping the namespace filter went unnoticed (mutation MC6).
   Cluster-scoped block: a same-named `PlacementPolicy` in `app` with its bindings → untouched.
 - **C5 No bindings.** → snapshot 0 created, timestamp written, role released.
-- **C6 Successive rollouts.** After rollout 1: `Synchronized=True`; change the ConfigMap; backdate the timestamp
-  (> 3m); flip `Synchronized=False/ResourcesChangedPendingRollout` → snapshot 1, bindings move to it, timestamp
-  advances; snapshot 0 is kept (revision limit 3).
+- **C6 Successive rollouts, with a user error in between.** After rollout 1: `Synchronized=True`; grow the ConfigMap
+  past the suite's per-snapshot cap (a user error); backdate the timestamp (> 3m); flip
+  `Synchronized=False/ResourcesChangedPendingRollout` → a Warning event regarding the policy (constraint 8), the
+  timestamp written (≥ the trigger), and the role released. Then force a reconciliation (min-wait toggle) →
+  `Consistently`: the policy is not written to (its resource version stays; a retry would claim and release the role),
+  no snapshot 1, bindings stay on snapshot 0. Shrink the ConfigMap (a changed value that fits), backdate the timestamp,
+  and force a reconciliation → snapshot 1, bindings move to it, timestamp advances; snapshot 0 is kept (revision
+  limit 3).
 - **C7 Unchanged resources.** Same as C6 without the ConfigMap change (reason `SomeClustersOnOlderResourceRevision`)
   → no snapshot 1, binding generations unchanged, timestamp advances, role released.
 - **C8 Update failure and retry.** A `ValidatingAdmissionPolicy` plus its binding. The policy matches `UPDATE`s of
@@ -310,26 +341,29 @@ placement policies"), each usable with `--focus`:
 - `retrieveMinimumWaitPeriod`, `remainingWaitPeriod`, `isRolloutNeeded`, `shouldSkipProcessing` (full matrices).
 - `autoRolloutRelevantChange` and the event handler funcs, including the restart path (a create event for a
   role-holding, disabled policy), which envtest cannot reach without restarting the manager; `castToPlacementPolicy`.
-- `New` argument checks and defaults; `refreshBindings` fail fast, error aggregation, and context cancellation (fake
-  client with `interceptor.Funcs`, as the placement policy controller unit tests do); rate limiter bookkeeping.
+- `New` argument checks and defaults (including the required event recorder); `refreshBindings` fail fast, error
+  aggregation, and context cancellation (fake client with `interceptor.Funcs`, as the placement policy controller unit
+  tests do); rate limiter bookkeeping; the user-error branch's write order (timestamp before release) and its handling
+  of a failure of either write.
 
 ## Behaviors to note (documented only; no action for now)
 
-1. **Resolved (October 21, 2026).** The timestamp is now written only after a successful rollout, so failures are
-   retried promptly (C8). Writing it afterwards with the old resource-version-guarded `Update` would have opened a
+1. **Resolved (October 21, 2026).** The timestamp is now written only after a successful rollout (or, since
+   October 22, a user-error failure; behavior 8), so other failures are retried promptly (C8). Writing it afterwards
+   with the old resource-version-guarded `Update` would have opened a
    race: in production the placement policy controller owns the bindings, reacts to their generation bumps, and
    rewrites the policy's `Synchronized` condition. That changes the policy's resource version, so the `Update`
    conflicts. On the retry, if every binding already pointed to the latest snapshot, `Synchronized` would read
    `False/FailedToSynchronizeSomeClusters`; no rollout would count as needed, the role would be released, and no
    timestamp would ever be written, so the next resource change would roll out regardless of the minimum wait period.
-   `bookkeepLastRolledOutTimestamp` now uses `client.MergeFrom` (decided with the user over a JSON patch). Verified
+   `bookkeepLastRolloutAttemptTimestamp` now uses `client.MergeFrom` (decided with the user over a JSON patch). Verified
    against envtest 1.33 with throwaway tests (now removed), writing from a stale copy after concurrent status, spec,
    and annotation changes:
    - full `Update` (old code): conflict;
    - `client.MergeFrom(original)`: the body is only `{"metadata":{"annotations":{"<timestamp key>":"..."}}}`, even
      when the stale copy had no annotations; the concurrent status, spec, and annotation changes all survive. Checked
-     again through the real `bookkeepLastRolledOutTimestamp` for both scopes;
-   - JSON patch `add` on `/metadata/annotations/kubefleet.dev~1auto-rollout-last-rolled-out-timestamp`: works when
+     again through the real `bookkeepLastRolloutAttemptTimestamp` for both scopes;
+   - JSON patch `add` on `/metadata/annotations/kubefleet.dev~1auto-rollout-last-rollout-attempt-timestamp`: works when
      the annotations map exists, but is rejected when the object has none (the parent must exist), and the `/` in the
      key must be escaped as `~1`.
    The race is not testable in the integration suite (see constraint 9); a unit test with `interceptor.Funcs` belongs
@@ -344,10 +378,22 @@ placement policies"), each usable with `--focus`:
    appends the policy ref, and relinquishing removes only that ref.
 6. The timestamp is written as RFC3339Nano and parsed as RFC3339; Go accepts fractional seconds there, so this is
    fine, but the asymmetry is worth knowing.
-7. While a rollout keeps failing, the controller holds the binding manager role across retries, so the placement
-   policy controller and staged update runs cannot manage the bindings meanwhile. Disabling auto-rollout releases it.
-   Retries do not wait for the minimum wait period, but they back off exponentially and create a new snapshot only if
-   the selected resources changed.
+7. While a rollout keeps failing with a non-user error (e.g., a binding update the API server rejects, C8), the
+   controller holds the binding manager role across retries, so the placement policy controller and staged update
+   runs cannot manage the bindings meanwhile. Disabling auto-rollout releases it. Retries do not wait for the minimum
+   wait period, but they back off exponentially and create a new snapshot only if the selected resources changed.
+8. **Resolved (October 22, 2026).** A user-error failure (in practice, from snapshotting: e.g., a selected resource
+   too large for a snapshot, which only snapshot creation checks, so the placement policy controller does not report
+   it) reports a Warning event, writes the timestamp, releases the role, and requeues after the minimum wait period.
+   Without the timestamp (the first version of this path), C6 found a hot loop: the claim is a status update, which
+   the event handler always enqueues; the next reconcile passed the wait period check (nothing recorded the failed
+   attempt) and claimed, failed, and released again, about 10 times a second per policy; the returned `RequeueAfter`
+   never came into play. Decided with the user over taking the snapshot before the claim (no write on a user error,
+   but a snapshot could then be taken while another controller holds the role) and over an in-memory backoff (lost on
+   restarts). The timestamp is written before the role is released, so the wait period holds retries back even if
+   the release fails. As a consequence, the annotation records the last rollout attempt that succeeded or failed due
+   to a user error, hence its name, `last-rollout-attempt-timestamp` (renamed from `last-rolled-out-timestamp`), and
+   fixing the resource takes effect at the next rollout, i.e., up to one wait period later.
 
 ## Decisions (October 21, 2026)
 
@@ -359,6 +405,8 @@ placement policies"), each usable with `--focus`:
 4. **Approved.** The unit tests listed above are a follow-up, not part of this work.
 5. **Approved.** File layout: A, B, and D share `lifecycle_integration_test.go`, and C goes in
    `rollout_integration_test.go`. Each group keeps its own `Describe` blocks (see the table under Test plan).
+6. **Approved (October 22, 2026).** Cover the user-error path in an existing scenario (C6, both scopes) rather than a
+   new one; throttle user-error retries by writing the timestamp (behavior 8).
 
 ## Estimated runtime
 
@@ -375,6 +423,9 @@ Measured with groups A, B, and C (162 specs, both scopes): `ginkgo -p --race` ~4
 
 Measured with the complete suite, groups A–D (192 specs, both scopes): `ginkgo -p --race` ~52s of spec time, ~62s
 wall.
+
+Measured after the C6 user-error steps (198 specs, both scopes; one more 5-second `Consistently` per scope):
+`ginkgo -p --race` ~66s of spec time, ~74s wall.
 
 ## Running the tests
 
@@ -434,3 +485,14 @@ Add `--focus="<Describe/Context text>"` to run a subset (see the `Describe` tabl
   counting as never rolled out (MD5) → D4's second step fails; no requeue while waiting (MD6) → D2 fails; min-wait
   changes not treated as relevant by the event handler (MD7) → D1, D3, and D4 fail. Remaining follow-ups: the unit
   tests listed under "Better as unit tests" (decision 4), and a package comment for the controller (ST1000).
+- October 22, 2026 (later): review fixes in the controller: relinquish only when the cached policy shows the role
+  held; a user error during the rollout reports a Warning event, releases the role, and requeues after the minimum
+  wait period (`New` now takes a required `events.EventRecorder`); the remaining wait is capped at the period; an
+  empty snapshot list is an unexpected error. **C6 now covers the user-error path** (both scopes; decision 6). Its
+  first run found the hot loop in behavior 8 (the no-retry check failed in both scopes against the code without the
+  timestamp write, which doubles as the mutation check); with the fix, 198 of 198 specs pass with `ginkgo -p --race`.
+  `go vet` passes; `golangci-lint` reports no issues on the package.
+- October 22, 2026 (later): the timestamp annotation is renamed to `kubefleet.dev/auto-rollout-last-rollout-attempt-timestamp`
+  (`AutoRolloutLastRolloutAttemptTimestampAnnotationKey`; `bookkeepLastRolloutAttemptTimestamp`), as user-error
+  failures write it too (behavior 8); the code, the test helpers and step texts, and this plan (except the entries
+  above) use the new name.

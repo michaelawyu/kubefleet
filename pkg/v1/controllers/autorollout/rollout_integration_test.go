@@ -22,9 +22,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
+	corev1 "k8s.io/api/core/v1"
+	eventsv1 "k8s.io/api/events/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -43,9 +46,9 @@ const (
 	// controller uses to refresh placement bindings.
 	manyBindingCount = 12
 
-	// How long ago test cases backdate the last rolled out timestamp to, so that the (default) minimum wait period
+	// How long ago test cases backdate the last rollout attempt timestamp to, so that the (default) minimum wait period
 	// never holds a rollout back.
-	backdatedLastRolledOutTimestampAge = time.Minute * 10
+	backdatedLastRolloutAttemptTimestampAge = time.Minute * 10
 )
 
 // The UID of a (fictional) older instance of a placement policy, i.e., one that has been deleted and re-created
@@ -63,6 +66,93 @@ const (
 	// The resource snapshot name that test cases write (as a dry run) to check whether the denial is in force.
 	dryRunResourceSnapshotName = "dry-run-resource-snapshot"
 )
+
+// The details of the event that the auto-rollout controller reports when it fails to snapshot the selected resources
+// of a placement policy due to a user error.
+const (
+	snapshotFailedEventReason = "FailedToSnapshotResourcesDuringAutoRollout"
+	snapshotFailedEventAction = "SnapshotResources"
+	// A part of the event note that identifies the user error that test cases cause: a selected resource that is too
+	// large to fit in a placement resource snapshot.
+	resourceTooLargeErrMsg = "too large to fit in a placement resource snapshot"
+)
+
+// oversizedConfigMapData returns ConfigMap data that is too large to fit in a placement resource snapshot (see
+// maxPerSnapshotResourceDataSizeBytes in the suite); a placement policy that selects a ConfigMap with this data cannot
+// have its resources snapshotted, which is a user error.
+func oversizedConfigMapData() map[string]string {
+	return map[string]string{
+		configMapDataKey: strings.Repeat("x", 2*maxPerSnapshotResourceDataSizeBytes),
+	}
+}
+
+// snapshotFailedEvent is the part of an event (reported on a snapshotting failure) that test cases check; the other
+// fields (e.g., the name, the timestamps, and the reporting instance) vary.
+type snapshotFailedEvent struct {
+	Type                string
+	Reason              string
+	Action              string
+	ReportingController string
+	Regarding           corev1.ObjectReference
+}
+
+// snapshotFailedEventActual verifies that the auto-rollout controller has reported, with a Warning event regarding
+// a placement policy, that it failed to snapshot the selected resources because one of them is too large.
+func snapshotFailedEventActual(policy placementv1alpha1.PlacementPolicyAccessor) func() error {
+	return func() error {
+		// Events regarding cluster-scoped objects are recorded in the default namespace.
+		eventNS := policy.GetNamespace()
+		if eventNS == clusterScopedNS {
+			eventNS = metav1.NamespaceDefault
+		}
+		// Read the events from the API server directly, so that the cache does not start watching events.
+		events := &eventsv1.EventList{}
+		if err := hubAPIReader.List(ctx, events, client.InNamespace(eventNS)); err != nil {
+			return fmt.Errorf("failed to list events: %w", err)
+		}
+
+		wantEvent := snapshotFailedEvent{
+			Type:                corev1.EventTypeWarning,
+			Reason:              snapshotFailedEventReason,
+			Action:              snapshotFailedEventAction,
+			ReportingController: controllerName,
+			Regarding: corev1.ObjectReference{
+				APIVersion: placementv1alpha1.GroupVersion.String(),
+				Kind:       placementPolicyKind(policy.GetNamespace()),
+				Namespace:  policy.GetNamespace(),
+				Name:       policy.GetName(),
+				UID:        policy.GetUID(),
+			},
+		}
+		for i := range events.Items {
+			event := &events.Items[i]
+			if event.Regarding.UID != policy.GetUID() || event.Reason != snapshotFailedEventReason {
+				continue
+			}
+			gotEvent := snapshotFailedEvent{
+				Type:                event.Type,
+				Reason:              event.Reason,
+				Action:              event.Action,
+				ReportingController: event.ReportingController,
+				Regarding: corev1.ObjectReference{
+					APIVersion: event.Regarding.APIVersion,
+					Kind:       event.Regarding.Kind,
+					Namespace:  event.Regarding.Namespace,
+					Name:       event.Regarding.Name,
+					UID:        event.Regarding.UID,
+				},
+			}
+			if diff := cmp.Diff(gotEvent, wantEvent); diff != "" {
+				return fmt.Errorf("snapshotting failure event diff (-got +want):\n%s", diff)
+			}
+			if !strings.Contains(event.Note, resourceTooLargeErrMsg) {
+				return fmt.Errorf("the snapshotting failure event note %q does not mention the user error (%q)", event.Note, resourceTooLargeErrMsg)
+			}
+			return nil
+		}
+		return fmt.Errorf("no snapshotting failure event regarding the placement policy has been found in namespace %q", eventNS)
+	}
+}
 
 // variantPlacementBindingNames returns the name of a placement binding of the given variant (e.g., one that the
 // auto-rollout controller should leave alone), along with the name of the (fictional) member cluster it binds to.
@@ -150,7 +240,7 @@ func placementBindingSnapshotChangeActual(bindingNS, bindingName string, wantDen
 
 // placementPolicyRolloutRetryingActual verifies that the auto-rollout controller is (still) in the middle of a rollout
 // of a placement policy: it holds the binding manager role of the placement policy, and has not written the last
-// rolled out timestamp (both checked on the same read of the placement policy).
+// rollout attempt timestamp (both checked on the same read of the placement policy).
 func placementPolicyRolloutRetryingActual(policyNSName, policyName string) func() error {
 	return placementPolicyAutoRolloutStateActual(policyNSName, policyName, wantAutoRolloutBindingManager(policyNSName, policyName), "")
 }
@@ -479,16 +569,48 @@ var _ = Describe("rolling out placement policies", func() {
 			markPlacementPolicyAsSynchronized(appNamespaceName, policyName)
 		})
 
-		It("can change the selected resources and backdate the last rolled out timestamp", func() {
-			updateConfigMapData(configMapName, map[string]string{configMapDataKey: altConfigMapDataValue})
+		It("can make the selected resources too large to snapshot and backdate the last rollout attempt timestamp", func() {
+			updateConfigMapData(configMapName, oversizedConfigMapData())
 			updatePlacementPolicyAnnotations(appNamespaceName, policyName, func(annotations map[string]string) {
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = backdatedTimestamp(backdatedLastRolledOutTimestampAge)
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = backdatedTimestamp(backdatedLastRolloutAttemptTimestampAge)
 			})
 		})
 
 		It("can mark the placement policy as having resources pending rollout again", func() {
 			notBefore = time.Now()
 			markPlacementPolicyAsPendingRollout(appNamespaceName, policyName, placementv1alpha1.PlacementPolicySynchronizedCondReasonResourcesChangedPendingRollout)
+		})
+
+		It("should report the snapshotting failure, write the last rollout attempt timestamp, and release the binding manager role", func() {
+			// The controller writes the timestamp for a rollout that fails due to a user error too, so that the minimum
+			// wait period spaces out the retries.
+			failed := allActual(
+				snapshotFailedEventActual(policy),
+				placementPolicyRolledOutActual(appNamespaceName, policyName, notBefore),
+			)
+			Eventually(failed, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to report the snapshotting failure")
+		})
+
+		It("should not retry the rollout within the minimum wait period, even when it processes the placement policy again", func() {
+			forcePlacementPolicyReconciliation(appNamespaceName, policyName)
+			// A retry would claim (and then release) the binding manager role again, i.e., write to the placement policy.
+			resourceVersion := placementPolicyResourceVersionOnAPIServer(appNamespaceName, policyName)
+			noRetry := allActual(
+				placementPolicyUnwrittenOnAPIServerActual(appNamespaceName, policyName, resourceVersion),
+				placementResourceSnapshotAbsentActual(appNamespaceName, snapshotNames[1]),
+				placementBindingsActual(appNamespaceName, bindingNames, snapshotNames[0], 2),
+			)
+			Consistently(noRetry, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Retried the rollout unexpectedly")
+		})
+
+		It("can change the selected resources to a size that fits, backdate the last rollout attempt timestamp, and make the controller retry the rollout", func() {
+			updateConfigMapData(configMapName, map[string]string{configMapDataKey: altConfigMapDataValue})
+			updatePlacementPolicyAnnotations(appNamespaceName, policyName, func(annotations map[string]string) {
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = backdatedTimestamp(backdatedLastRolloutAttemptTimestampAge)
+			})
+			notBefore = time.Now()
+			// The timestamp change alone does not make the controller process the placement policy.
+			forcePlacementPolicyReconciliation(appNamespaceName, policyName)
 		})
 
 		It("should roll out the changed resources, as a new resource snapshot, to all the placement bindings", func() {
@@ -550,9 +672,9 @@ var _ = Describe("rolling out placement policies", func() {
 			markPlacementPolicyAsSynchronized(appNamespaceName, policyName)
 		})
 
-		It("can backdate the last rolled out timestamp", func() {
+		It("can backdate the last rollout attempt timestamp", func() {
 			updatePlacementPolicyAnnotations(appNamespaceName, policyName, func(annotations map[string]string) {
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = backdatedTimestamp(backdatedLastRolledOutTimestampAge)
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = backdatedTimestamp(backdatedLastRolloutAttemptTimestampAge)
 			})
 		})
 
@@ -984,16 +1106,49 @@ var _ = Describe("rolling out cluster placement policies", func() {
 			markPlacementPolicyAsSynchronized(clusterScopedNS, policyName)
 		})
 
-		It("can change the selected resources and backdate the last rolled out timestamp", func() {
-			updateConfigMapData(configMapName, map[string]string{configMapDataKey: altConfigMapDataValue})
+		It("can make the selected resources too large to snapshot and backdate the last rollout attempt timestamp", func() {
+			updateConfigMapData(configMapName, oversizedConfigMapData())
 			updatePlacementPolicyAnnotations(clusterScopedNS, policyName, func(annotations map[string]string) {
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = backdatedTimestamp(backdatedLastRolledOutTimestampAge)
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = backdatedTimestamp(backdatedLastRolloutAttemptTimestampAge)
 			})
 		})
 
 		It("can mark the cluster placement policy as having resources pending rollout again", func() {
 			notBefore = time.Now()
 			markPlacementPolicyAsPendingRollout(clusterScopedNS, policyName, placementv1alpha1.PlacementPolicySynchronizedCondReasonResourcesChangedPendingRollout)
+		})
+
+		It("should report the snapshotting failure, write the last rollout attempt timestamp, and release the binding manager role", func() {
+			// The controller writes the timestamp for a rollout that fails due to a user error too, so that the minimum
+			// wait period spaces out the retries.
+			failed := allActual(
+				snapshotFailedEventActual(policy),
+				placementPolicyRolledOutActual(clusterScopedNS, policyName, notBefore),
+			)
+			Eventually(failed, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to report the snapshotting failure")
+		})
+
+		It("should not retry the rollout within the minimum wait period, even when it processes the cluster placement policy again", func() {
+			forcePlacementPolicyReconciliation(clusterScopedNS, policyName)
+			// A retry would claim (and then release) the binding manager role again, i.e., write to the cluster placement
+			// policy.
+			resourceVersion := placementPolicyResourceVersionOnAPIServer(clusterScopedNS, policyName)
+			noRetry := allActual(
+				placementPolicyUnwrittenOnAPIServerActual(clusterScopedNS, policyName, resourceVersion),
+				placementResourceSnapshotAbsentActual(clusterScopedNS, snapshotNames[1]),
+				placementBindingsActual(clusterScopedNS, bindingNames, snapshotNames[0], 2),
+			)
+			Consistently(noRetry, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Retried the rollout unexpectedly")
+		})
+
+		It("can change the selected resources to a size that fits, backdate the last rollout attempt timestamp, and make the controller retry the rollout", func() {
+			updateConfigMapData(configMapName, map[string]string{configMapDataKey: altConfigMapDataValue})
+			updatePlacementPolicyAnnotations(clusterScopedNS, policyName, func(annotations map[string]string) {
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = backdatedTimestamp(backdatedLastRolloutAttemptTimestampAge)
+			})
+			notBefore = time.Now()
+			// The timestamp change alone does not make the controller process the cluster placement policy.
+			forcePlacementPolicyReconciliation(clusterScopedNS, policyName)
 		})
 
 		It("should roll out the changed resources, as a new resource snapshot, to all the cluster placement bindings", func() {
@@ -1055,9 +1210,9 @@ var _ = Describe("rolling out cluster placement policies", func() {
 			markPlacementPolicyAsSynchronized(clusterScopedNS, policyName)
 		})
 
-		It("can backdate the last rolled out timestamp", func() {
+		It("can backdate the last rollout attempt timestamp", func() {
 			updatePlacementPolicyAnnotations(clusterScopedNS, policyName, func(annotations map[string]string) {
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = backdatedTimestamp(backdatedLastRolledOutTimestampAge)
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = backdatedTimestamp(backdatedLastRolloutAttemptTimestampAge)
 			})
 		})
 

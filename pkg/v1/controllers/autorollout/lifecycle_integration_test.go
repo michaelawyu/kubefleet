@@ -73,7 +73,7 @@ func markPlacementPolicyAsPendingRolloutWithAutoRolloutClaim(policyNSName, polic
 }
 
 // placementPolicySpecAndAnnotationsUntouchedActual verifies that a placement policy is still at its first generation
-// (i.e., its spec has not been changed) and that, apart from the last rolled out timestamp, its annotations are
+// (i.e., its spec has not been changed) and that, apart from the last rollout attempt timestamp, its annotations are
 // exactly the given ones.
 func placementPolicySpecAndAnnotationsUntouchedActual(policyNSName, policyName string, wantAnnotations map[string]string) func() error {
 	return func() error {
@@ -86,12 +86,12 @@ func placementPolicySpecAndAnnotationsUntouchedActual(policyNSName, policyName s
 		}
 		gotAnnotations := make(map[string]string, len(policy.GetAnnotations()))
 		for k, v := range policy.GetAnnotations() {
-			if k != rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey {
+			if k != rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey {
 				gotAnnotations[k] = v
 			}
 		}
 		if diff := cmp.Diff(gotAnnotations, wantAnnotations); diff != "" {
-			return fmt.Errorf("placement policy annotations (other than the last rolled out timestamp) diff (-got +want):\n%s", diff)
+			return fmt.Errorf("placement policy annotations (other than the last rollout attempt timestamp) diff (-got +want):\n%s", diff)
 		}
 		return nil
 	}
@@ -110,7 +110,7 @@ var _ = Describe("gating auto-rollouts of placement policies", func() {
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
 		var notBefore time.Time
-		var wantLastRolledOutTimestamp string
+		var wantLastRolloutAttemptTimestamp string
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
@@ -135,7 +135,7 @@ var _ = Describe("gating auto-rollouts of placement policies", func() {
 		})
 
 		It("can mark the placement policy as synchronized", func() {
-			wantLastRolledOutTimestamp = lastRolledOutTimestamp(appNamespaceName, policyName)
+			wantLastRolloutAttemptTimestamp = lastRolloutAttemptTimestamp(appNamespaceName, policyName)
 			markPlacementPolicyAsSynchronized(appNamespaceName, policyName)
 			forcePlacementPolicyReconciliation(appNamespaceName, policyName)
 		})
@@ -144,7 +144,7 @@ var _ = Describe("gating auto-rollouts of placement policies", func() {
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(appNamespaceName, snapshotNames[1]),
 				placementBindingsActual(appNamespaceName, bindingNames, snapshotNames[0], 2),
-				placementPolicyAtRestActual(appNamespaceName, policyName, wantLastRolledOutTimestamp),
+				placementPolicyAtRestActual(appNamespaceName, policyName, wantLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the placement policy unexpectedly")
 		})
@@ -242,8 +242,8 @@ var _ = Describe("gating auto-rollouts of placement policies", func() {
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
 		var notBefore time.Time
-		// A last rolled out timestamp long enough ago that the minimum wait period never holds a rollout back.
-		backdatedLastRolledOutTimestamp := backdatedTimestamp(time.Hour * 2)
+		// A last rollout attempt timestamp long enough ago that the minimum wait period never holds a rollout back.
+		backdatedLastRolloutAttemptTimestamp := backdatedTimestamp(time.Hour * 2)
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
@@ -272,10 +272,10 @@ var _ = Describe("gating auto-rollouts of placement policies", func() {
 			})
 		})
 
-		It("can change the selected resources and backdate the last rolled out timestamp", func() {
+		It("can change the selected resources and backdate the last rollout attempt timestamp", func() {
 			updateConfigMapData(configMapName, map[string]string{configMapDataKey: altConfigMapDataValue})
 			updatePlacementPolicyAnnotations(appNamespaceName, policyName, func(annotations map[string]string) {
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = backdatedLastRolledOutTimestamp
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = backdatedLastRolloutAttemptTimestamp
 			})
 		})
 
@@ -287,7 +287,7 @@ var _ = Describe("gating auto-rollouts of placement policies", func() {
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(appNamespaceName, snapshotNames[1]),
 				placementBindingsActual(appNamespaceName, bindingNames, snapshotNames[0], 2),
-				placementPolicyAtRestActual(appNamespaceName, policyName, backdatedLastRolledOutTimestamp),
+				placementPolicyAtRestActual(appNamespaceName, policyName, backdatedLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the placement policy unexpectedly")
 		})
@@ -480,7 +480,7 @@ var _ = Describe("gating auto-rollouts of cluster placement policies", func() {
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
 		var notBefore time.Time
-		var wantLastRolledOutTimestamp string
+		var wantLastRolloutAttemptTimestamp string
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
@@ -505,7 +505,7 @@ var _ = Describe("gating auto-rollouts of cluster placement policies", func() {
 		})
 
 		It("can mark the cluster placement policy as synchronized", func() {
-			wantLastRolledOutTimestamp = lastRolledOutTimestamp(clusterScopedNS, policyName)
+			wantLastRolloutAttemptTimestamp = lastRolloutAttemptTimestamp(clusterScopedNS, policyName)
 			markPlacementPolicyAsSynchronized(clusterScopedNS, policyName)
 			forcePlacementPolicyReconciliation(clusterScopedNS, policyName)
 		})
@@ -514,7 +514,7 @@ var _ = Describe("gating auto-rollouts of cluster placement policies", func() {
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(clusterScopedNS, snapshotNames[1]),
 				placementBindingsActual(clusterScopedNS, bindingNames, snapshotNames[0], 2),
-				placementPolicyAtRestActual(clusterScopedNS, policyName, wantLastRolledOutTimestamp),
+				placementPolicyAtRestActual(clusterScopedNS, policyName, wantLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the cluster placement policy unexpectedly")
 		})
@@ -612,8 +612,8 @@ var _ = Describe("gating auto-rollouts of cluster placement policies", func() {
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
 		var notBefore time.Time
-		// A last rolled out timestamp long enough ago that the minimum wait period never holds a rollout back.
-		backdatedLastRolledOutTimestamp := backdatedTimestamp(time.Hour * 2)
+		// A last rollout attempt timestamp long enough ago that the minimum wait period never holds a rollout back.
+		backdatedLastRolloutAttemptTimestamp := backdatedTimestamp(time.Hour * 2)
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
@@ -642,10 +642,10 @@ var _ = Describe("gating auto-rollouts of cluster placement policies", func() {
 			})
 		})
 
-		It("can change the selected resources and backdate the last rolled out timestamp", func() {
+		It("can change the selected resources and backdate the last rollout attempt timestamp", func() {
 			updateConfigMapData(configMapName, map[string]string{configMapDataKey: altConfigMapDataValue})
 			updatePlacementPolicyAnnotations(clusterScopedNS, policyName, func(annotations map[string]string) {
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = backdatedLastRolledOutTimestamp
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = backdatedLastRolloutAttemptTimestamp
 			})
 		})
 
@@ -657,7 +657,7 @@ var _ = Describe("gating auto-rollouts of cluster placement policies", func() {
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(clusterScopedNS, snapshotNames[1]),
 				placementBindingsActual(clusterScopedNS, bindingNames, snapshotNames[0], 2),
-				placementPolicyAtRestActual(clusterScopedNS, policyName, backdatedLastRolledOutTimestamp),
+				placementPolicyAtRestActual(clusterScopedNS, policyName, backdatedLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the cluster placement policy unexpectedly")
 		})
@@ -953,15 +953,15 @@ var _ = Describe("managing the binding manager role of placement policies", func
 		snapshotName := primaryPlacementResourceSnapshotName(policyName, 0)
 
 		var bindingNames []string
-		var recentLastRolledOutTimestamp string
+		var recentLastRolloutAttemptTimestamp string
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
 			// The placement policy was rolled out just now; the (default) minimum wait period holds the next
 			// rollout back for longer than the test case runs.
-			recentLastRolledOutTimestamp = backdatedTimestamp(0)
+			recentLastRolloutAttemptTimestamp = backdatedTimestamp(0)
 			annotations := autoRolloutEnabledAnnotations()
-			annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = recentLastRolledOutTimestamp
+			annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = recentLastRolloutAttemptTimestamp
 			policy := createPlacementPolicy(appNamespaceName, policyName, configMapName, annotations)
 			bindingNames = createPlacementBindings(policy, randStr, lifecycleBindingCount)
 			waitForObjectsToBeCached(append(placementBindingObjs(appNamespaceName, bindingNames), policy)...)
@@ -980,7 +980,7 @@ var _ = Describe("managing the binding manager role of placement policies", func
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(appNamespaceName, snapshotName),
 				placementBindingsActual(appNamespaceName, bindingNames, previousResourceSnapshotName, 1),
-				placementPolicyAtRestActual(appNamespaceName, policyName, recentLastRolledOutTimestamp),
+				placementPolicyAtRestActual(appNamespaceName, policyName, recentLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the placement policy unexpectedly")
 		})
@@ -1154,15 +1154,15 @@ var _ = Describe("managing the binding manager role of cluster placement policie
 		snapshotName := primaryPlacementResourceSnapshotName(policyName, 0)
 
 		var bindingNames []string
-		var recentLastRolledOutTimestamp string
+		var recentLastRolloutAttemptTimestamp string
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
 			// The cluster placement policy was rolled out just now; the (default) minimum wait period holds the next
 			// rollout back for longer than the test case runs.
-			recentLastRolledOutTimestamp = backdatedTimestamp(0)
+			recentLastRolloutAttemptTimestamp = backdatedTimestamp(0)
 			annotations := autoRolloutEnabledAnnotations()
-			annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = recentLastRolledOutTimestamp
+			annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = recentLastRolloutAttemptTimestamp
 			policy := createPlacementPolicy(clusterScopedNS, policyName, configMapName, annotations)
 			bindingNames = createPlacementBindings(policy, randStr, lifecycleBindingCount)
 			waitForObjectsToBeCached(append(placementBindingObjs(clusterScopedNS, bindingNames), policy)...)
@@ -1181,7 +1181,7 @@ var _ = Describe("managing the binding manager role of cluster placement policie
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(clusterScopedNS, snapshotName),
 				placementBindingsActual(clusterScopedNS, bindingNames, previousResourceSnapshotName, 1),
-				placementPolicyAtRestActual(clusterScopedNS, policyName, recentLastRolledOutTimestamp),
+				placementPolicyAtRestActual(clusterScopedNS, policyName, recentLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the cluster placement policy unexpectedly")
 		})
@@ -1247,16 +1247,16 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of pla
 
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
-		var lastRolledOutTimestamp string
+		var wantLastRolloutAttemptTimestamp string
 		var notBefore time.Time
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
 			// The placement policy was rolled out two minutes ago; the default minimum wait period (3 minutes) holds
 			// the next rollout back for about another minute.
-			lastRolledOutTimestamp = backdatedTimestamp(time.Minute * 2)
+			wantLastRolloutAttemptTimestamp = backdatedTimestamp(time.Minute * 2)
 			annotations := autoRolloutEnabledAnnotations()
-			annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = lastRolledOutTimestamp
+			annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = wantLastRolloutAttemptTimestamp
 			policy = createPlacementPolicy(appNamespaceName, policyName, configMapName, annotations)
 			bindingNames = createPlacementBindings(policy, randStr, lifecycleBindingCount)
 			waitForObjectsToBeCached(append(placementBindingObjs(appNamespaceName, bindingNames), policy)...)
@@ -1270,7 +1270,7 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of pla
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(appNamespaceName, snapshotName),
 				placementBindingsActual(appNamespaceName, bindingNames, previousResourceSnapshotName, 1),
-				placementPolicyAtRestActual(appNamespaceName, policyName, lastRolledOutTimestamp),
+				placementPolicyAtRestActual(appNamespaceName, policyName, wantLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the placement policy unexpectedly")
 		})
@@ -1309,7 +1309,7 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of pla
 
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
-		var lastRolledOutTimestamp string
+		var wantLastRolloutAttemptTimestamp string
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
@@ -1324,9 +1324,9 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of pla
 			// Write the timestamp only now (rather than at creation), so that the setup does not eat into the
 			// remaining 15 seconds of the minimum wait period; the timestamp change alone does not make the controller
 			// process the placement policy.
-			lastRolledOutTimestamp = backdatedTimestamp(time.Second * 45)
+			wantLastRolloutAttemptTimestamp = backdatedTimestamp(time.Second * 45)
 			updatePlacementPolicyAnnotations(appNamespaceName, policyName, func(annotations map[string]string) {
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = lastRolledOutTimestamp
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = wantLastRolloutAttemptTimestamp
 			})
 			markPlacementPolicyAsPendingRollout(appNamespaceName, policyName, placementv1alpha1.PlacementPolicySynchronizedCondReasonResourcesChangedPendingRollout)
 		})
@@ -1335,16 +1335,16 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of pla
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(appNamespaceName, snapshotName),
 				placementBindingsActual(appNamespaceName, bindingNames, previousResourceSnapshotName, 1),
-				placementPolicyAtRestActual(appNamespaceName, policyName, lastRolledOutTimestamp),
+				placementPolicyAtRestActual(appNamespaceName, policyName, wantLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the placement policy unexpectedly")
 		})
 
 		It("should roll out the latest resources to all the placement bindings once the minimum wait period passes, with no further changes", func() {
-			lastRolledOut, err := time.Parse(time.RFC3339, lastRolledOutTimestamp)
-			Expect(err).To(Succeed(), "Failed to parse the last rolled out timestamp")
+			lastRolloutAttempt, err := time.Parse(time.RFC3339, wantLastRolloutAttemptTimestamp)
+			Expect(err).To(Succeed(), "Failed to parse the last rollout attempt timestamp")
 			// The new rollout must not happen before the minimum wait period (1 minute) has passed since the last one.
-			rolledOut := rolledOutActual(policy, bindingNames, 0, lastRolledOut.Add(time.Minute))
+			rolledOut := rolledOutActual(policy, bindingNames, 0, lastRolloutAttempt.Add(time.Minute))
 			Eventually(rolledOut, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to roll out the placement policy")
 		})
 
@@ -1368,17 +1368,17 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of pla
 
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
-		var lastRolledOutTimestamp string
+		var wantLastRolloutAttemptTimestamp string
 		var notBefore time.Time
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
 			// A minimum wait period below the lower bound (1 minute), which the controller clamps up to the bound; the
 			// placement policy was rolled out 10 seconds ago.
-			lastRolledOutTimestamp = backdatedTimestamp(time.Second * 10)
+			wantLastRolloutAttemptTimestamp = backdatedTimestamp(time.Second * 10)
 			annotations := autoRolloutEnabledAnnotations()
 			annotations[rolloutv1alpha1.AutoRolloutMinimumWaitPeriodAnnotationKey] = "1s"
-			annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = lastRolledOutTimestamp
+			annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = wantLastRolloutAttemptTimestamp
 			policy = createPlacementPolicy(appNamespaceName, policyName, configMapName, annotations)
 			bindingNames = createPlacementBindings(policy, randStr, lifecycleBindingCount)
 			waitForObjectsToBeCached(append(placementBindingObjs(appNamespaceName, bindingNames), policy)...)
@@ -1392,18 +1392,18 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of pla
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(appNamespaceName, snapshotName),
 				placementBindingsActual(appNamespaceName, bindingNames, previousResourceSnapshotName, 1),
-				placementPolicyAtRestActual(appNamespaceName, policyName, lastRolledOutTimestamp),
+				placementPolicyAtRestActual(appNamespaceName, policyName, wantLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the placement policy unexpectedly")
 		})
 
-		It("can set a minimum wait period above the upper bound and backdate the last rolled out timestamp", func() {
+		It("can set a minimum wait period above the upper bound and backdate the last rollout attempt timestamp", func() {
 			// A minimum wait period above the upper bound (1 hour), which the controller clamps down to the bound; the
-			// placement policy was last rolled out 2 hours ago. Both annotations change in one write.
+			// last rollout attempt of the placement policy was 2 hours ago. Both annotations change in one write.
 			notBefore = time.Now()
 			updatePlacementPolicyAnnotations(appNamespaceName, policyName, func(annotations map[string]string) {
 				annotations[rolloutv1alpha1.AutoRolloutMinimumWaitPeriodAnnotationKey] = "5h"
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = backdatedTimestamp(time.Hour * 2)
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = backdatedTimestamp(time.Hour * 2)
 			})
 		})
 
@@ -1432,7 +1432,7 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of pla
 
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
-		var lastRolledOutTimestamp string
+		var wantLastRolloutAttemptTimestamp string
 		var notBefore time.Time
 
 		BeforeAll(func() {
@@ -1440,10 +1440,10 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of pla
 			// A malformed minimum wait period, for which the controller uses the default (3 minutes); the placement
 			// policy was rolled out two minutes ago, i.e., within the default period but not within the lower bound
 			// (1 minute).
-			lastRolledOutTimestamp = backdatedTimestamp(time.Minute * 2)
+			wantLastRolloutAttemptTimestamp = backdatedTimestamp(time.Minute * 2)
 			annotations := autoRolloutEnabledAnnotations()
 			annotations[rolloutv1alpha1.AutoRolloutMinimumWaitPeriodAnnotationKey] = "soon"
-			annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = lastRolledOutTimestamp
+			annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = wantLastRolloutAttemptTimestamp
 			policy = createPlacementPolicy(appNamespaceName, policyName, configMapName, annotations)
 			bindingNames = createPlacementBindings(policy, randStr, lifecycleBindingCount)
 			waitForObjectsToBeCached(append(placementBindingObjs(appNamespaceName, bindingNames), policy)...)
@@ -1457,18 +1457,18 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of pla
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(appNamespaceName, snapshotName),
 				placementBindingsActual(appNamespaceName, bindingNames, previousResourceSnapshotName, 1),
-				placementPolicyAtRestActual(appNamespaceName, policyName, lastRolledOutTimestamp),
+				placementPolicyAtRestActual(appNamespaceName, policyName, wantLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the placement policy unexpectedly")
 		})
 
-		It("can set a malformed last rolled out timestamp", func() {
-			// The controller treats a placement policy with a malformed last rolled out timestamp as never rolled
+		It("can set a malformed last rollout attempt timestamp", func() {
+			// The controller treats a placement policy with a malformed last rollout attempt timestamp as never rolled
 			// out. A timestamp change alone does not make the controller process the placement policy; change the
 			// (still malformed) minimum wait period in the same write as well.
 			notBefore = time.Now()
 			updatePlacementPolicyAnnotations(appNamespaceName, policyName, func(annotations map[string]string) {
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = "not-a-timestamp"
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = "not-a-timestamp"
 				annotations[rolloutv1alpha1.AutoRolloutMinimumWaitPeriodAnnotationKey] = "later"
 			})
 		})
@@ -1500,16 +1500,16 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of clu
 
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
-		var lastRolledOutTimestamp string
+		var wantLastRolloutAttemptTimestamp string
 		var notBefore time.Time
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
 			// The cluster placement policy was rolled out two minutes ago; the default minimum wait period (3 minutes)
 			// holds the next rollout back for about another minute.
-			lastRolledOutTimestamp = backdatedTimestamp(time.Minute * 2)
+			wantLastRolloutAttemptTimestamp = backdatedTimestamp(time.Minute * 2)
 			annotations := autoRolloutEnabledAnnotations()
-			annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = lastRolledOutTimestamp
+			annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = wantLastRolloutAttemptTimestamp
 			policy = createPlacementPolicy(clusterScopedNS, policyName, configMapName, annotations)
 			bindingNames = createPlacementBindings(policy, randStr, lifecycleBindingCount)
 			waitForObjectsToBeCached(append(placementBindingObjs(clusterScopedNS, bindingNames), policy)...)
@@ -1523,7 +1523,7 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of clu
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(clusterScopedNS, snapshotName),
 				placementBindingsActual(clusterScopedNS, bindingNames, previousResourceSnapshotName, 1),
-				placementPolicyAtRestActual(clusterScopedNS, policyName, lastRolledOutTimestamp),
+				placementPolicyAtRestActual(clusterScopedNS, policyName, wantLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the cluster placement policy unexpectedly")
 		})
@@ -1562,7 +1562,7 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of clu
 
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
-		var lastRolledOutTimestamp string
+		var wantLastRolloutAttemptTimestamp string
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
@@ -1577,9 +1577,9 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of clu
 			// Write the timestamp only now (rather than at creation), so that the setup does not eat into the
 			// remaining 15 seconds of the minimum wait period; the timestamp change alone does not make the controller
 			// process the cluster placement policy.
-			lastRolledOutTimestamp = backdatedTimestamp(time.Second * 45)
+			wantLastRolloutAttemptTimestamp = backdatedTimestamp(time.Second * 45)
 			updatePlacementPolicyAnnotations(clusterScopedNS, policyName, func(annotations map[string]string) {
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = lastRolledOutTimestamp
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = wantLastRolloutAttemptTimestamp
 			})
 			markPlacementPolicyAsPendingRollout(clusterScopedNS, policyName, placementv1alpha1.PlacementPolicySynchronizedCondReasonResourcesChangedPendingRollout)
 		})
@@ -1588,16 +1588,16 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of clu
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(clusterScopedNS, snapshotName),
 				placementBindingsActual(clusterScopedNS, bindingNames, previousResourceSnapshotName, 1),
-				placementPolicyAtRestActual(clusterScopedNS, policyName, lastRolledOutTimestamp),
+				placementPolicyAtRestActual(clusterScopedNS, policyName, wantLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the cluster placement policy unexpectedly")
 		})
 
 		It("should roll out the latest resources to all the cluster placement bindings once the minimum wait period passes, with no further changes", func() {
-			lastRolledOut, err := time.Parse(time.RFC3339, lastRolledOutTimestamp)
-			Expect(err).To(Succeed(), "Failed to parse the last rolled out timestamp")
+			lastRolloutAttempt, err := time.Parse(time.RFC3339, wantLastRolloutAttemptTimestamp)
+			Expect(err).To(Succeed(), "Failed to parse the last rollout attempt timestamp")
 			// The new rollout must not happen before the minimum wait period (1 minute) has passed since the last one.
-			rolledOut := rolledOutActual(policy, bindingNames, 0, lastRolledOut.Add(time.Minute))
+			rolledOut := rolledOutActual(policy, bindingNames, 0, lastRolloutAttempt.Add(time.Minute))
 			Eventually(rolledOut, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to roll out the cluster placement policy")
 		})
 
@@ -1621,17 +1621,17 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of clu
 
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
-		var lastRolledOutTimestamp string
+		var wantLastRolloutAttemptTimestamp string
 		var notBefore time.Time
 
 		BeforeAll(func() {
 			createConfigMap(configMapName)
 			// A minimum wait period below the lower bound (1 minute), which the controller clamps up to the bound; the
 			// cluster placement policy was rolled out 10 seconds ago.
-			lastRolledOutTimestamp = backdatedTimestamp(time.Second * 10)
+			wantLastRolloutAttemptTimestamp = backdatedTimestamp(time.Second * 10)
 			annotations := autoRolloutEnabledAnnotations()
 			annotations[rolloutv1alpha1.AutoRolloutMinimumWaitPeriodAnnotationKey] = "1s"
-			annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = lastRolledOutTimestamp
+			annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = wantLastRolloutAttemptTimestamp
 			policy = createPlacementPolicy(clusterScopedNS, policyName, configMapName, annotations)
 			bindingNames = createPlacementBindings(policy, randStr, lifecycleBindingCount)
 			waitForObjectsToBeCached(append(placementBindingObjs(clusterScopedNS, bindingNames), policy)...)
@@ -1645,18 +1645,19 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of clu
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(clusterScopedNS, snapshotName),
 				placementBindingsActual(clusterScopedNS, bindingNames, previousResourceSnapshotName, 1),
-				placementPolicyAtRestActual(clusterScopedNS, policyName, lastRolledOutTimestamp),
+				placementPolicyAtRestActual(clusterScopedNS, policyName, wantLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the cluster placement policy unexpectedly")
 		})
 
-		It("can set a minimum wait period above the upper bound and backdate the last rolled out timestamp", func() {
+		It("can set a minimum wait period above the upper bound and backdate the last rollout attempt timestamp", func() {
 			// A minimum wait period above the upper bound (1 hour), which the controller clamps down to the bound; the
-			// cluster placement policy was last rolled out 2 hours ago. Both annotations change in one write.
+			// last rollout attempt of the cluster placement policy was 2 hours ago. Both annotations change in one
+			// write.
 			notBefore = time.Now()
 			updatePlacementPolicyAnnotations(clusterScopedNS, policyName, func(annotations map[string]string) {
 				annotations[rolloutv1alpha1.AutoRolloutMinimumWaitPeriodAnnotationKey] = "5h"
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = backdatedTimestamp(time.Hour * 2)
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = backdatedTimestamp(time.Hour * 2)
 			})
 		})
 
@@ -1685,7 +1686,7 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of clu
 
 		var policy placementv1alpha1.PlacementPolicyAccessor
 		var bindingNames []string
-		var lastRolledOutTimestamp string
+		var wantLastRolloutAttemptTimestamp string
 		var notBefore time.Time
 
 		BeforeAll(func() {
@@ -1693,10 +1694,10 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of clu
 			// A malformed minimum wait period, for which the controller uses the default (3 minutes); the placement
 			// policy was rolled out two minutes ago, i.e., within the default period but not within the lower bound
 			// (1 minute).
-			lastRolledOutTimestamp = backdatedTimestamp(time.Minute * 2)
+			wantLastRolloutAttemptTimestamp = backdatedTimestamp(time.Minute * 2)
 			annotations := autoRolloutEnabledAnnotations()
 			annotations[rolloutv1alpha1.AutoRolloutMinimumWaitPeriodAnnotationKey] = "soon"
-			annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = lastRolledOutTimestamp
+			annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = wantLastRolloutAttemptTimestamp
 			policy = createPlacementPolicy(clusterScopedNS, policyName, configMapName, annotations)
 			bindingNames = createPlacementBindings(policy, randStr, lifecycleBindingCount)
 			waitForObjectsToBeCached(append(placementBindingObjs(clusterScopedNS, bindingNames), policy)...)
@@ -1710,18 +1711,18 @@ var _ = Describe("enforcing the minimum wait period between auto-rollouts of clu
 			noRollout := allActual(
 				placementResourceSnapshotAbsentActual(clusterScopedNS, snapshotName),
 				placementBindingsActual(clusterScopedNS, bindingNames, previousResourceSnapshotName, 1),
-				placementPolicyAtRestActual(clusterScopedNS, policyName, lastRolledOutTimestamp),
+				placementPolicyAtRestActual(clusterScopedNS, policyName, wantLastRolloutAttemptTimestamp),
 			)
 			Consistently(noRollout, consistentlyDuration, consistentlyInterval).Should(Succeed(), "Rolled out the cluster placement policy unexpectedly")
 		})
 
-		It("can set a malformed last rolled out timestamp", func() {
-			// The controller treats a cluster placement policy with a malformed last rolled out timestamp as never
+		It("can set a malformed last rollout attempt timestamp", func() {
+			// The controller treats a cluster placement policy with a malformed last rollout attempt timestamp as never
 			// rolled out. A timestamp change alone does not make the controller process the cluster placement policy;
 			// change the (still malformed) minimum wait period in the same write as well.
 			notBefore = time.Now()
 			updatePlacementPolicyAnnotations(clusterScopedNS, policyName, func(annotations map[string]string) {
-				annotations[rolloutv1alpha1.AutoRolloutLastRolledOutTimestampAnnotationKey] = "not-a-timestamp"
+				annotations[rolloutv1alpha1.AutoRolloutLastRolloutAttemptTimestampAnnotationKey] = "not-a-timestamp"
 				annotations[rolloutv1alpha1.AutoRolloutMinimumWaitPeriodAnnotationKey] = "later"
 			})
 		})
