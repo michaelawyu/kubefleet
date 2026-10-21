@@ -51,7 +51,7 @@ enableStagedUpdateRunAPIs: true
 enablePlacementPolicyAPIs: false
 enableEvictionAPIs: true
 
-enablePprof: true
+enablePprof: false
 pprofPort: 6065
 
 hubAPIQPS: 250
