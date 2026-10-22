@@ -66,6 +66,7 @@ import (
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/resourceeligibility"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/validator"
 	"github.com/kubefleet-dev/kubefleet/pkg/v1/controllers/annotationplacement"
+	"github.com/kubefleet-dev/kubefleet/pkg/v1/controllers/autorollout"
 	"github.com/kubefleet-dev/kubefleet/pkg/v1/controllers/placementpolicy"
 	"github.com/kubefleet-dev/kubefleet/pkg/v1/controllers/stagedupdaterun"
 	v1workgenerator "github.com/kubefleet-dev/kubefleet/pkg/v1/controllers/workgenerator"
@@ -86,6 +87,15 @@ const (
 
 // placementResourceSnapshotSlots is the snapshot manager's lock striping; its minimum.
 const placementResourceSnapshotSlots int32 = 256
+
+// Fixed concurrency for the experimental placement policy controllers. These are deliberately not derived from
+// the placement management flags (--max-fleet-size, --max-concurrent-cluster-placement), which tune the
+// v1beta1 controllers only.
+const (
+	placementPolicyWorkGeneratorConcurrentReconciles   = 10
+	placementPolicyStagedUpdateRunConcurrentReconciles = 5
+	placementPolicyAutoRolloutConcurrentReconciles     = 5
+)
 
 var (
 	v1Beta1RequiredGVKs = []schema.GroupVersionKind{
@@ -383,7 +393,7 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 			}
 			klog.Info("Setting up the placement policy work generator")
 			if err := v1workgenerator.New(mgr.GetClient(), parallelizer.DefaultNumOfWorkers).
-				SetupWithManager(mgr, int(math.Ceil(float64(opts.PlacementMgmtOpts.MaxFleetSize)/10)*math.Ceil(float64(opts.PlacementMgmtOpts.MaxConcurrentClusterPlacement)/10))); err != nil {
+				SetupWithManager(mgr, placementPolicyWorkGeneratorConcurrentReconciles); err != nil {
 				klog.ErrorS(err, "Unable to set up the placement policy work generator")
 				return err
 			}
@@ -395,8 +405,20 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 				klog.ErrorS(surErr, "Unable to create the placement policy staged update run controller")
 				return surErr
 			}
-			if err := stagedUpdateRuns.SetupWithManager(mgr, int(math.Ceil(float64(opts.PlacementMgmtOpts.MaxConcurrentClusterPlacement)/10))); err != nil {
+			if err := stagedUpdateRuns.SetupWithManager(mgr, placementPolicyStagedUpdateRunConcurrentReconciles); err != nil {
 				klog.ErrorS(err, "Unable to set up the placement policy staged update run controller")
+				return err
+			}
+			klog.Info("Setting up the placement policy auto-rollout controller")
+			// A nil rate limiter picks the controller default.
+			autoRollouts, arErr := autorollout.New(mgr.GetClient(), snapshots,
+				parallelizer.NewParallelizer(parallelizer.DefaultNumOfWorkers), nil, mgr.GetEventRecorder("auto-rollout-controller"))
+			if arErr != nil {
+				klog.ErrorS(arErr, "Unable to create the placement policy auto-rollout controller")
+				return arErr
+			}
+			if err := autoRollouts.SetupWithManager(mgr, placementPolicyAutoRolloutConcurrentReconciles); err != nil {
+				klog.ErrorS(err, "Unable to set up the placement policy auto-rollout controller")
 				return err
 			}
 			// Annotation-based placement generates the policies above; the resource watcher feeds it.
