@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
@@ -401,21 +400,12 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 			}
 			// Annotation-based placement generates the policies above; the resource watcher feeds it.
 			annotatedSources = &annotationplacement.SourceQueue{}
-			enableWorkload := opts.WebhookAndAdmissionPolicyOpts.EnableWorkload
 			if err := (&annotationplacement.Reconciler{
-				Client:     mgr.GetClient(),
-				APIReader:  mgr.GetAPIReader(),
-				RESTMapper: mgr.GetRESTMapper(),
-				Recorder:   mgr.GetEventRecorder("annotation-placement-controller"),
-				// The v1 kind and namespace filters, plus the object filter the resource watcher applies,
-				// which the checker does not cover.
-				ShouldPlace: func(source *unstructured.Unstructured) (bool, error) {
-					if !v1ResourceEligibilityChecker.AllowsGVK(source.GroupVersionKind()) ||
-						!v1ResourceEligibilityChecker.AllowsNamespace(annotationplacement.SourceNamespace(source)) {
-						return false, nil
-					}
-					return controller.ShouldPropagateObj(dynamicInformerManager, source, enableWorkload)
-				},
+				Client:                     mgr.GetClient(),
+				APIReader:                  mgr.GetAPIReader(),
+				RESTMapper:                 mgr.GetRESTMapper(),
+				Recorder:                   mgr.GetEventRecorder("annotation-placement-controller"),
+				ResourceEligibilityChecker: v1ResourceEligibilityChecker,
 			}).SetupWithManager(mgr, annotatedSources); err != nil {
 				klog.ErrorS(err, "Unable to set up the annotation placement controller")
 				return err
