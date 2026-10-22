@@ -410,9 +410,8 @@ func SetupControllers(ctx context.Context, wg *sync.WaitGroup, mgr ctrl.Manager,
 				return err
 			}
 			klog.Info("Setting up the placement policy auto-rollout controller")
-			// A nil rate limiter picks the controller default.
-			autoRollouts, arErr := autorollout.New(mgr.GetClient(), snapshots,
-				parallelizer.NewParallelizer(parallelizer.DefaultNumOfWorkers), nil, mgr.GetEventRecorder("auto-rollout-controller"))
+			// A nil parallelizer and rate limiter pick the controller defaults.
+			autoRollouts, arErr := autorollout.New(mgr.GetClient(), snapshots, nil, nil, mgr.GetEventRecorder("auto-rollout-controller"))
 			if arErr != nil {
 				klog.ErrorS(arErr, "Unable to create the placement policy auto-rollout controller")
 				return arErr
