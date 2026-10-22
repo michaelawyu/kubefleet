@@ -192,11 +192,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 	if r.ResourceEligibilityChecker != nil {
 		if !r.ResourceEligibilityChecker.AllowsGVK(source.GroupVersionKind()) {
 			// The resource's GVK is not allowed for placement.
-			return ctrl.Result{}, r.deletePolicy(ctx, source, "the resource is not eligible for placement (invalid GVK)")
+			return ctrl.Result{}, r.deletePolicy(ctx, source, "the resource is not eligible for placement (blocked GVK)")
 		}
-		if !r.ResourceEligibilityChecker.AllowsNamespace(source.GetNamespace()) {
-			// The resource's namespace is not allowed for placement.
-			return ctrl.Result{}, r.deletePolicy(ctx, source, "the resource is not eligible for placement (invalid namespace)")
+		// A Namespace object is checked against its own name, as it carries no namespace of its own.
+		if !r.ResourceEligibilityChecker.AllowsNamespace(SourceNamespace(source)) {
+			return ctrl.Result{}, r.deletePolicy(ctx, source, "the resource is not eligible for placement (blocked namespace)")
 		}
 		eligible, cause, err := r.ResourceEligibilityChecker.AllowsObject(source)
 		if err != nil {
@@ -207,9 +207,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (ctrl.Result, e
 		if !eligible {
 			return ctrl.Result{}, r.deletePolicy(ctx, source, fmt.Sprintf("the resource is not eligible for placement (%s)", cause))
 		}
-	}
-	if isObjectBlockedForAnnotationBasedPlacement(source) {
-		return ctrl.Result{}, r.deletePolicy(ctx, source, "the resource kind cannot be placed through annotations; create a placement policy instead")
 	}
 
 	value, annotated := source.GetAnnotations()[kfplacementv1alpha1.ClusterSelectorsAnnotation]

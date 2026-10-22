@@ -310,7 +310,7 @@ func TestReconcileDeletedResource(t *testing.T) {
 // Its generated policy is deleted: the resource watcher reports such a resource as deleted and then
 // never again, so this reconciliation is the last chance to clean up.
 func TestReconcileIneligibleResource(t *testing.T) {
-	for _, check := range []string{"GVK", "namespace", "object"} {
+	for _, check := range []string{"GVK", "namespace", "namespace object", "object"} {
 		t.Run(check, func(t *testing.T) {
 			ctx := context.Background()
 			source := newSource(deploymentGVK, testNamespace, testName, map[string]string{kfplacementv1alpha1.ClusterSelectorsAnnotation: oneSelector})
@@ -321,6 +321,11 @@ func TestReconcileIneligibleResource(t *testing.T) {
 					t.Fatalf("SetGVKCheckList() = %v, want no error", err)
 				}
 			case "namespace":
+				checker.SetNamespaceCheckList(resourceeligibility.NamespaceEligibilityModeDenyList, []string{testNamespace}, nil)
+			case "namespace object":
+				// A Namespace carries no namespace of its own, so it must be checked against its name;
+				// checking its empty namespace field would let a skipped namespace through.
+				source = newSource(namespaceGVK, "", testNamespace, map[string]string{kfplacementv1alpha1.ClusterSelectorsAnnotation: oneSelector})
 				checker.SetNamespaceCheckList(resourceeligibility.NamespaceEligibilityModeDenyList, []string{testNamespace}, nil)
 			case "object":
 				controller := true
@@ -358,6 +363,10 @@ func TestReconcileIneligibleResource(t *testing.T) {
 	}
 }
 
+// TestReconcileBlockedAdmissionPolicy covers the admission policy kinds, which annotation-based
+// placement refuses to place even though an explicitly authored placement policy can still place
+// them. An annotated one is warned about rather than given a policy, and a policy generated for it
+// before the kind was blocked is deleted.
 func TestReconcileBlockedAdmissionPolicy(t *testing.T) {
 	for _, kind := range []string{
 		"ValidatingAdmissionPolicy",
@@ -392,8 +401,8 @@ func TestReconcileBlockedAdmissionPolicy(t *testing.T) {
 				if _, found := policyFrom(ctx, t, r, source); found {
 					t.Errorf("Reconcile(%v) left a generated policy, want none", req)
 				}
-				if diff := cmp.Diff(wantReasons, recordedReasons(recorder)); diff != "" {
-					t.Errorf("Reconcile(%v) recorded events mismatch (-want, +got):\n%s", req, diff)
+				if diff := cmp.Diff(recordedReasons(recorder), wantReasons); diff != "" {
+					t.Errorf("Reconcile(%v) recorded events mismatch (-got, +want):\n%s", req, diff)
 				}
 			})
 		}
