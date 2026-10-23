@@ -82,14 +82,88 @@ func (m *Manager) enqueueOldResourceSnapshotsForGC(
 	}
 }
 
+// checkForInconsistentResourceSnapshots scans the given (sorted) primary resource snapshots of a placement policy for
+// snapshots that are not owned by the placement policy, e.g., those left over from a previous placement policy of
+// the same name.
+//
+// Note that only primary resource snapshots are checked here. A secondary resource snapshot without a primary, i.e.,
+// one created by a previous placement policy of the same name in an interrupted snapshot creation attempt and then
+// orphaned (e.g., the placement policy is deleted with the orphan propagation policy), will not be detected; nor will
+// the Kubernetes GC remove it, as it has no owners. This is considered acceptable, as such a snapshot is harmless:
+// it is not referenced by any object, and it never gets picked up when listing snapshots by index, as any secondary
+// snapshots left over at an index are always cleaned up (see cleanUpOrphanedSecondarySnapshots) before the placement
+// policy creates new snapshots at that index. The snapshot will linger until then (or until it is removed manually).
+func (m *Manager) checkForInconsistentResourceSnapshots(
+	sortedSnapshots []placementv1alpha1.PlacementResourceSnapshotAccessor,
+	placementPolicyAccessor placementv1alpha1.PlacementPolicyAccessor,
+) (found bool, err error) {
+	for idx := range sortedSnapshots {
+		snapshot := sortedSnapshots[idx]
+
+		// Check if the snapshot has a owner reference to the same named placement policy, but with a different UID.
+		//
+		// This signals that we might be observing an inconsistent state where Kubernetes API server's GC process
+		// is incomplete; return a transient error and wait for the situation to resolve.
+		ownerRef := placementPolicyOwnerRef(snapshot, placementPolicyAccessor.GetName())
+		if ownerRef != nil && ownerRef.UID != placementPolicyAccessor.GetUID() {
+			// Err out right away; no need to keep scanning.
+			return found, errors.NewTransientError(nil,
+				"found a placement resource snapshot owned by a placement policy that has been deleted; waiting for the garbage collection to complete",
+				"placementResourceSnapshot", klog.KObj(snapshot), "observedUID", ownerRef.UID, "expectedUID", placementPolicyAccessor.GetUID())
+		}
+
+		// Check if the snapshot has no owners. If so, we might have caught a situation where the snapshot is orphaned.
+		// Enqueue the snapshot for garbage collection.
+		if len(snapshot.GetOwnerReferences()) == 0 {
+			found = true
+			m.gcwq.Add(snapshotGarbageCollectionRequest{
+				snapshotNamespacedName: types.NamespacedName{
+					Namespace: snapshot.GetNamespace(),
+					Name:      snapshot.GetName(),
+				},
+				snapshotUID: snapshot.GetUID(),
+				placementPolicyNamespacedName: types.NamespacedName{
+					Namespace: placementPolicyAccessor.GetNamespace(),
+					Name:      placementPolicyAccessor.GetName(),
+				},
+			})
+		}
+
+		// Handle the unlikely case where the snapshot has other owners (differently named placement policies, etc.).
+		// This is considered a user error.
+		if ownerRefs := snapshot.GetOwnerReferences(); len(ownerRefs) > 0 && (ownerRef == nil || len(ownerRefs) > 1) {
+			return found, errors.NewUserError(nil,
+				fmt.Sprintf("found a placement resource snapshot (%s) that has unexpected owner references", snapshot.GetName()),
+				"placementResourceSnapshot", klog.KObj(snapshot), "ownerReferences", ownerRefs,
+				"placementPolicy", klog.KObj(placementPolicyAccessor))
+		}
+	}
+	return found, nil
+}
+
 // garbageCollect processes a garbage collection request.
 func (m *Manager) garbageCollect(ctx context.Context, snapshotGCRequest snapshotGarbageCollectionRequest) error {
 	// GC the resource snapshots (the primary and its secondaries).
 	//
-	// Note that KubeFleet always creates resource snapshots in a specific order, and GC only occurs when the
-	// resource snapshot manager has already seen at least one newer snapshot; this guarantees that the cache
-	// can be reliably used to list an outdated primary resource snapshot and its secondaries - no snapshots will
-	// be missed.
+	// A GC request is issued for either:
+	//
+	// * an outdated primary resource snapshot (one beyond the revision history limit), which is only enqueued after
+	//   the resource snapshot manager has seen at least one newer snapshot; or
+	// * a primary resource snapshot left over from a previous placement policy of the same name (one without any
+	//   owner references), which might be the latest snapshot that the previous placement policy has.
+	//
+	// In both cases, no more snapshots will be created at the index of the primary resource snapshot: KubeFleet
+	// always creates the snapshots of an index in a specific order (secondaries first, primary last) and only moves
+	// forward to newer indices afterwards; and the resource snapshot manager blocks any snapshot creation as long as
+	// there is a primary resource snapshot not owned by the placement policy. This guarantees that the cache can be
+	// reliably used to list a primary resource snapshot and its secondaries - no snapshots will be missed.
+	//
+	// The same guarantees also ensure that all the snapshots listed at the index come from the same placement policy
+	// as the primary resource snapshot: snapshots of a re-created placement policy can only be created after all
+	// the primary snapshots left over from previous placement policies are gone, and any secondary snapshots left
+	// over at an index are cleaned up before new snapshots are created at that index (see
+	// cleanUpOrphanedSecondarySnapshots). Consequently, no ownership checks are needed when deleting the secondary
+	// resource snapshots.
 
 	// Retrieve the primary resource snapshot.
 	var primarySnapshot placementv1alpha1.PlacementResourceSnapshotAccessor
@@ -137,7 +211,7 @@ func (m *Manager) garbageCollect(ctx context.Context, snapshotGCRequest snapshot
 	//
 	// TO-DO (chenyu1): evaluate if it is needed to add additional safeguards against such
 	// premature garbage collection; the chances are quite low in normal ops.
-	inUse, err := m.isSnapshotInUseByAnyPlacementBinding(ctx, primarySnapshot)
+	inUse, err := m.isSnapshotInUseByAnyPlacementBinding(ctx, primarySnapshot, snapshotGCRequest.placementPolicyNamespacedName)
 	if err != nil {
 		return errors.Wraps(err, "failed to check if the placement resource snapshot is in use by any placement bindings")
 	}
@@ -183,35 +257,12 @@ func (m *Manager) garbageCollect(ctx context.Context, snapshotGCRequest snapshot
 		return listErr
 	}
 
-	// Retrieve the owner reference of the primary resource snapshot that points to its placement policy; it is
-	// used to verify the ownership of the secondary resource snapshots.
-	primarySnapshotOwnerRef := placementPolicyOwnerRef(primarySnapshot, ownedBy)
-	if primarySnapshotOwnerRef == nil {
-		return errors.NewUnexpectedError(nil, "the primary placement resource snapshot is missing the owner reference to its placement policy",
-			"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot), "placementPolicyName", ownedBy)
-	}
-
 	// Delete all the resource snapshots that are not the primary first.
+	//
+	// See the notes at the beginning of this method on why no ownership checks are needed here.
 	for _, snapshot := range snapshots {
 		if snapshot.GetName() == primarySnapshot.GetName() {
 			continue
-		}
-
-		// As a sanity check, verify if the secondary snapshot is owned by the same placement policy as the
-		// primary resource snapshot.
-		//
-		// The snapshots are listed by their owned-by annotation and index only; if a placement policy has been deleted
-		// and re-created with the same name, the cache might hold snapshots owned by different generations of
-		// the placement policy at the same time.
-		secondarySnapshotOwnerRef := placementPolicyOwnerRef(snapshot, ownedBy)
-		if secondarySnapshotOwnerRef == nil {
-			return errors.NewUnexpectedError(nil, "the secondary placement resource snapshot is missing the owner reference to its placement policy",
-				"secondaryPlacementResourceSnapshot", klog.KObj(snapshot), "placementPolicyName", ownedBy)
-		}
-		if secondarySnapshotOwnerRef.UID != primarySnapshotOwnerRef.UID {
-			return errors.NewTransientError(nil, "observed an inconsistent state: the secondary and the primary placement resource snapshots are owned by different placement policies with the same name",
-				"secondaryPlacementResourceSnapshot", klog.KObj(snapshot), "secondaryPlacementResourceSnapshotOwnerUID", secondarySnapshotOwnerRef.UID,
-				"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot), "primaryPlacementResourceSnapshotOwnerUID", primarySnapshotOwnerRef.UID)
 		}
 
 		if err := m.hubClient.Delete(ctx, snapshot, client.Preconditions{UID: ptr.To(snapshot.GetUID())}); err != nil && !apierrors.IsNotFound(err) {
@@ -235,17 +286,19 @@ func (m *Manager) garbageCollect(ctx context.Context, snapshotGCRequest snapshot
 // given (primary) placement resource snapshot.
 //
 // Note that this method reads from the cache, as the custom field index is only available there.
-func (m *Manager) isSnapshotInUseByAnyPlacementBinding(ctx context.Context, primarySnapshot placementv1alpha1.PlacementResourceSnapshotAccessor) (bool, error) {
-	// Retrieve the name of the owner placement policy.
-	//
-	// Note that the owned-by label is not used here, as its value might have been truncated.
-	placementPolicyName := primarySnapshot.GetAnnotations()[placementv1alpha1.PlacementResourceSnapshotOwnedByAnnotationKey]
-	if placementPolicyName == "" {
-		return false, errors.NewUnexpectedError(nil, "the primary placement resource snapshot is missing the owned-by annotation",
-			"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot))
+func (m *Manager) isSnapshotInUseByAnyPlacementBinding(ctx context.Context,
+	primarySnapshot placementv1alpha1.PlacementResourceSnapshotAccessor,
+	placementPolicyNamespacedName types.NamespacedName,
+) (bool, error) {
+	placementPolicyName := placementPolicyNamespacedName.Name
+	snapshotOwnerRef := placementPolicyOwnerRef(primarySnapshot, placementPolicyName)
+	if snapshotOwnerRef == nil {
+		// The primary resource snapshot is not owned by the placement policy; always consider such snapshots to
+		// be safe for GC.
+		return false, nil
 	}
-	// The placement policy always lives in the same namespace as its placement resource snapshots.
-	placementPolicyNamespace := primarySnapshot.GetNamespace()
+
+	placementPolicyNamespace := placementPolicyNamespacedName.Namespace
 	fieldMatchers := client.MatchingFields{
 		fieldindexers.PlacementBindingOwnedByAndInUseOfPrimaryResourceSnapshotCustomFieldName: fmt.Sprintf(
 			fieldindexers.PlacementBindingOwnedByAndInUseOfPrimaryResourceSnapshotCustomFieldValFmt,
@@ -256,7 +309,6 @@ func (m *Manager) isSnapshotInUseByAnyPlacementBinding(ctx context.Context, prim
 	// Only one matching binding is needed to tell if the snapshot is in use.
 	limit := client.Limit(1)
 
-	var placementBinding placementv1alpha1.PlacementBindingAccessor
 	if placementPolicyNamespace == "" {
 		// The placement policy is cluster-scoped; list cluster placement bindings.
 		placementBindingList := &placementv1alpha1.ClusterPlacementBindingList{}
@@ -266,7 +318,6 @@ func (m *Manager) isSnapshotInUseByAnyPlacementBinding(ctx context.Context, prim
 		if len(placementBindingList.Items) == 0 {
 			return false, nil
 		}
-		placementBinding = &placementBindingList.Items[0]
 	} else {
 		// The placement policy is namespace-scoped; list placement bindings in the same namespace.
 		placementBindingList := &placementv1alpha1.PlacementBindingList{}
@@ -277,30 +328,8 @@ func (m *Manager) isSnapshotInUseByAnyPlacementBinding(ctx context.Context, prim
 		if len(placementBindingList.Items) == 0 {
 			return false, nil
 		}
-		placementBinding = &placementBindingList.Items[0]
 	}
-
-	// As a sanity check, verify that the placement binding is owned by the same placement policy as the
-	// given primary placement resource snapshot.
-	//
-	// The field index matches placement bindings by the name of their owner placement policy only; if a placement
-	// policy has been deleted and re-created with the same name, the cache might hold objects owned by
-	// different generations of the placement policy at the same time.
-	snapshotOwnerRef := placementPolicyOwnerRef(primarySnapshot, placementPolicyName)
-	if snapshotOwnerRef == nil {
-		return false, errors.NewUnexpectedError(nil, "the primary placement resource snapshot is missing the owner reference to its placement policy",
-			"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot), "placementPolicyName", placementPolicyName)
-	}
-	bindingOwnerRef := placementPolicyOwnerRef(placementBinding, placementPolicyName)
-	if bindingOwnerRef == nil {
-		return false, errors.NewUnexpectedError(nil, "the placement binding is missing the owner reference to its placement policy",
-			"placementBinding", klog.KObj(placementBinding), "placementPolicyName", placementPolicyName)
-	}
-	if snapshotOwnerRef.UID != bindingOwnerRef.UID {
-		return false, errors.NewTransientError(nil, "observed an inconsistent state: the placement binding and the primary placement resource snapshot are owned by different placement policies with the same name",
-			"placementBinding", klog.KObj(placementBinding), "placementBindingOwnerUID", bindingOwnerRef.UID,
-			"primaryPlacementResourceSnapshot", klog.KObj(primarySnapshot), "primaryPlacementResourceSnapshotOwnerUID", snapshotOwnerRef.UID)
-	}
+	// A binding has been found to reference the primary resource snapshot; it is considered in use.
 	return true, nil
 }
 
