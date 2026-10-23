@@ -191,17 +191,21 @@ re-created with the same name.
 - `retrieveLatestSnapshot` (`ops.go`) now runs `checkForInconsistentResourceSnapshots` (`gc.go`) on the primary
   snapshots, right after sorting them. Both entry points are affected. For each primary:
   - **Owned by a same-named policy with another UID** (the previous policy is still being garbage-collected):
-    Transient, "found a placement resource snapshot owned by a placement policy that has been deleted; waiting for
-    the garbage collection to complete". The scan stops.
-  - **No owner references** (left over from a policy deleted with orphan propagation): a GC request is enqueued.
-    After the scan, the call fails as Transient, "leftover resource snapshots are detected; waiting for garbage
-    collection to complete".
+    Transient, "found a placement resource snapshot owned by a different placement policy of the same name (e.g., one
+    that has been deleted); waiting for garbage collection to complete". The scan stops.
+  - **No owner references** (left over from a policy deleted with orphan propagation): a GC request is enqueued,
+    unless the snapshot is already marked for deletion. Either way, after the scan, the call fails as Transient,
+    "leftover resource snapshots are detected; waiting for garbage collection to complete"; the error names the
+    leftover snapshots.
   - **Other owner references** (a differently named owner, an extra owner, the wrong kind): User, "found a placement
     resource snapshot (NAME) that has unexpected owner references". The name is in the message, so it reaches the
     policy status.
   - While blocked, no history GC requests are enqueued and no snapshot is created.
-- `garbageCollect` no longer checks ownership; it deletes every snapshot at the primary's index. The comment at the
-  top of `garbageCollect` explains why this is safe: the block above, plus `cleanUpOrphanedSecondarySnapshots`.
+- `garbageCollect` no longer requires the snapshots at the primary's index to be owned by the policy; orphaned groups
+  are deleted too. The comment at the top of `garbageCollect` explains why this is safe in normal operations: the block
+  above, plus `cleanUpOrphanedSecondarySnapshots`. As a sanity check against heavy cache lag, it skips (and logs) any
+  listed snapshot that is another primary, or whose policy owner (or lack of one) differs from the primary's. Since
+  snapshot names include the policy UID, the API server no longer stops two policy generations from sharing an index.
 - `isSnapshotInUseByAnyPlacementBinding` takes the policy's namespaced name from the GC request.
   - A snapshot without an owner reference to the policy is never in use, so orphans are collected even when a
     binding still names them.
@@ -243,12 +247,13 @@ Unindexed decoys (no owned-by annotation) are never scanned and need no owner re
 | Unit test | Covers |
 |---|---|
 | `uniquename/uniquename_test.go` | Name format, a different UID giving a different name, dots, truncation boundaries, uniqueness |
-| `TestCheckForInconsistentResourceSnapshots` | Every owner variant (stale UID, orphan, other name, extra owner, wrong kind, namespaced), scan order, enqueued requests |
+| `TestCheckForInconsistentResourceSnapshots` | Every owner variant (stale UID, orphan, other name, extra owner, wrong kind, namespaced), scan order, returned leftovers, enqueued requests, orphans already marked for deletion (still leftovers, not re-enqueued) |
 | `TestIsSnapshotInUseByAnyPlacementBinding` | Orphan bypass, other-name and wrong-kind owners, cross-namespace bindings, list failure |
-| `TestGarbageCollect` | Owned and orphaned groups, in use, re-created primary, primary not found, Get failure |
+| `TestGarbageCollect` | Owned and orphaned groups, in use, re-created primary, primary not found, Get failure, skipped snapshots at the same index (another primary, a different or missing policy owner) |
+| `TestStart` | The GC worker loop: retry with backoff, drop on Unexpected errors, stop on context cancellation (added with this revision; see below) |
 
-**Not covered anywhere:** the `Start` worker loop, and `IsSnapshotSynchronized` (a gap that predates this change,
-including its owner-UID check).
+**Not covered anywhere:** `IsSnapshotSynchronized` (a gap that predates this change, including its owner-UID check).
+At planning time, the `Start` worker loop was not covered either; `TestStart` now covers it.
 
 The integration cases below therefore take one representative per owner variant. They focus on what unit tests
 can't show: real field indexes and the cache, the running GC worker, recovery once the block clears, and both entry
@@ -276,7 +281,7 @@ points.
 
 1. Create the policy and a snapshot at index 0.
 2. Delete the policy and re-create it with the same name.
-3. Both entry points fail as Transient ("owned by a placement policy that has been deleted"):
+3. Both entry points fail as Transient ("owned by a different placement policy of the same name"):
    - nothing is created under the new UID's names (`verifyNoPrimarySnapshotAtIdx(0)`);
    - the old snapshot is untouched;
    - a paused manager's queue stays empty, so no history GC happens while blocked.
@@ -297,8 +302,10 @@ points.
 
 **LO-3. An orphaned primary pending deletion** (PP)
 
-1. Set up as in LO-2, but give one orphaned primary a finalizer.
-2. Calls stay Transient (`Consistently`) while it is terminating, and nothing is created.
+1. Create the policy and a snapshot at index 0. Give the snapshot a finalizer, orphan it, and re-create the policy.
+   (Implemented with a single snapshot; the LO-2 setup, as first planned, adds nothing here.)
+2. Once the GC worker has marked the snapshot for deletion, calls stay Transient ("leftover resource snapshots are
+   detected", `Consistently`), and nothing is created.
 3. Remove the finalizer; the call then succeeds.
 
 **LO-4. Unexpected owner references** (PP)
@@ -325,7 +332,8 @@ The other owner variants are unit-tested; one representative is enough here.
 1. Create a policy with `ResourceRevisionHistoryLimit` 1 and a snapshot at index 0, plus a binding owned by the
    policy that names index 0.
 2. Create index 1, then call again; that retrieval sees both indices and enqueues index 0.
-3. Index 0 is kept (`Consistently`), and `NumRequeues` for its request stays 0: the request is dropped, not retried.
+3. Once the GC worker has picked up the request (its workqueue is empty), index 0 is kept (`Consistently`), and
+   `NumRequeues` for its request stays 0: the request is dropped, not retried.
 4. With a paused manager, `garbageCollect` returns nil and index 0 is kept.
 5. Point the binding to index 1. The next retrieval enqueues index 0 again, and it is collected.
 6. A binding with no owner that names an outdated snapshot also keeps it, since binding owners are not checked.
@@ -545,10 +553,11 @@ to test contexts by position, in file order: PP-n and CPP-n are the n-th `Contex
   - More entries for the PR description:
     - Snapshot creation is blocked while leftover primaries exist. A stale owner UID or an orphan is Transient, and
       unexpected owners are a User error.
-    - GC no longer checks ownership, and the in-use check is by name only.
+    - GC no longer checks ownership, and the in-use check is by name only. (Revised at 07:56: GC now skips snapshots
+      whose policy owner differs from the primary's.)
     - Snapshot names always carry a hash that includes the policy UID; the exported `uniquename` package builds them.
   - Implementation is waiting for approval.
-- October 24, 07:50: The revision was implemented.
+- October 24, 07:35: The revision was implemented (commit `f2e74e10`).
   - **LO-1 to LO-5** are in a new `Describe("corner cases (leftover snapshots from previous placement policies)")` at
     the end of `corner_cases_integration_test.go`. There are six contexts (LO-2 runs once per scope) and 33 specs.
     Three error message constants were added: `staleOwnerSnapshotErrMsg`, `leftoverSnapshotsErrMsg`, and
@@ -571,3 +580,34 @@ to test contexts by position, in file order: PP-n and CPP-n are the n-th `Contex
     - `go test -race -count=30 -run TestStart` passed.
     - `golangci-lint --fast-only` reported 0 issues. In the new code, the full run flags only a `goconst` finding on
       the `ConfigMap` literal, the same style as the rest of the file.
+- October 24, 07:56: Following review, `garbageCollect` gained a sanity check in its delete loop. It skips (and logs at
+  `V(2)`, as a cache-lag symptom rather than an error) any snapshot at the primary's index that is another primary, or
+  whose policy owner (or lack of one) differs from the primary's. The check uses the new helper
+  `isSamePlacementPolicyOwner`.
+  - Why: names now include the policy UID, so only the cache-based block keeps two policy generations from sharing an
+    index. If the cache lags, GC of an orphaned primary could otherwise delete a re-created policy's snapshots at that
+    index. Losing only its secondaries would leave the policy stuck on the "fewer sub-indexed snapshots" Unexpected error.
+  - `TestGarbageCollect` has four new cases: another primary at the index; an orphaned primary alongside a re-created
+    policy's snapshots; a secondary owned by another UID; and an ownerless secondary under an owned primary.
+  - `checkForInconsistentResourceSnapshots` no longer re-enqueues ownerless primaries that are already marked for
+    deletion, but they still block snapshotting. `TestCheckForInconsistentResourceSnapshots` has two new cases for
+    this.
+  - Doc and wording fixes from the review:
+    - `checkForInconsistentResourceSnapshots` now returns the leftover primaries (as `klog.ObjectRef`s) instead of a
+      bool, so the "leftover resource snapshots are detected" error names them, along with the policy.
+    - The stale-owner error now reads "owned by a different placement policy of the same name (e.g., one that has
+      been deleted)"; `staleOwnerSnapshotErrMsg` was updated to match.
+    - Comments now credit the Kubernetes garbage collector (kube-controller-manager), not the API server.
+    - The doc comment of `isSnapshotInUseByAnyPlacementBinding` says that binding owners are not checked.
+- October 24, 08:05: Minor test fixes from the review, and breadcrumb consistency fixes.
+  - `gc_test.go` builds snapshot names with `uniquename` instead of the pre-UID format. The "primary snapshot has been
+    re-created" case now re-creates the snapshot under the same policy, since only the same policy can reuse a name.
+  - GC-5's `verifySnapshotsKeptWithoutRetries` first waits until the GC worker has picked up the request (the
+    workqueue is empty). Before, `NumRequeues` of 0 also held for a request that had not been processed at all.
+  - Breadcrumb fixes:
+    - The implementation entry is now timed 07:35, matching the commit, instead of 07:50.
+    - The unit test table lists `TestStart`, and "not covered anywhere" no longer lists the `Start` loop.
+    - The LO-3 plan matches the single-snapshot implementation.
+    - The leftover check and GC-5 descriptions match the current behavior.
+  - Validation: `gofmt` and `go vet` are clean, and the `gc_test.go` unit tests pass with `-race`. The integration
+    suite was not re-run.

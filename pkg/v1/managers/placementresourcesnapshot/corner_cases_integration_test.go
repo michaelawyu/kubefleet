@@ -47,7 +47,7 @@ const (
 	secondaryCreationFailedErrMsg  = "failed to create a secondary placement resource snapshot"
 	fewerSubIndexedSnapshotsErrMsg = "there are fewer sub-indexed placement resource snapshots than the count label indicates"
 	mismatchedContentsHashErrMsg   = "a sub-indexed placement resource snapshot has a different contents hash than the primary placement resource snapshot"
-	staleOwnerSnapshotErrMsg       = "found a placement resource snapshot owned by a placement policy that has been deleted"
+	staleOwnerSnapshotErrMsg       = "found a placement resource snapshot owned by a different placement policy of the same name"
 	leftoverSnapshotsErrMsg        = "leftover resource snapshots are detected"
 	unexpectedOwnerRefsErrMsg      = "that has unexpected owner references"
 

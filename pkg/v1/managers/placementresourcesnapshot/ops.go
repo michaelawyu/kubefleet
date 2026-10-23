@@ -176,13 +176,14 @@ func (m *Manager) retrieveLatestSnapshot(ctx context.Context, placementPolicy pl
 	}
 
 	// Check for inconsistent resource snapshots.
-	found, err := m.checkForInconsistentResourceSnapshots(snapshots, placementPolicy)
+	leftovers, err := m.checkForInconsistentResourceSnapshots(snapshots, placementPolicy)
 	if err != nil {
 		return nil, errors.Wraps(err, "observed inconsistent resource snapshots")
 	}
-	if found {
-		// Inconsistent resource snapshots have been found; wait for them to disappear before proceeding.
-		return nil, errors.NewTransientError(nil, "leftover resource snapshots are detected; waiting for garbage collection to complete")
+	if len(leftovers) > 0 {
+		// Leftover resource snapshots have been found; wait for them to disappear before proceeding.
+		return nil, errors.NewTransientError(nil, "leftover resource snapshots are detected; waiting for garbage collection to complete",
+			"placementPolicy", klog.KObj(placementPolicy), "leftoverPlacementResourceSnapshots", leftovers)
 	}
 
 	// Enqueue the outdated primary resource snapshots for GC.

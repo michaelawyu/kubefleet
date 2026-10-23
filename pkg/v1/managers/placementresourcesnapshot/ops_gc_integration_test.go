@@ -4040,8 +4040,17 @@ var _ = Describe("GC variants", func() {
 		// verifySnapshotsKeptWithoutRetries verifies that the placement policy keeps the wanted snapshots, i.e., the
 		// manager under test does not garbage collect the snapshot of the given GC request, and that the GC request
 		// is dropped rather than retried.
+		//
+		// The GC request must have been enqueued before this helper is called.
 		verifySnapshotsKeptWithoutRetries := func(gcRequest snapshotGarbageCollectionRequest, wantNames []string) {
 			GinkgoHelper()
+
+			// Wait until the GC worker has picked up the GC request; otherwise the checks below would also pass with
+			// a GC request that has not been processed at all. A retry, should one happen, comes after the request
+			// is picked up, and the Consistently block below catches it.
+			Eventually(func() int {
+				return resourceSnapshotManager.gcwq.Len()
+			}, eventuallyDuration, eventuallyInterval).Should(BeZero(), "The GC request has not been picked up by the GC worker")
 
 			Consistently(func() error {
 				if err := checkOwnedSnapshots(placementPolicy, wantNames); err != nil {

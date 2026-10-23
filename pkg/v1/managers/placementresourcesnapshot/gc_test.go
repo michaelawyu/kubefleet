@@ -33,12 +33,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 	kferrors "github.com/kubefleet-dev/kubefleet/pkg/utils/errors"
+	"github.com/kubefleet-dev/kubefleet/pkg/v1/managers/placementresourcesnapshot/uniquename"
 	"github.com/kubefleet-dev/kubefleet/pkg/v1/utils/fieldindexers"
 )
 
@@ -80,7 +82,7 @@ func TestCheckForInconsistentResourceSnapshots(t *testing.T) {
 	otherClusterPolicyOwnerRef := ownerRef(placementv1alpha1.ClusterPlacementPolicyKind, otherPolicyName, "other-policy-uid")
 
 	snapshotName := func(idx int) string {
-		return fmt.Sprintf("%s-resource-snapshot-%d", policyName, idx)
+		return uniquename.PrimaryPlacementResourceSnapshotName(policyName, policyUID, idx)
 	}
 	snapshotUID := func(idx int) types.UID {
 		return types.UID(fmt.Sprintf("snapshot-%d-uid", idx))
@@ -104,6 +106,12 @@ func TestCheckForInconsistentResourceSnapshots(t *testing.T) {
 			},
 		}
 	}
+	deletionTimestamp := metav1.NewTime(time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC))
+	// markedForDeletion marks the given cluster placement resource snapshot for deletion.
+	markedForDeletion := func(snapshot *placementv1alpha1.ClusterPlacementResourceSnapshot) *placementv1alpha1.ClusterPlacementResourceSnapshot {
+		snapshot.DeletionTimestamp = &deletionTimestamp
+		return snapshot
+	}
 	gcRequest := func(namespace string, idx int) snapshotGarbageCollectionRequest {
 		return snapshotGarbageCollectionRequest{
 			snapshotNamespacedName:        types.NamespacedName{Namespace: namespace, Name: snapshotName(idx)},
@@ -111,12 +119,15 @@ func TestCheckForInconsistentResourceSnapshots(t *testing.T) {
 			placementPolicyNamespacedName: types.NamespacedName{Namespace: namespace, Name: policyName},
 		}
 	}
+	leftover := func(namespace string, idx int) klog.ObjectRef {
+		return klog.ObjectRef{Namespace: namespace, Name: snapshotName(idx)}
+	}
 
 	testCases := []struct {
 		name            string
 		placementPolicy placementv1alpha1.PlacementPolicyAccessor
 		sortedSnapshots []placementv1alpha1.PlacementResourceSnapshotAccessor
-		wantFound       bool
+		wantLeftovers   []klog.ObjectRef
 		// The category of the error that is expected to be returned; leave empty if no error is expected.
 		wantErrCategory kferrors.ErrCategory
 		wantGCRequests  []snapshotGarbageCollectionRequest
@@ -141,8 +152,28 @@ func TestCheckForInconsistentResourceSnapshots(t *testing.T) {
 				clusterSnapshot(1, clusterPolicyOwnerRef),
 				clusterSnapshot(2),
 			},
-			wantFound:      true,
+			wantLeftovers:  []klog.ObjectRef{leftover("", 0), leftover("", 2)},
 			wantGCRequests: []snapshotGarbageCollectionRequest{gcRequest("", 0), gcRequest("", 2)},
+		},
+		{
+			name:            "orphaned snapshot marked for deletion",
+			placementPolicy: clusterPolicy,
+			sortedSnapshots: []placementv1alpha1.PlacementResourceSnapshotAccessor{
+				markedForDeletion(clusterSnapshot(0)),
+			},
+			// Snapshotting stays blocked, but no GC request is enqueued again.
+			wantLeftovers: []klog.ObjectRef{leftover("", 0)},
+		},
+		{
+			name:            "orphaned snapshots, one of which is marked for deletion",
+			placementPolicy: clusterPolicy,
+			sortedSnapshots: []placementv1alpha1.PlacementResourceSnapshotAccessor{
+				markedForDeletion(clusterSnapshot(0)),
+				clusterSnapshot(1),
+				clusterSnapshot(2, clusterPolicyOwnerRef),
+			},
+			wantLeftovers:  []klog.ObjectRef{leftover("", 0), leftover("", 1)},
+			wantGCRequests: []snapshotGarbageCollectionRequest{gcRequest("", 1)},
 		},
 		{
 			name:            "snapshot owned by a deleted placement policy with the same name",
@@ -160,7 +191,7 @@ func TestCheckForInconsistentResourceSnapshots(t *testing.T) {
 				clusterSnapshot(0),
 				clusterSnapshot(1, staleClusterPolicyOwnerRef),
 			},
-			wantFound:       true,
+			wantLeftovers:   []klog.ObjectRef{leftover("", 0)},
 			wantErrCategory: kferrors.ErrCategoryTransient,
 			wantGCRequests:  []snapshotGarbageCollectionRequest{gcRequest("", 0)},
 		},
@@ -203,7 +234,7 @@ func TestCheckForInconsistentResourceSnapshots(t *testing.T) {
 				namespacedSnapshot(0),
 				namespacedSnapshot(1, namespacedPolicyOwnerRef),
 			},
-			wantFound:      true,
+			wantLeftovers:  []klog.ObjectRef{leftover(namespaceName, 0)},
 			wantGCRequests: []snapshotGarbageCollectionRequest{gcRequest(namespaceName, 0)},
 		},
 	}
@@ -214,17 +245,17 @@ func TestCheckForInconsistentResourceSnapshots(t *testing.T) {
 			defer gcwq.ShutDown()
 			m := &Manager{gcwq: gcwq}
 
-			gotFound, err := m.checkForInconsistentResourceSnapshots(tc.sortedSnapshots, tc.placementPolicy)
+			gotLeftovers, err := m.checkForInconsistentResourceSnapshots(tc.sortedSnapshots, tc.placementPolicy)
 			switch {
 			case tc.wantErrCategory != "" && err == nil:
-				t.Errorf("checkForInconsistentResourceSnapshots() = %v, nil, want error of category %v", gotFound, tc.wantErrCategory)
+				t.Errorf("checkForInconsistentResourceSnapshots() = %v, nil, want error of category %v", gotLeftovers, tc.wantErrCategory)
 			case tc.wantErrCategory != "":
 				verifyErrCategory(t, "checkForInconsistentResourceSnapshots()", err, tc.wantErrCategory)
 			case err != nil:
 				t.Errorf("checkForInconsistentResourceSnapshots() = %v, want no error", err)
 			}
-			if gotFound != tc.wantFound {
-				t.Errorf("checkForInconsistentResourceSnapshots() found = %v, want %v", gotFound, tc.wantFound)
+			if diff := cmp.Diff(gotLeftovers, tc.wantLeftovers, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("checkForInconsistentResourceSnapshots() leftovers mismatch (-got +want):\n%s", diff)
 			}
 
 			gotGCRequests := make([]snapshotGarbageCollectionRequest, 0, gcwq.Len())
@@ -244,22 +275,23 @@ func TestCheckForInconsistentResourceSnapshots(t *testing.T) {
 // TestIsSnapshotInUseByAnyPlacementBinding tests the isSnapshotInUseByAnyPlacementBinding method.
 func TestIsSnapshotInUseByAnyPlacementBinding(t *testing.T) {
 	const (
-		policyName        = "policy"
-		otherPolicyName   = "other-policy"
-		snapshotName      = "policy-resource-snapshot-0"
-		otherSnapshotName = "policy-resource-snapshot-1"
-		bindingName       = "binding"
-		namespaceName     = "app"
-		otherNamespace    = "other-app"
-		clusterName       = "member-1"
+		policyName      = "policy"
+		otherPolicyName = "other-policy"
+		bindingName     = "binding"
+		namespaceName   = "app"
+		otherNamespace  = "other-app"
+		clusterName     = "member-1"
 	)
+	policyUID := types.UID("policy-uid")
+	snapshotName := uniquename.PrimaryPlacementResourceSnapshotName(policyName, policyUID, 0)
+	otherSnapshotName := uniquename.PrimaryPlacementResourceSnapshotName(policyName, policyUID, 1)
 
 	policyOwnerRef := func(kind, name string) metav1.OwnerReference {
 		return metav1.OwnerReference{
 			APIVersion: placementv1alpha1.GroupVersion.String(),
 			Kind:       kind,
 			Name:       name,
-			UID:        types.UID("policy-uid"),
+			UID:        policyUID,
 		}
 	}
 	clusterPolicyOwnerRef := policyOwnerRef(placementv1alpha1.ClusterPlacementPolicyKind, policyName)
@@ -415,23 +447,29 @@ func TestIsSnapshotInUseByAnyPlacementBinding(t *testing.T) {
 // TestGarbageCollect tests the garbageCollect method.
 func TestGarbageCollect(t *testing.T) {
 	const (
-		policyName    = "policy"
-		primaryName   = "policy-resource-snapshot-0"
-		secondaryName = "policy-resource-snapshot-0-1"
-		tertiaryName  = "policy-resource-snapshot-0-2"
-		bindingName   = "binding"
-		clusterName   = "member-1"
+		policyName  = "policy"
+		bindingName = "binding"
+		clusterName = "member-1"
 	)
+	policyUID := types.UID("policy-uid")
+	recreatedPolicyUID := types.UID("recreated-policy-uid")
+	primaryName := uniquename.PrimaryPlacementResourceSnapshotName(policyName, policyUID, 0)
+	secondaryName := uniquename.SecondaryPlacementResourceSnapshotName(policyName, policyUID, 0, 1)
+	tertiaryName := uniquename.SecondaryPlacementResourceSnapshotName(policyName, policyUID, 0, 2)
+	// Unexpected primary and secondary snapshots at the same index as the primary snapshot specified in the GC
+	// request, named as those of a re-created placement policy of the same name.
+	otherPrimaryName := uniquename.PrimaryPlacementResourceSnapshotName(policyName, recreatedPolicyUID, 0)
+	otherSecondaryName := uniquename.SecondaryPlacementResourceSnapshotName(policyName, recreatedPolicyUID, 0, 1)
 	primaryUID := types.UID("primary-uid")
 	recreatedPrimaryUID := types.UID("recreated-primary-uid")
 	policyOwnerRef := metav1.OwnerReference{
 		APIVersion: placementv1alpha1.GroupVersion.String(),
 		Kind:       placementv1alpha1.ClusterPlacementPolicyKind,
 		Name:       policyName,
-		UID:        types.UID("policy-uid"),
+		UID:        policyUID,
 	}
 	recreatedPolicyOwnerRef := policyOwnerRef
-	recreatedPolicyOwnerRef.UID = types.UID("recreated-policy-uid")
+	recreatedPolicyOwnerRef.UID = recreatedPolicyUID
 
 	snapshot := func(name string, uid types.UID, subIdx int, ownerRefs ...metav1.OwnerReference) *placementv1alpha1.ClusterPlacementResourceSnapshot {
 		return &placementv1alpha1.ClusterPlacementResourceSnapshot{
@@ -491,6 +529,42 @@ func TestGarbageCollect(t *testing.T) {
 			},
 		},
 		{
+			name: "another primary snapshot at the same index",
+			objs: []client.Object{
+				snapshot(primaryName, primaryUID, 0, policyOwnerRef),
+				snapshot(secondaryName, "secondary-uid", 1, policyOwnerRef),
+				snapshot(otherPrimaryName, "other-primary-uid", 0, policyOwnerRef),
+			},
+			wantRemainingSnapshots: []string{otherPrimaryName},
+		},
+		{
+			name: "orphaned primary snapshot, with snapshots of a re-created placement policy at the same index",
+			objs: []client.Object{
+				snapshot(primaryName, primaryUID, 0),
+				snapshot(secondaryName, "secondary-uid", 1),
+				snapshot(otherPrimaryName, "other-primary-uid", 0, recreatedPolicyOwnerRef),
+				snapshot(otherSecondaryName, "other-secondary-uid", 1, recreatedPolicyOwnerRef),
+			},
+			wantRemainingSnapshots: []string{otherPrimaryName, otherSecondaryName},
+		},
+		{
+			name: "secondary snapshot owned by a different placement policy of the same name",
+			objs: []client.Object{
+				snapshot(primaryName, primaryUID, 0, policyOwnerRef),
+				snapshot(secondaryName, "secondary-uid", 1, recreatedPolicyOwnerRef),
+				snapshot(tertiaryName, "tertiary-uid", 2, policyOwnerRef),
+			},
+			wantRemainingSnapshots: []string{secondaryName},
+		},
+		{
+			name: "orphaned secondary snapshot with a primary snapshot owned by the placement policy",
+			objs: []client.Object{
+				snapshot(primaryName, primaryUID, 0, policyOwnerRef),
+				snapshot(secondaryName, "secondary-uid", 1),
+			},
+			wantRemainingSnapshots: []string{secondaryName},
+		},
+		{
 			name: "primary snapshot in use by a placement binding",
 			objs: []client.Object{
 				snapshot(primaryName, primaryUID, 0, policyOwnerRef),
@@ -509,9 +583,11 @@ func TestGarbageCollect(t *testing.T) {
 		},
 		{
 			name: "primary snapshot has been re-created",
+			// Snapshot names factor in the UID of the placement policy; only the same placement policy can re-create
+			// a snapshot under the same name (e.g., after the snapshot has been deleted by hand).
 			objs: []client.Object{
-				snapshot(primaryName, recreatedPrimaryUID, 0, recreatedPolicyOwnerRef),
-				snapshot(secondaryName, "secondary-uid", 1, recreatedPolicyOwnerRef),
+				snapshot(primaryName, recreatedPrimaryUID, 0, policyOwnerRef),
+				snapshot(secondaryName, "secondary-uid", 1, policyOwnerRef),
 			},
 			wantRemainingSnapshots: []string{primaryName, secondaryName},
 		},
@@ -571,18 +647,18 @@ func TestGarbageCollect(t *testing.T) {
 
 // TestStart tests the GC worker loop that the Start method runs.
 func TestStart(t *testing.T) {
-	const (
-		policyName    = "policy"
-		primaryName0  = "policy-resource-snapshot-0"
-		secondaryName = "policy-resource-snapshot-0-1"
-		primaryName1  = "policy-resource-snapshot-1"
-		malformedName = "policy-resource-snapshot-malformed"
-	)
+	const policyName = "policy"
+	policyUID := types.UID("policy-uid")
+	primaryName0 := uniquename.PrimaryPlacementResourceSnapshotName(policyName, policyUID, 0)
+	secondaryName := uniquename.SecondaryPlacementResourceSnapshotName(policyName, policyUID, 0, 1)
+	primaryName1 := uniquename.PrimaryPlacementResourceSnapshotName(policyName, policyUID, 1)
+	// The primary snapshot at index 2; it is given a malformed index label below.
+	malformedName := uniquename.PrimaryPlacementResourceSnapshotName(policyName, policyUID, 2)
 	policyOwnerRef := metav1.OwnerReference{
 		APIVersion: placementv1alpha1.GroupVersion.String(),
 		Kind:       placementv1alpha1.ClusterPlacementPolicyKind,
 		Name:       policyName,
-		UID:        types.UID("policy-uid"),
+		UID:        policyUID,
 	}
 
 	// snapshot returns a cluster placement resource snapshot owned by the placement policy; the index label is a
