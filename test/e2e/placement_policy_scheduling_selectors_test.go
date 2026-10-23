@@ -21,7 +21,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -94,17 +93,12 @@ var _ = Describe("placement policy scheduling with cluster selector options", La
 		})
 
 		It("should report the selector as short of its count, with its minimum count reached", func() {
-			// Reaching minCount but not count still reports the policy as not scheduled (decision 7); only the
-			// message tells the two cases apart.
+			// Reaching minCount but not count still reports the policy as not scheduled; only the message tells the two
+			// cases apart.
 			Eventually(placementPolicyStatusActual(policyKey, unfulfilledPlacementPolicyStatus(3, 2, 1)), workloadEventuallyDuration, eventuallyInterval).
 				Should(Succeed(), "Failed to report the expected cluster placement policy status")
-
-			policy, err := retrievePlacementPolicy(policyKey)
-			Expect(err).NotTo(HaveOccurred(), "Failed to get cluster placement policy %s", policyKey)
-			scheduledCond := meta.FindStatusCondition(policy.GetStatus().Conditions, kfplacementv1alpha1.PlacementPolicyCondTypeScheduled)
-			Expect(scheduledCond).NotTo(BeNil(), "Cluster placement policy %s has no Scheduled condition", policyKey)
-			Expect(scheduledCond.Message).To(ContainSubstring("have reached their minimum cluster counts"),
-				"The Scheduled condition message does not report the minimum count as reached")
+			Eventually(placementPolicyConditionMessageActual(policyKey, kfplacementv1alpha1.PlacementPolicyCondTypeScheduled, "have reached their minimum cluster counts"),
+				eventuallyDuration, eventuallyInterval).Should(Succeed(), "The Scheduled condition message does not report the minimum count as reached")
 		})
 	})
 
@@ -496,6 +490,9 @@ var _ = Describe("placement policy scheduling with cluster selector options", La
 				claims, err := claimsOfPolicy(policyKey.Name, policyKey.Namespace)
 				if err != nil {
 					return err
+				}
+				if len(claims.Items) != 1 {
+					return fmt.Errorf("placement policy %s has %d cluster claims, want 1", policyKey, len(claims.Items))
 				}
 				claim := &claims.Items[0]
 				switch {

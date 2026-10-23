@@ -134,7 +134,7 @@ var _ = Describe("placement policy deletion", Label("placementpolicy"), func() {
 		AfterAll(func() {
 			// The work resources must go even if removing the policy fails; otherwise they leak into later specs.
 			// Deleting the hub namespace also removes the bindings, should the spec fail with them still orphaned, and
-			// the resource snapshot that the re-created policy reuses without owning it (Q11).
+			// the resource snapshot that the re-created policy reuses without owning it.
 			defer cleanupWorkResourcesOnHubAndMembers()
 			ensurePlacementPolicyRemoved(policyKey)
 		})
@@ -179,9 +179,9 @@ var _ = Describe("placement policy deletion", Label("placementpolicy"), func() {
 			Expect(hubClient.Create(ctx, newPolicy())).To(Succeed(), "Failed to re-create placement policy %s", policyKey)
 		})
 
-		// The deletion orphaned the resource snapshot too, and the re-created policy reuses it without taking it over
-		// (Q11). Until that is fixed, the specs check only the bindings, and leave out the snapshot and the resource
-		// status of the policy, which is reported against it.
+		// The deletion orphaned the resource snapshot too, and the re-created policy reuses it without taking it over.
+		// Until that is fixed, the specs check only the bindings, and leave out the snapshot and the resource status of
+		// the policy, which is reported against it.
 		It("should adopt the orphaned bindings, keeping them, their Works, and the ConfigMaps as they were", func() {
 			adoptedActual := placementPolicyBindingOwnershipActual(policyKey, bindingUIDsByCluster, true)
 			Eventually(adoptedActual, workloadEventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to adopt the orphaned bindings")

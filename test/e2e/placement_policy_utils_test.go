@@ -177,9 +177,9 @@ func placementPolicyBindingUIDsByCluster(key types.NamespacedName) map[string]ty
 // margin (the Kind clusters share the host clock).
 //
 // When a selector picks too many clusters, the placement policy controller trims the newest bindings first, by
-// creation timestamp, which has a resolution of one second, and breaks ties by cluster name (Q14). Specs that rely on
-// which of two bindings is the newer one call this before causing the second binding, so that it is stamped a later
-// second than the first.
+// creation timestamp, which has a resolution of one second, and breaks ties by cluster name. Specs that rely on which
+// of two bindings is the newer one call this before causing the second binding, so that it is stamped a later second
+// than the first.
 func waitPastCreationSecond(createdAt metav1.Time) {
 	if wait := time.Until(createdAt.Add(time.Second + 250*time.Millisecond)); wait > 0 {
 		time.Sleep(wait)
