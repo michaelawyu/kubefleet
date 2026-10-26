@@ -35,6 +35,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 	fleetv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 )
 
@@ -56,6 +57,72 @@ func toUnstructured(t *testing.T, obj runtime.Object) *unstructured.Unstructured
 		t.Fatalf("failed to convert obj into a map: %v", err)
 	}
 	return &unstructured.Unstructured{Object: unstructuredObj}
+}
+
+// TestIsOwnedByNewerKubeFleetAPIObjects tests the isOwnedByNewerKubeFleetAPIObjects function.
+func TestIsOwnedByNewerKubeFleetAPIObjects(t *testing.T) {
+	newerAPIAppliedWorkOwnerRef := metav1.OwnerReference{
+		APIVersion: placementv1alpha1.GroupVersion.String(),
+		Kind:       placementv1alpha1.AppliedWorkKind,
+		Name:       "applied-work-v1",
+		UID:        "uid-applied-work-v1",
+	}
+	newerAPIWorkOwnerRef := metav1.OwnerReference{
+		APIVersion: placementv1alpha1.GroupVersion.String(),
+		Kind:       "Work",
+		Name:       "work-v1",
+		UID:        "uid-work-v1",
+	}
+
+	nsWithOwners := func(ownerRefs ...metav1.OwnerReference) *unstructured.Unstructured {
+		obj := nsUnstructured.DeepCopy()
+		obj.SetOwnerReferences(ownerRefs)
+		return obj
+	}
+
+	testCases := []struct {
+		name               string
+		inMemberClusterObj *unstructured.Unstructured
+		want               bool
+	}{
+		{
+			name: "no object",
+		},
+		{
+			name:               "no owners",
+			inMemberClusterObj: nsWithOwners(),
+		},
+		{
+			name:               "owned by a non-KubeFleet owner",
+			inMemberClusterObj: nsWithOwners(dummyOwnerRef),
+		},
+		{
+			name:               "owned by an AppliedWork object from the older KubeFleet APIs",
+			inMemberClusterObj: nsWithOwners(*appliedWorkOwnerRef),
+		},
+		{
+			name:               "owned by a non-AppliedWork object from the newer KubeFleet APIs",
+			inMemberClusterObj: nsWithOwners(newerAPIWorkOwnerRef),
+		},
+		{
+			name:               "owned by an AppliedWork object from the newer KubeFleet APIs",
+			inMemberClusterObj: nsWithOwners(newerAPIAppliedWorkOwnerRef),
+			want:               true,
+		},
+		{
+			name:               "co-owned by AppliedWork objects from both the older and the newer KubeFleet APIs",
+			inMemberClusterObj: nsWithOwners(*appliedWorkOwnerRef, dummyOwnerRef, newerAPIAppliedWorkOwnerRef),
+			want:               true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isOwnedByNewerKubeFleetAPIObjects(tc.inMemberClusterObj); got != tc.want {
+				t.Errorf("isOwnedByNewerKubeFleetAPIObjects() = %t, want %t", got, tc.want)
+			}
+		})
+	}
 }
 
 // Note (chenyu1): The fake client Fleet uses for unit tests has trouble processing certain

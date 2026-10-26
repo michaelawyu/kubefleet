@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 
+	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
 	fleetv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 	"github.com/kubefleet-dev/kubefleet/pkg/utils/controller"
 )
@@ -39,6 +40,26 @@ const (
 	k8sReservedLabelAnnotationAbbrDomain = "k8s.io/"
 	fleetReservedLabelAnnotationDomain   = "kubernetes-fleet.io/"
 )
+
+// isOwnedByNewerKubeFleetAPIObjects checks if the object in the member cluster is owned by newer KubeFleet API
+// objects, specifically the AppliedWork objects in the `placement.kubefleet.dev` API group.
+//
+// This is added as a safeguard to avoid scenarios where a manifest is applied via both the older ResourcePlacement
+// APIs and the newer PlacementPolicy APIs. And the safeguard always runs regardless of the apply strategy in use.
+func isOwnedByNewerKubeFleetAPIObjects(inMemberClusterObj *unstructured.Unstructured) bool {
+	if inMemberClusterObj == nil {
+		return false
+	}
+
+	curOwners := inMemberClusterObj.GetOwnerReferences()
+	for idx := range curOwners {
+		owner := &curOwners[idx]
+		if owner.APIVersion == placementv1alpha1.GroupVersion.String() && owner.Kind == placementv1alpha1.AppliedWorkKind {
+			return true
+		}
+	}
+	return false
+}
 
 // takeOverPreExistingObject takes over a pre-existing object in the member cluster.
 func (r *Reconciler) takeOverPreExistingObject(
