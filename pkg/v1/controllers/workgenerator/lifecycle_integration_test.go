@@ -791,9 +791,9 @@ var _ = Describe("missing reserved namespaces", func() {
 		})
 
 		// The work generator does not watch namespaces; it picks up the new namespace when it retries the failed
-		// reconciliation, which is subject to exponential backoff.
+		// reconciliation, whose backoff is capped at a second in this suite (see requeueMaxDelay).
 		It("should generate the work objects", func() {
-			Eventually(f.worksMatchActual(0, nil), eventuallyDurationForBackoffRetries, eventuallyInterval).Should(Succeed(), "Failed to generate the work objects")
+			Eventually(f.worksMatchActual(0, nil), eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to generate the work objects")
 		})
 
 		It("should refresh the placement binding status", func() {

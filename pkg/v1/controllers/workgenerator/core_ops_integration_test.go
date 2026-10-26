@@ -1642,9 +1642,9 @@ var _ = Describe("reconciling placement bindings (multiple placement resource sn
 			}
 
 			// The work generator does not watch placement resource snapshots; it picks up the newly added secondary
-			// snapshots only when it retries the failed reconciliation, which is subject to exponential backoff.
+			// snapshots only when it retries the failed reconciliation, whose backoff is capped at a second in this suite (see requeueMaxDelay).
 			worksUpdatedActual := worksGeneratedActual(memberCluster1Name, appNamespaceName, bindingName, wantWorks)
-			Eventually(worksUpdatedActual, eventuallyDurationForBackoffRetries, eventuallyInterval).Should(Succeed(), "Failed to update and create the work objects")
+			Eventually(worksUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update and create the work objects")
 		})
 
 		It("should update the primary work object in place (not re-create it)", func() {
@@ -3764,9 +3764,9 @@ var _ = Describe("reconciling cluster placement bindings (multiple placement res
 			}
 
 			// The work generator does not watch placement resource snapshots; it picks up the newly added secondary
-			// snapshots only when it retries the failed reconciliation, which is subject to exponential backoff.
+			// snapshots only when it retries the failed reconciliation, whose backoff is capped at a second in this suite (see requeueMaxDelay).
 			worksUpdatedActual := worksGeneratedActual(memberCluster1Name, clusterScopedNS, bindingName, wantWorks)
-			Eventually(worksUpdatedActual, eventuallyDurationForBackoffRetries, eventuallyInterval).Should(Succeed(), "Failed to update and create the work objects")
+			Eventually(worksUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update and create the work objects")
 		})
 
 		It("should update the primary work object in place (not re-create it)", func() {

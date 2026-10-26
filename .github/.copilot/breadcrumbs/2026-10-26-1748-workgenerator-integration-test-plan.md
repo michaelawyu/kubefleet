@@ -18,9 +18,10 @@ including the uncommitted changes in [controller.go](../../../pkg/v1/controllers
 Cross-reference the existing tests, and identify the scenarios to add, update, and remove. The old work generator ITs
 (`pkg/controllers/workgenerator`) are used as a reference only (see [Old tests → new plan](#old-tests--new-plan)).
 
-**Status**: In progress. All [Decisions](#decisions) are resolved (October 26, 2026). Implemented: X5 and X6 (fixing
-the six existing specs that the code changes broke; see [Baseline](#baseline)), and the S, L, and R sections. Pending:
-the rate limiter option (Decision 8) and the CI wiring (Decision 5).
+**Status**: Implemented (October 26, 2026), apart from the deferred unit tests U1 and U6. All [Decisions](#decisions)
+are resolved. Done: X5 and X6 (fixing the six existing specs that the code changes broke; see [Baseline](#baseline)),
+the S, L, and R sections, unit tests U2–U5 and U7, the rate limiter option (Decision 8), and the CI wiring
+(Decision 5).
 
 ## Requirements
 
@@ -194,30 +195,30 @@ the 50-entry cap, and the failed-resource **order** (the status helpers sort bef
 
 ## Suite changes
 
-1. **CI wiring** (Decision 5, accepted). Today the package runs under `go test` in `make local-unit-test` (no `-p`),
-   and the ~30 new contexts make a serial run noticeably slower. Follow the `stagedupdaterun` / v1 work applier
-   pattern:
+1. **CI wiring** (Decision 5, implemented October 26, 2026). Previously the package ran under `go test` in
+   `make local-unit-test` (no `-p`), and the ~30 new contexts make a serial run noticeably slower. It follows the
+   `stagedupdaterun` / v1 work applier pattern:
    - a `TestMain` in [suite_test.go](../../../pkg/v1/controllers/workgenerator/suite_test.go) that exits early when
-     `KUBEFLEET_CI_TEST_RUNNER_NAME=default` (the `make local-unit-test` step), and runs the suite otherwise;
+     `KUBEFLEET_CI_TEST_RUNNER_NAME=default` (the `make test` step), and runs the suite otherwise;
    - a dedicated step in `.github/workflows/ci.yml`, after the v1 work applier step:
      `ginkgo -v -p --procs=4 --race --cover -coverprofile=work-generator-v1-it-coverage.out
-     ./pkg/v1/controllers/workgenerator/`, with `KUBEFLEET_CI_TEST_RUNNER_NAME: 'ginkgo'`.
+     ./pkg/v1/controllers/workgenerator/`, with `KUBEFLEET_CI_TEST_RUNNER_NAME: 'ginkgo'` (the Codecov step picks up
+     the profile, as it searches for all coverage files).
 
-   The unit tests in the package (`works_test.go`, `uniquename_test.go`) then run in the Ginkgo step as well, as
-   `TestMain` gates the whole test binary.
-2. **Rate limiter option** (Decision 8, accepted; a small production change).
+   The unit tests in the package then run in the Ginkgo step as well, as `TestMain` gates the whole test binary.
+2. **Rate limiter option** (Decision 8, implemented October 26, 2026; a small production change).
    - Product: `New` in [controller.go](../../../pkg/v1/controllers/workgenerator/controller.go) takes an extra
      `workqueue.TypedRateLimiter[reconcile.Request]` argument, stored on the `Reconciler` and passed to
      `controller.Options.RateLimiter` in `SetupWithManager`. Nil keeps controller-runtime's default (with the default
      priority queue, an exponential 5ms → 1000s limiter), following the v1 work applier's constructor, which also takes
      optional limiters with nil meaning the default. The only production caller,
-     [setup.go](../../../cmd/hubagent/workload/setup.go), passes nil, so production behavior does not change.
+     [setup.go](../../../cmd/hubagent/workload/setup.go), passes nil, so production behavior does not change; the unit
+     tests pass nil too.
    - Suite: [suite_test.go](../../../pkg/v1/controllers/workgenerator/suite_test.go) passes
-     `workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](5*time.Millisecond, time.Second)`, with a
-     comment explaining why (no snapshot watch; recovery depends on retries).
-   - Existing tests: the two `handle inconsistent resource snapshots` contexts switch from
-     `eventuallyDurationForBackoffRetries` to `eventuallyDuration` (as part of X5), and the constant is deleted (its
-     comment moves to the suite's limiter).
+     `workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](requeueBaseDelay, requeueMaxDelay)` (5ms,
+     1s), with a comment explaining why (no snapshot or namespace watch; recovery depends on retries).
+   - Existing tests: every `eventuallyDurationForBackoffRetries` (the two `handle inconsistent resource snapshots`
+     contexts, the S section, and L4) is now `eventuallyDuration`, and the constant is deleted.
 
 ## Shared test utilities ([utils_integration_test.go](../../../pkg/v1/controllers/workgenerator/utils_integration_test.go))
 
@@ -289,7 +290,7 @@ Missing secondaries ("fewer than count") and a hash mismatch after an invalid ma
 | L1 | P1 | one policy on two clusters | Two bindings of the same policy (member-1, member-2) on the same set (2 snapshots); mark works on member-1 only; roll out set 1 to binding 1 only; delete binding 1 | Same work names in both reserved namespaces; only binding 1 synced after marking; binding 2's works and status untouched by binding 1's rollout and deletion |
 | L2 | P1 | long and dotted names | Policy and binding names over 61 characters with dots; 2 snapshots; baseline; rollout; delete | Work names truncated/dot-free as `uniqueNameForWorkDerivedFromPlacementResourceSnapshot` computes; owner labels hashed; the in-sync path works (listing through the field index, event mapping through the annotation); rollout in place; primary work removed on delete |
 | L3 | P2 | binding re-created while old secondary works linger | Baseline on set 0 (3 snapshots); delete the binding (secondaries linger, no GC); re-create it (same name) on set 1 (2 snapshots) | Sub-index 1 work updated in place (same UID) with the new primary as controller owner; sub-index 2 work deleted as dangling; linked count 2; synced after marking |
-| L4 | P2 | reserved namespace of the target cluster missing | Binding to `member-<rand>` with no reserved namespace; then create `fleet-member-<rand>` (one scope is enough) | Finalizer added; no works and no status (`Consistently`); after the namespace appears: works generated (on `eventuallyDurationForBackoffRetries` until Decision 8 lands, as the work generator does not watch namespaces), `WaitingForSync` → mark → synced |
+| L4 | P2 | reserved namespace of the target cluster missing | Binding to `member-<rand>` with no reserved namespace; then create `fleet-member-<rand>` (one scope is enough) | Finalizer added; no works and no status (`Consistently`); after the namespace appears: works generated (within `eventuallyDuration`, thanks to the suite's capped rate limiter, as the work generator does not watch namespaces), `WaitingForSync` → mark → synced |
 | L5 | — | ~~empty `resourceSnapshotName` / `clusterName`~~ | Dropped (October 26, 2026): the CRD now rejects empty values (Decision 7) | — |
 
 ### R. `status_integration_test.go`: status refresh gaps
@@ -297,7 +298,7 @@ Missing secondaries ("fewer than count") and a hash mismatch after an invalid ma
 | ID | P | Context | Setup → steps | Assert |
 | --- | --- | --- | --- | --- |
 | R1 | P2 | applied, availability not yet reported | Baseline up to `WaitingForSync`; mark works `Applied` only; then mark them available | Status stays `WaitingForSync` (`Consistently`); synced after the availability update |
-| R2 | P2 | no-op refresh skips the write | Synced binding; update a work's status without changing the outcome (e.g., a manifest condition message) | Binding resource version unchanged (`Consistently`). Note: this pins the observable behavior only; the API server also treats an identical status update as a no-op (no resource version bump), so the test cannot tell the client-side skip apart (verified by a mutation run, October 26, 2026). U4 would cover the skip itself |
+| R2 | P2 | no-op refresh skips the write | Synced binding; update a work's status without changing the outcome (e.g., a manifest condition message) | Binding resource version unchanged (`Consistently`). Note: this pins the observable behavior only; the API server also treats an identical status update as a no-op (no resource version bump), so the test cannot tell the client-side skip apart (verified by a mutation run, October 26, 2026). U4 covers the skip itself (its "status unchanged" case fails when the skip is removed) |
 | R3 | P2 | work metadata tampered | Synced binding; change the primary work's linked-snapshot annotation; later touch the work's status | Not reconciled while only metadata changes (`Consistently`; B7); after the status touch: re-linked in place, status goes `WaitingForSync` then synced (1s requeue), no spec change |
 | R4 | P2 | more than 50 failed resources | One snapshot with 51 ConfigMaps (one scope); mark all failed to apply | `FailedResources` has 50 entries in the documented order (compare **without** `SortSlices`); counters 51/0/0. Could be U4 instead |
 
@@ -305,7 +306,7 @@ Missing secondaries ("fewer than count") and a hash mismatch after an invalid ma
 
 | ID | Existing | Proposal | Reason |
 | --- | --- | --- | --- |
-| X5 | core `handle inconsistent resource snapshots`, both scopes | **Rewrite (P0; done October 26, 2026)** | Index 1 without its secondary: now `InvalidSnapshots` with the "fewer … deleted" message, `IncompleteSetOfResources`, counters 3/3/3 from index 0's works, works unchanged. Index 1's secondary with a mismatched hash: `Unexpected`, not surfaced, so the status stays exactly as in the previous step (the "fewer" message remains though the cause changed; B2). Index 2 without its secondaries: `InvalidSnapshots` again, at the newer generation. Recovery once the secondaries appear: unchanged; still on `eventuallyDurationForBackoffRetries` until Decision 8 lands (measured ~15s per scope) |
+| X5 | core `handle inconsistent resource snapshots`, both scopes | **Rewrite (P0; done October 26, 2026)** | Index 1 without its secondary: now `InvalidSnapshots` with the "fewer … deleted" message, `IncompleteSetOfResources`, counters 3/3/3 from index 0's works, works unchanged. Index 1's secondary with a mismatched hash: `Unexpected`, not surfaced, so the status stays exactly as in the previous step (the "fewer" message remains though the cause changed; B2). Index 2 without its secondaries: `InvalidSnapshots` again, at the newer generation. Recovery once the secondaries appear: unchanged; now within `eventuallyDuration` (Decision 8; it took ~15s per scope on the 1-minute budget before) |
 | X6 | lifecycle `changing sync strategies`, 1 and 2 snapshots × both scopes | **Update (P0; done October 26, 2026)** | After setting (and after unsetting) the strategy: works patched in place (already asserted); the binding status stays as recorded before the change, with conditions at the previous generation (`Consistently`), instead of `WaitingForSync`; after marking the works: synced at the new generation |
 | X1 | core `generate works` (single snapshot), both scopes | Keep (Decision 3) | Overlaps `registerBaselineSpecs` in the single-snapshot lifecycle contexts, but kept |
 | X2 | core cluster-scoped `Describe`s (10 contexts, ~2,100 lines) | Keep as is (Decision 4) | They mirror the namespace-scoped ones; folding them into the `scopes` loop is not planned |
@@ -314,25 +315,42 @@ Missing secondaries ("fewer than count") and a hash mismatch after an invalid ma
 
 Apart from X5 and X6, no existing test is obsolete.
 
-### Better as unit tests (out of scope; Decision 6)
+### Unit tests (Decision 6)
 
-- **U1 `retrievePrimaryAndSecondaryPlacementResourceSnapshots`** with a fake client and the field index: count label
-  invalid / < 1, missing owned-by annotation or index label, malformed sub-index label (sort errors), fewer than count,
-  duplicates (last counted, right after the counted ones, further down (ignored), primary), gap, hash mismatch, extras
-  trimmed, ordering. Needs the `fieldindexers` extractors exported (or a test-only index setup).
-- **U2 `markPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots`** with a fake client and a write-counting
-  interceptor: `Available` set only when the last processed snapshot differs (or is unset); counters only from the
-  works linked to the last processed snapshot; the 50-entry cap; the whole-status no-op skip.
-- **U3 `countResourcesInWorksByProcessingResults`, `failedResourceFromManifestStatus`,
-  `refreshPlacementBindingSyncCond`, `refreshPlacementBindingAvailableCond`**: pure functions; manifests without
-  `Applied`, applied without `Available`, the sort order, missing/stale work conditions.
-- **U4 `refreshPlacementBindingStatus`**: the 50-entry cap and the no-op write skip (fake client).
-- **U5 `buildWorkObjectFor` / `updateWorkObjectMetadataAndSpec`**: labels, annotations, manifests, sync strategy;
-  missing sub-index label.
-- **U6 work event handler**: nil objects, failed casts, missing label/annotation, status-only update filter. Needs the
-  handler funcs pulled out of `SetupWithManager`.
-- **U7 `refreshSyncStrategyOnlyForWorks`** (fake client): only the works whose strategy differs are patched; only
-  `spec.syncStrategy` changes; an optimistic-lock conflict (stale cached copy) is returned as an error.
+U2–U5 and U7 are implemented (October 26, 2026); U1 and U6 are deferred. The unit tests use the controller-runtime
+fake client, with interceptors that count status updates and patches (and inject errors), and share builders in
+`status_test.go` (`newCondition`, `newManifestStatus`, `newWorkWithStatus`, `workConds`, `newFailedResource`,
+`newBindingWithStatus`, `newUnitTestHubClient`, `countStatusUpdates`, `failedToApplyWorkWithManyManifests`). They also
+reuse a few pure helpers from `utils_integration_test.go` (the manifest identifier builders, `objectRefFromManifestIdentifier`,
+`paddedConfigMapNameTemplate`), as both are compiled into the same test binary.
+
+- **U1 `retrievePrimaryAndSecondaryPlacementResourceSnapshots`** (deferred): with a fake client and the field index:
+  count label invalid / < 1, missing owned-by annotation or index label, malformed sub-index label (sort errors), fewer
+  than count, duplicates (last counted, right after the counted ones, further down (ignored), primary), gap, hash
+  mismatch, extras trimmed, ordering. Needs the `fieldindexers` extractors exported (or a test-only index setup).
+- **U2 `TestMarkPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots`** (`status_test.go`, 7 cases, done): a
+  rollout to an invalid snapshot (`Available=IncompleteSetOfResources`, counters only from the works linked to the last
+  processed snapshot); nothing processed yet (0/0/0, works ignored); the processed snapshot itself invalid (`Available`
+  left as is); the 50-entry cap; already marked with the same details (no write) or different details (write); a
+  failed update (API server error).
+- **U3** (`status_test.go`, done): `TestCountResourcesInWorksByProcessingResults` (5 cases: no works, unprocessed
+  manifests, applied with and without availability results, failures incl. `DiffDetails` and an ignored `Available`
+  condition on a not-applied manifest, the sort order across works by group/version/kind/namespace/name),
+  `TestFailedResourceFromManifestStatus` (2), `TestRefreshPlacementBindingSyncCond` (4), and
+  `TestRefreshPlacementBindingAvailableCond` (4) (missing or stale work conditions → not ready, conditions untouched).
+- **U4 `TestRefreshPlacementBindingStatus`** (`status_test.go`, 8 cases, done): not ready (no `Applied`, stale
+  `Applied`, no `Available`) → no write; all synchronized; some failed (sorted, with counters); **status unchanged → no
+  write** (the client-side skip that R2 cannot tell apart); the 50-entry cap; a failed update.
+- **U5** (`works_test.go`, done): `TestBuildWorkObjectFor` (3 cases: a primary snapshot with a namespace-scoped binding
+  and a sync strategy (copied, not shared); a secondary snapshot with a cluster-scoped binding with long dotted names
+  (hashed labels, full names in the annotations); a missing sub-index label → `Unexpected` error) and
+  `TestUpdateWorkObjectMetadataAndSpec` (2 cases: a bare work object; an existing one, whose owned labels/annotations,
+  manifests, and sync strategy are overwritten while other labels/annotations are kept).
+- **U6 work event handler** (deferred): nil objects, failed casts, missing label/annotation, status-only update
+  filter. Needs the handler funcs pulled out of `SetupWithManager`.
+- **U7 `TestRefreshSyncStrategyOnlyForWorks`** (`works_test.go`, 4 cases, done): only the works whose strategy differs
+  are patched (set and unset), and only `spec.syncStrategy` changes; nothing patched when all are in sync; a stale
+  cached copy → conflict error (API server category), thanks to the optimistic lock.
 - Unreachable today: the empty-name sanity check in `Reconcile` (the CRD rejects empty names), the
   duplicate-work-name check in `refreshWorks` (duplicate sub-indices are rejected first), the `Atoi` error inside the
   sub-index loop (the sort has already parsed every label), and non-not-found binding `Get` errors.
@@ -395,7 +413,8 @@ Apart from X5 and X6, no existing test is obsolete.
 4. **Skipped (October 26, 2026).** X2 is not folded into the `scopes` loop.
 5. **Accepted (October 26, 2026).** Add a `TestMain` gate and a dedicated `ginkgo -p` CI step for the package (see
    [Suite changes](#suite-changes)).
-6. **Deferred (October 26, 2026).** Unit tests U1–U7 are left alone for now.
+6. **Partially implemented (October 26, 2026).** Unit tests U2–U5 and U7 are added; U1 and U6 (which need small
+   production refactors first) are left alone for now.
 7. **Resolved (October 26, 2026)** by code changes:
    - B8, empty spec fields: `+kubebuilder:validation:MinLength=1` on `placementPolicyName`, `clusterName`, and
      `resourceSnapshotName` in
@@ -449,14 +468,21 @@ capped limiter.
   `fewerSnapshotsErrMsg`; new `bindingFixture` methods `recordStatus` / `statusUnchangedActual` (the fixture still
   lives in `lifecycle_integration_test.go` until Decision 2 moves it). Verified: `ginkgo -p --race` passes 464/464
   (105.4s spec time, 1m56s wall; +12 specs); the X5 recovery takes ~15s per scope, within the 1-minute budget.
-- [ ] CI wiring (Decision 5).
-- [ ] Rate limiter option + suite limiter; existing contexts off the 1-minute budget (Decision 8).
+- [x] **CI wiring** (Decision 5) (October 26, 2026): `TestMain` gate in `suite_test.go` (verified: with
+  `KUBEFLEET_CI_TEST_RUNNER_NAME=default`, `go test` exits right away without running the suite) and the step `Run
+  work generator (v1) unit and integration tests with Ginkgo CLI & generate coverage` in `.github/workflows/ci.yml`,
+  after the v1 work applier step.
+- [x] **Rate limiter option** (Decision 8) (October 26, 2026): `New(hubClient, workerCnt, rateLimiter)`; the hub agent
+  and the unit tests pass nil; the suite passes a 5ms → 1s exponential limiter; all `eventuallyDurationForBackoffRetries`
+  uses are now `eventuallyDuration`, and the constant is gone. Verified: `go vet` on the package and on
+  `cmd/hubagent/workload`; `ginkgo -p --race` passes 930/930 (163.8s spec time, 2m58s wall); `golangci-lint` reports
+  no new issues.
 - [x] Shared utilities for X5/X6 and the S section, including the fixture move (Decision 2) (October 26, 2026); the L/R
   helpers are pending (see [Shared test utilities](#shared-test-utilities-utils_integration_testgo)).
 - [x] **S section, all rows** (October 26, 2026): `invalid_snapshots_integration_test.go`, `Describe("handling invalid
   placement resource snapshots")`, 11 contexts per scope (S1; S2 with the same and a different stray hash; S3–S9,
-  S7b), 304 specs. Steps that depend on a retry after a snapshot change (not a binding or work event) use
-  `eventuallyDurationForBackoffRetries` until Decision 8 lands.
+  S7b), 304 specs. Steps that depend on a retry after a snapshot change (not a binding or work event) used
+  `eventuallyDurationForBackoffRetries` at first; they are on `eventuallyDuration` since Decision 8 landed.
   - Verified: the S contexts pass on their own and in the full run, 768/768 with `ginkgo -p --race` (133.5s spec time,
     2m26s wall).
   - Two temporary product mutations were caught: limiting the sub-index check to the counted snapshots fails S2 (both
@@ -482,3 +508,11 @@ capped limiter.
   fails R4; listing works by the raw binding name (instead of the hashed label value) fails L2 (both scopes); removing
   the client-side no-op skip does **not** fail R2 (see the R2 row). `go vet` and `gofmt` are clean; `golangci-lint`
   reports no new issues (two `goconst` findings from the new helpers were fixed with constants).
+- [x] **Unit tests U2–U5 and U7** (October 26, 2026; see [Unit tests](#unit-tests-decision-6)): 9 test functions, 39
+  table cases, in the new `status_test.go` and in `works_test.go`. Verified: all pass with `go test -race`, and the
+  package runs 930/930 with `ginkgo -p --race` (167.3s spec time, 2m57s wall). Temporary product mutations, each caught
+  by the intended case: removing the client-side no-op skip in `refreshPlacementBindingStatus` (U4 "status
+  unchanged"); always setting `IncompleteSetOfResources` (U2 "the processed snapshot has become invalid"); patching
+  every work regardless of its strategy (U7, 3 cases); dropping the optimistic lock from the patch (U7 conflict case).
+  `golangci-lint` reports no new issues (four `goconst` findings on repeated literals in the new tests were fixed with
+  local constants).

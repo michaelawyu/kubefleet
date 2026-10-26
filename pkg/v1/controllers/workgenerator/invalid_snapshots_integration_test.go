@@ -28,8 +28,7 @@ import (
 )
 
 // The work generator does not watch placement resource snapshots; it picks up snapshot changes only when it retries
-// a failed reconciliation, which is subject to exponential backoff. Checks that depend on such retries (as opposed to
-// binding or work object events) use eventuallyDurationForBackoffRetries.
+// a failed reconciliation, whose backoff is capped at a second in this suite (see requeueMaxDelay).
 var _ = Describe("handling invalid placement resource snapshots", func() {
 	serverSideApplyStrategy := &placementv1alpha1.SyncStrategy{
 		ApplyMethod: placementv1alpha1.ApplyMethodServerSideApply,
@@ -106,7 +105,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 			})
 
 			It("should update the work object in place", func() {
-				Eventually(f.worksMatchActual(1, nil), eventuallyDurationForBackoffRetries, eventuallyInterval).Should(Succeed(), "Failed to update the work object")
+				Eventually(f.worksMatchActual(1, nil), eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update the work object")
 				f.expectWorksNotRecreated()
 			})
 
@@ -173,7 +172,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 					set0 := f.sets[0]
 					wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName())
 					Eventually(f.invalidSnapshotsStatusActual(wantStatus, duplicateSubIdxErrMsg),
-						eventuallyDurationForBackoffRetries, eventuallyInterval).Should(Succeed(), "Failed to report the duplicate sub-indices")
+						eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to report the duplicate sub-indices")
 					f.recordStatus()
 				})
 
@@ -191,7 +190,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 				})
 
 				It("should update the work objects in place", func() {
-					Eventually(f.worksMatchActual(1, nil), eventuallyDurationForBackoffRetries, eventuallyInterval).Should(Succeed(), "Failed to update the work objects")
+					Eventually(f.worksMatchActual(1, nil), eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update the work objects")
 					f.expectWorksNotRecreated()
 				})
 
@@ -297,7 +296,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 			})
 
 			It("should update the work objects", func() {
-				Eventually(f.worksMatchActual(1, nil), eventuallyDurationForBackoffRetries, eventuallyInterval).Should(Succeed(), "Failed to update the work objects")
+				Eventually(f.worksMatchActual(1, nil), eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update the work objects")
 			})
 
 			It("should refresh the placement binding status", func() {
@@ -355,7 +354,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 			})
 
 			It("should update and create the work objects (and not create any for the extra snapshot)", func() {
-				Eventually(f.worksMatchActual(1, nil), eventuallyDurationForBackoffRetries, eventuallyInterval).Should(Succeed(), "Failed to update and create the work objects")
+				Eventually(f.worksMatchActual(1, nil), eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update and create the work objects")
 			})
 
 			It("should refresh the placement binding status", func() {
@@ -405,7 +404,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 			})
 
 			It("should generate the work objects", func() {
-				Eventually(f.worksMatchActual(0, nil), eventuallyDurationForBackoffRetries, eventuallyInterval).Should(Succeed(), "Failed to generate the work objects")
+				Eventually(f.worksMatchActual(0, nil), eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to generate the work objects")
 			})
 
 			It("should refresh the placement binding status", func() {
@@ -511,7 +510,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 			})
 
 			It("should update the work object in place, with the new snapshot and the sync strategy", func() {
-				Eventually(f.worksMatchBindingStrategyActual(1), eventuallyDurationForBackoffRetries, eventuallyInterval).Should(Succeed(), "Failed to update the work object")
+				Eventually(f.worksMatchBindingStrategyActual(1), eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to update the work object")
 				f.expectWorksNotRecreated()
 			})
 
@@ -602,7 +601,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 			})
 
 			It("should re-create the secondary work object", func() {
-				Eventually(f.worksMatchActual(0, nil), eventuallyDurationForBackoffRetries, eventuallyInterval).Should(Succeed(), "Failed to re-create the secondary work object")
+				Eventually(f.worksMatchActual(0, nil), eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to re-create the secondary work object")
 			})
 
 			It("should refresh the placement binding status", func() {

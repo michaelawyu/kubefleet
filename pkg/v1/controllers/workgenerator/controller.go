@@ -51,14 +51,20 @@ type Reconciler struct {
 	hubClient client.Client
 
 	parallelizer parallelizerutil.Parallelizer
+
+	// rateLimiter is the rate limiter for requeues of failed reconciliations; nil means the controller-runtime default.
+	rateLimiter workqueue.TypedRateLimiter[reconcile.Request]
 }
 
-func New(hubClient client.Client, workerCnt int) *Reconciler {
+// New returns a new work generator reconciler. If rateLimiter is nil, the default rate limiter of controller-runtime
+// is used for requeues of failed reconciliations.
+func New(hubClient client.Client, workerCnt int, rateLimiter workqueue.TypedRateLimiter[reconcile.Request]) *Reconciler {
 	parallelizer := parallelizerutil.NewParallelizer(workerCnt)
 
 	return &Reconciler{
 		hubClient:    hubClient,
 		parallelizer: parallelizer,
+		rateLimiter:  rateLimiter,
 	}
 }
 
@@ -305,7 +311,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconciles 
 
 	return ctrl.NewControllerManagedBy(mgr).
 		Named(controllerName).
-		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles, RateLimiter: r.rateLimiter}).
 		// The controller watches placement binding objects (both namespace-scoped and cluster-scoped) for spec
 		// changes (generation predicate).
 		Watches(&placementv1alpha1.PlacementBinding{}, &handler.EnqueueRequestForObject{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).

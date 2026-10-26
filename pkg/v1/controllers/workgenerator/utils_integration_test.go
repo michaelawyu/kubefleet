@@ -113,11 +113,6 @@ const (
 	eventuallyInterval   = time.Second * 1
 	consistentlyDuration = time.Second * 5
 	consistentlyInterval = time.Millisecond * 500
-
-	// The work generator does not watch placement resource snapshots; when it fails to process a placement binding
-	// due to inconsistent snapshots, it only picks up later snapshot changes when it retries the reconciliation,
-	// which is subject to exponential backoff. Checks that depend on such retries use a longer timeout.
-	eventuallyDurationForBackoffRetries = time.Minute
 )
 
 var (
