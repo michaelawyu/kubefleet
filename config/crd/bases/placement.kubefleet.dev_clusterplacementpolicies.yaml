@@ -536,15 +536,14 @@ spec:
                         If the Operator field is set to Exists, this field must be left empty.
                       type: string
                   type: object
+                  x-kubernetes-validations:
+                  - message: operator must be Exists when key is empty
+                    rule: (has(self.key) && self.key != '') || self.operator == 'Exists'
+                  - message: value must be empty when operator is Exists
+                    rule: self.operator != 'Exists' || !has(self.value) || self.value
+                      == ''
                 maxItems: 10
                 type: array
-                x-kubernetes-validations:
-                - message: operator must be Exists and value must be empty when key
-                    is empty
-                  rule: self.all(t, t.key != '' || (t.operator == 'Exists' && t.value
-                    == ''))
-                - message: value must be empty when operator is Exists
-                  rule: self.all(t, t.operator != 'Exists' || t.value == '')
             required:
             - resourceSelectors
             type: object
