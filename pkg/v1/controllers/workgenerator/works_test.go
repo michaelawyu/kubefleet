@@ -164,7 +164,7 @@ func TestAreWorksInSync(t *testing.T) {
 			works: []placementv1alpha1.Work{
 				newWork("work-0", primarySnapshotName, "1", nil),
 			},
-			wantStatus: workSyncStatusOutOfSync,
+			wantStatus: workSyncStatusResourcesOutOfSync,
 		},
 		{
 			name:    "last processed snapshot differs from the primary snapshot",
@@ -172,12 +172,12 @@ func TestAreWorksInSync(t *testing.T) {
 			works: []placementv1alpha1.Work{
 				newWork("work-0", primarySnapshotName, "1", nil),
 			},
-			wantStatus: workSyncStatusOutOfSync,
+			wantStatus: workSyncStatusResourcesOutOfSync,
 		},
 		{
 			name:       "no work objects",
 			binding:    newBinding(ptr.To(primarySnapshotName), nil),
-			wantStatus: workSyncStatusOutOfSync,
+			wantStatus: workSyncStatusResourcesOutOfSync,
 		},
 		{
 			name:    "a work object is linked to another snapshot",
@@ -186,7 +186,7 @@ func TestAreWorksInSync(t *testing.T) {
 				newWork("work-0", primarySnapshotName, "2", nil),
 				newWork("work-1", staleSnapshotName, "", nil),
 			},
-			wantStatus: workSyncStatusOutOfSync,
+			wantStatus: workSyncStatusResourcesOutOfSync,
 		},
 		{
 			name:    "a work object has no link annotation",
@@ -195,7 +195,7 @@ func TestAreWorksInSync(t *testing.T) {
 				newWork("work-0", primarySnapshotName, "2", nil),
 				{ObjectMeta: metav1.ObjectMeta{Name: "work-1"}},
 			},
-			wantStatus: workSyncStatusOutOfSync,
+			wantStatus: workSyncStatusResourcesOutOfSync,
 		},
 		{
 			name:    "the primary work object is missing (no linked work count)",
@@ -203,7 +203,7 @@ func TestAreWorksInSync(t *testing.T) {
 			works: []placementv1alpha1.Work{
 				newWork("work-1", primarySnapshotName, "", nil),
 			},
-			wantStatus: workSyncStatusOutOfSync,
+			wantStatus: workSyncStatusResourcesOutOfSync,
 		},
 		{
 			name:    "fewer work objects than the linked work count",
@@ -211,7 +211,7 @@ func TestAreWorksInSync(t *testing.T) {
 			works: []placementv1alpha1.Work{
 				newWork("work-0", primarySnapshotName, "2", nil),
 			},
-			wantStatus: workSyncStatusOutOfSync,
+			wantStatus: workSyncStatusResourcesOutOfSync,
 		},
 		{
 			name:    "more work objects than the linked work count",
@@ -220,7 +220,7 @@ func TestAreWorksInSync(t *testing.T) {
 				newWork("work-0", primarySnapshotName, "1", nil),
 				newWork("work-1", primarySnapshotName, "", nil),
 			},
-			wantStatus: workSyncStatusOutOfSync,
+			wantStatus: workSyncStatusResourcesOutOfSync,
 		},
 		{
 			name:    "sync strategy is set on the binding but not on the work objects",
@@ -228,7 +228,7 @@ func TestAreWorksInSync(t *testing.T) {
 			works: []placementv1alpha1.Work{
 				newWork("work-0", primarySnapshotName, "1", nil),
 			},
-			wantStatus: workSyncStatusOutOfSync,
+			wantStatus: workSyncStatusStrategyOutOfSync,
 		},
 		{
 			name:    "sync strategy is unset on the binding but set on a secondary work object",
@@ -237,7 +237,7 @@ func TestAreWorksInSync(t *testing.T) {
 				newWork("work-0", primarySnapshotName, "2", nil),
 				newWork("work-1", primarySnapshotName, "", serverSideApplyStrategy),
 			},
-			wantStatus: workSyncStatusOutOfSync,
+			wantStatus: workSyncStatusStrategyOutOfSync,
 		},
 		{
 			name:    "multiple work objects have the linked work count annotation",
