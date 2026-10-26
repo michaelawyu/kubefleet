@@ -24,6 +24,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	placementv1alpha1 "github.com/kubefleet-dev/kubefleet/apis/kubefleet.dev/placement/v1alpha1"
+	kfioplacementv1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1"
 	kfioplacementv1beta1 "github.com/kubefleet-dev/kubefleet/apis/placement/v1beta1"
 )
 
@@ -34,6 +35,14 @@ func TestIsOwnedByOlderKubeFleetAPIObjects(t *testing.T) {
 		Kind:               kfioplacementv1beta1.AppliedWorkKind,
 		Name:               "applied-work-old",
 		UID:                "uid-applied-work-old",
+		BlockOwnerDeletion: ptr.To(true),
+	}
+	// The older KubeFleet API group serves AppliedWork objects in both v1 and v1beta1.
+	olderAPIV1AppliedWorkRef := metav1.OwnerReference{
+		APIVersion:         kfioplacementv1.GroupVersion.String(),
+		Kind:               kfioplacementv1beta1.AppliedWorkKind,
+		Name:               "applied-work-old-v1",
+		UID:                "uid-applied-work-old-v1",
 		BlockOwnerDeletion: ptr.To(true),
 	}
 	olderAPIWorkRef := metav1.OwnerReference{
@@ -54,6 +63,14 @@ func TestIsOwnedByOlderKubeFleetAPIObjects(t *testing.T) {
 		Kind:       "AppliedWork",
 		Name:       "non-kubefleet-owner",
 		UID:        "uid-non-kubefleet-owner",
+	}
+	// An owner reference of the AppliedWork kind and of the same version as the older KubeFleet APIs, but
+	// in an API group that merely shares a prefix with the older KubeFleet API group.
+	lookalikeGroupRef := metav1.OwnerReference{
+		APIVersion: kfioplacementv1beta1.GroupVersion.Group + ".example.com/" + kfioplacementv1beta1.GroupVersion.Version,
+		Kind:       kfioplacementv1beta1.AppliedWorkKind,
+		Name:       "applied-work-lookalike",
+		UID:        "uid-applied-work-lookalike",
 	}
 
 	configMapWithOwners := func(ownerRefs ...metav1.OwnerReference) *unstructured.Unstructured {
@@ -91,8 +108,17 @@ func TestIsOwnedByOlderKubeFleetAPIObjects(t *testing.T) {
 			inMemberClusterObj: configMapWithOwners(olderAPIWorkRef),
 		},
 		{
+			name:               "owned by an AppliedWork object from an API group that shares a prefix with the older KubeFleet API group",
+			inMemberClusterObj: configMapWithOwners(lookalikeGroupRef),
+		},
+		{
 			name:               "owned by an AppliedWork object from the older KubeFleet APIs",
 			inMemberClusterObj: configMapWithOwners(olderAPIAppliedWorkRef),
+			want:               true,
+		},
+		{
+			name:               "owned by an AppliedWork object from the older KubeFleet APIs (v1)",
+			inMemberClusterObj: configMapWithOwners(olderAPIV1AppliedWorkRef),
 			want:               true,
 		},
 		{

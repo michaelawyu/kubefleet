@@ -5494,12 +5494,14 @@ var _ = Describe("drift detection and takeover", func() {
 		nsName := fmt.Sprintf(nsNameTemplate, utils.RandStr())
 
 		// The owner reference points to an AppliedWork object from the newer KubeFleet APIs, which does
-		// not exist; this is OK as there is no garbage collector in the test environment.
+		// not exist; this is OK as there is no garbage collector in the test environment. It is in the same
+		// form as the newer work applier sets it on the objects it places.
 		newerAPIAppliedWorkOwnerRef := metav1.OwnerReference{
-			APIVersion: placementv1alpha1.GroupVersion.String(),
-			Kind:       placementv1alpha1.AppliedWorkKind,
-			Name:       fmt.Sprintf(workNameTemplate, utils.RandStr()),
-			UID:        "uid-newer-api-applied-work",
+			APIVersion:         placementv1alpha1.GroupVersion.String(),
+			Kind:               placementv1alpha1.AppliedWorkKind,
+			Name:               fmt.Sprintf(workNameTemplate, utils.RandStr()),
+			UID:                "uid-newer-api-applied-work",
+			BlockOwnerDeletion: ptr.To(true),
 		}
 
 		var preExistingConfigMap *corev1.ConfigMap

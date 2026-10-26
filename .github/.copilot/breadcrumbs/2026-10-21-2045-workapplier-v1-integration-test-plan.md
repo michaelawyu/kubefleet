@@ -694,5 +694,18 @@ today).
     - a temporary mutation (`isOwnedByOlderKubeFleetAPIObjects` always returns false) fails T8 at its first status
       spec (the config map is taken over and applied, `Applied=True`), and fails the two `true` cases of the unit
       test.
+  - Follow-up (October 26, 2026), after review:
+    - The safeguards in both work appliers match owner references by API group and kind only, not by the full API
+      version, as owner references are not migrated when an API version changes (and the
+      `placement.kubernetes-fleet.io` group serves AppliedWork in both `v1` and `v1beta1`).
+    - `TestIsOwnedByOlderKubeFleetAPIObjects` gains 2 cases (9 in total): a `placement.kubernetes-fleet.io/v1`
+      AppliedWork (true), and an AppliedWork from a group that only shares a prefix with the older API group (false).
+      The older work applier's `TestIsOwnedByNewerKubeFleetAPIObjects` gains the matching pair.
+    - The older work applier's IT (`objects owned by the newer KubeFleet APIs`) now sets `BlockOwnerDeletion=true` on
+      its newer-API owner reference, as the newer work applier does.
+    - Verified: gofmt, `go vet` and `golangci-lint --fast-only` are clean (goimports is clean on the changed files).
+      The unit tests pass in both packages, and the new version cases fail against the previous exact-version
+      guards. With `go test -race` and `-ginkgo.focus`, T8 runs 12/12 and the older work applier's context runs
+      13/13. The full packages are not re-run.
 - [ ] P1 contexts.
 - [ ] P2 contexts.

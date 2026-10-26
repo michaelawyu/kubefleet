@@ -67,11 +67,26 @@ func TestIsOwnedByNewerKubeFleetAPIObjects(t *testing.T) {
 		Name:       "applied-work-v1",
 		UID:        "uid-applied-work-v1",
 	}
+	// An owner reference of a different (hypothetical) version in the newer KubeFleet API group.
+	newerAPIOtherVersionAppliedWorkOwnerRef := metav1.OwnerReference{
+		APIVersion: placementv1alpha1.GroupVersion.Group + "/v1beta1",
+		Kind:       placementv1alpha1.AppliedWorkKind,
+		Name:       "applied-work-v1-other-version",
+		UID:        "uid-applied-work-v1-other-version",
+	}
 	newerAPIWorkOwnerRef := metav1.OwnerReference{
 		APIVersion: placementv1alpha1.GroupVersion.String(),
 		Kind:       "Work",
 		Name:       "work-v1",
 		UID:        "uid-work-v1",
+	}
+	// An owner reference of the AppliedWork kind and of the same version as the newer KubeFleet APIs, but
+	// in an API group that merely shares a prefix with the newer KubeFleet API group.
+	lookalikeGroupAppliedWorkOwnerRef := metav1.OwnerReference{
+		APIVersion: placementv1alpha1.GroupVersion.Group + ".example.com/" + placementv1alpha1.GroupVersion.Version,
+		Kind:       placementv1alpha1.AppliedWorkKind,
+		Name:       "applied-work-lookalike",
+		UID:        "uid-applied-work-lookalike",
 	}
 
 	nsWithOwners := func(ownerRefs ...metav1.OwnerReference) *unstructured.Unstructured {
@@ -105,8 +120,17 @@ func TestIsOwnedByNewerKubeFleetAPIObjects(t *testing.T) {
 			inMemberClusterObj: nsWithOwners(newerAPIWorkOwnerRef),
 		},
 		{
+			name:               "owned by an AppliedWork object from an API group that shares a prefix with the newer KubeFleet API group",
+			inMemberClusterObj: nsWithOwners(lookalikeGroupAppliedWorkOwnerRef),
+		},
+		{
 			name:               "owned by an AppliedWork object from the newer KubeFleet APIs",
 			inMemberClusterObj: nsWithOwners(newerAPIAppliedWorkOwnerRef),
+			want:               true,
+		},
+		{
+			name:               "owned by an AppliedWork object from a different version of the newer KubeFleet APIs",
+			inMemberClusterObj: nsWithOwners(newerAPIOtherVersionAppliedWorkOwnerRef),
 			want:               true,
 		},
 		{
