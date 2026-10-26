@@ -1,7 +1,7 @@
 # Work Generator (v1) Integration Test Plan
 
-**Date**: October 26, 2026 17:48 AEDT (revised 19:33 AEDT for the latest code changes, and 21:41 AEDT for the
-`Available` condition fix)
+**Date**: October 26, 2026 17:48 AEDT (revised 19:33 AEDT for the latest code changes, 21:41 AEDT for the
+`Available` condition fix, and October 27, 02:58 AEDT for the `IncompleteSetOfResources` message)
 **Task**: Plan (not yet implement) the tests for `pkg/v1/controllers/workgenerator`, based on the current code base,
 including the uncommitted changes in [controller.go](../../../pkg/v1/controllers/workgenerator/controller.go),
 [retrieval.go](../../../pkg/v1/controllers/workgenerator/retrieval.go),
@@ -108,9 +108,10 @@ Reconcile flow:
    - `Synchronized=False/InvalidSnapshots` for the current generation, with the message `Failed to synchronize resources
      as the given placement resource snapshots are invalid: <err>`;
    - if the last processed snapshot is the spec snapshot (or nothing has been processed):
-     `Available=False/IncompleteSetOfResources` for the current generation ("The set of resources in the target cluster
-     might have become incomplete; cannot complete the availability check"); otherwise (a rollout to a different
-     snapshot) `Available` is left as is, which is safe as it can only carry an older generation (or be absent);
+     `Available=False/IncompleteSetOfResources` for the current generation, with the message `Cannot check the
+     availability of resources as the given placement resource snapshots are invalid; some resources might be missing
+     from the target cluster`; otherwise (a rollout to a different snapshot) `Available` is left as is, which is safe as
+     it can only carry an older generation (or be absent);
    - the counters and failed resources are recomputed from the works linked to the last processed snapshot (none →
      0/0/0 and no failed resources; failed resources capped at 50);
    - `LastProcessedResourceSnapshotName` is untouched; the write is skipped if the whole status is unchanged.
@@ -538,3 +539,10 @@ capped limiter.
   explicit generations, `registerBaselineSpecs` records the status); S1, S2, S4, S5, S7b, and S9 (rollout) keep the
   baseline `Available`; S8 expects `IncompleteSetOfResources` at the same generation; X5 keeps the pre-rollout
   `Available`. The verification figures and mutation results above predate this change.
+- [x] **`IncompleteSetOfResources` message reworded** (October 27, 2026, 02:58 AEDT). The `Available=False` message set
+  by `markPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots` now gives the cause and fits the nothing-processed
+  case too (the old "might have become incomplete" implied a previously complete set): `Cannot check the availability
+  of resources as the given placement resource snapshots are invalid; some resources might be missing from the target
+  cluster`. Test updates: U2's `incompleteSetOfResourcesCond` builder only; the ITs ignore condition messages
+  (`ignoreFieldConditionLTTMsg`), so no IT changes. Verified: U2 passes (8/8) with `go test -race -run
+  TestMarkPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots`.
