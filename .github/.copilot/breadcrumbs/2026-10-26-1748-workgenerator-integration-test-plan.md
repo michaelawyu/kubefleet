@@ -225,7 +225,9 @@ the 50-entry cap, and the failed-resource **order** (the status helpers sort bef
    - Existing tests: every `eventuallyDurationForBackoffRetries` (the two `handle inconsistent resource snapshots`
      contexts, the S section, and L4) is now `eventuallyDuration`, and the constant is deleted.
 
-## Shared test utilities ([utils_integration_test.go](../../../pkg/v1/controllers/workgenerator/utils_integration_test.go))
+## Shared test utilities
+
+The helpers live in [utils_integration_test.go](../../../pkg/v1/controllers/workgenerator/utils_integration_test.go).
 
 - **Done (October 26, 2026):** moved `scope`, `scopes`, `snapshotSet`, and `bindingFixture` here from
   `lifecycle_integration_test.go` (Requirement 6; Decision 2).
@@ -489,7 +491,7 @@ capped limiter.
   `cmd/hubagent/workload`; `ginkgo -p --race` passes 930/930 (163.8s spec time, 2m58s wall); `golangci-lint` reports
   no new issues.
 - [x] Shared utilities for X5/X6 and the S section, including the fixture move (Decision 2) (October 26, 2026); the L/R
-  helpers are pending (see [Shared test utilities](#shared-test-utilities-utils_integration_testgo)).
+  helpers are pending (see [Shared test utilities](#shared-test-utilities)).
 - [x] **S section, all rows** (October 26, 2026): `invalid_snapshots_integration_test.go`, `Describe("handling invalid
   placement resource snapshots")`, 11 contexts per scope (S1; S2 with the same and a different stray hash; S3–S9,
   S7b), 304 specs. Steps that depend on a retry after a snapshot change (not a binding or work event) used
