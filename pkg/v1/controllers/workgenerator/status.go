@@ -114,7 +114,7 @@ func (r *Reconciler) markPlacementBindingAsFailedToSynchronizeDueToInvalidSnapsh
 			Status:             metav1.ConditionFalse,
 			ObservedGeneration: placementBinding.GetGeneration(),
 			Reason:             placementv1alpha1.PlacementBindingAvailableCondReasonIncompleteSetOfResources,
-			Message:            "The set of resources in the target cluster might have become incomplete; cannot complete the availability check",
+			Message:            "Cannot check the availability of resources as the given placement resource snapshots are invalid; some resources might be missing from the target cluster",
 		})
 	}
 

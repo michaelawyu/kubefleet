@@ -704,7 +704,7 @@ func TestMarkPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots(t *testi
 	incompleteSetOfResourcesCond := func(generation int64) metav1.Condition {
 		return newCondition(placementv1alpha1.PlacementBindingCondTypeAvailable, metav1.ConditionFalse, generation,
 			placementv1alpha1.PlacementBindingAvailableCondReasonIncompleteSetOfResources,
-			"The set of resources in the target cluster might have become incomplete; cannot complete the availability check")
+			"Cannot check the availability of resources as the given placement resource snapshots are invalid; some resources might be missing from the target cluster")
 	}
 	// The status of a placement binding whose resources (from snapshot 0) have been synchronized and become available
 	// at generation 2.
