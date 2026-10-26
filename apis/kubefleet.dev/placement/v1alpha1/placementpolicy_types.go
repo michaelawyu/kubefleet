@@ -146,8 +146,6 @@ type PlacementPolicySpec struct {
 	//
 	// +kubebuilder:validation:Optional
 	// +kubebuilder:validation:MaxItems=10
-	// +kubebuilder:validation:XValidation:rule="self.all(t, t.key != '' || (t.operator == 'Exists' && t.value == ''))",message="operator must be Exists and value must be empty when key is empty"
-	// +kubebuilder:validation:XValidation:rule="self.all(t, t.operator != 'Exists' || t.value == '')",message="value must be empty when operator is Exists"
 	Tolerations []Toleration `json:"tolerations,omitempty"`
 }
 
@@ -506,6 +504,11 @@ const (
 	WhenNamespaceDoesNotExistOptionReportError     WhenNamespaceDoesNotExistOption = "ReportError"
 )
 
+// Key and Value are optional with no defaults, so the rules below must guard them with has(); reading
+// an absent field in CEL is an evaluation error, which the API server reports as a rejection.
+
+// +kubebuilder:validation:XValidation:rule="(has(self.key) && self.key != '') || self.operator == 'Exists'",message="operator must be Exists when key is empty"
+// +kubebuilder:validation:XValidation:rule="self.operator != 'Exists' || !has(self.value) || self.value == ''",message="value must be empty when operator is Exists"
 type Toleration struct {
 	// The key of the taint that the toleration applies to.
 	//
