@@ -60,7 +60,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 
 			It("should mark the placement binding as failed to synchronize due to invalid snapshots", func() {
 				set0 := f.sets[0]
-				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName())
+				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName(), f.status)
 				Eventually(f.invalidSnapshotsStatusActual(wantStatus, fmt.Sprintf(snapshotNotFoundErrMsgFmt, set1.primaryName())),
 					eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the placement binding as failed to synchronize")
 				f.recordStatus()
@@ -81,7 +81,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 
 			It("should recount the resources from the placed work objects", func() {
 				set0 := f.sets[0]
-				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName())
+				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName(), f.status)
 				wantStatus.AvailableResources = ptr.To(set0.resourceCount() - 1)
 				wantStatus.FailedResources = []placementv1alpha1.FailedResource{
 					{
@@ -156,7 +156,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 
 				It("should mark the placement binding as failed to synchronize as the snapshot is not found", func() {
 					set0 := f.sets[0]
-					wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName())
+					wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName(), f.status)
 					Eventually(f.invalidSnapshotsStatusActual(wantStatus, fmt.Sprintf(snapshotNotFoundErrMsgFmt, set1.primaryName())),
 						eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the placement binding as failed to synchronize")
 				})
@@ -170,7 +170,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 
 				It("should report the duplicate sub-indices", func() {
 					set0 := f.sets[0]
-					wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName())
+					wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName(), f.status)
 					Eventually(f.invalidSnapshotsStatusActual(wantStatus, duplicateSubIdxErrMsg),
 						eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to report the duplicate sub-indices")
 					f.recordStatus()
@@ -282,7 +282,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 
 			It("should report the duplicate sub-indices", func() {
 				set0 := f.sets[0]
-				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName())
+				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName(), f.status)
 				Eventually(f.invalidSnapshotsStatusActual(wantStatus, duplicateSubIdxErrMsg),
 					eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to report the duplicate sub-indices")
 			})
@@ -340,7 +340,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 
 			It("should report the inconsistent sub-indices", func() {
 				set0 := f.sets[0]
-				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName())
+				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName(), f.status)
 				Eventually(f.invalidSnapshotsStatusActual(wantStatus, inconsistentSubIdxErrMsg),
 					eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to report the inconsistent sub-indices")
 			})
@@ -389,7 +389,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 
 			It("should mark the placement binding as failed to synchronize due to invalid snapshots", func() {
 				// Nothing has been processed (or placed) yet.
-				wantStatus := wantPlacementBindingStatusInvalidSnapshots(0, "")
+				wantStatus := wantPlacementBindingStatusInvalidSnapshots(0, "", nil)
 				wantStatus.LastProcessedResourceSnapshotName = nil
 				Eventually(f.invalidSnapshotsStatusActual(wantStatus, fmt.Sprintf(snapshotNotFoundErrMsgFmt, set0.primaryName())),
 					eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the placement binding as failed to synchronize")
@@ -496,7 +496,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 
 			It("should mark the placement binding as failed to synchronize due to invalid snapshots", func() {
 				set0 := f.sets[0]
-				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName())
+				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName(), f.status)
 				Eventually(f.invalidSnapshotsStatusActual(wantStatus, fmt.Sprintf(snapshotNotFoundErrMsgFmt, set1.primaryName())),
 					eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the placement binding as failed to synchronize")
 			})
@@ -554,8 +554,8 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 			})
 
 			It("should mark the placement binding as failed to synchronize, at the same generation", func() {
-				// The placement binding still points to the processed snapshot, so the Available condition is left
-				// as it is; the resource counters are tallied from the remaining (primary) work object.
+				// The placement binding still points to the processed snapshot, so availability is invalidated;
+				// the resource counters are tallied from the remaining (primary) work object.
 				set0 := f.sets[0]
 				placedResources := int32(resourcesPerSnapshot)
 				wantStatus := &placementv1alpha1.PlacementBindingStatus{
@@ -567,8 +567,8 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 						},
 						{
 							Type:   placementv1alpha1.PlacementBindingCondTypeAvailable,
-							Status: metav1.ConditionTrue,
-							Reason: placementv1alpha1.PlacementBindingAvailableCondReasonAllResourcesAvailable,
+							Status: metav1.ConditionFalse,
+							Reason: placementv1alpha1.PlacementBindingAvailableCondReasonIncompleteSetOfResources,
 						},
 					},
 					SelectedResources:                 ptr.To(placedResources),
@@ -639,7 +639,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 
 			It("should mark the placement binding as failed to synchronize due to invalid snapshots", func() {
 				set0 := f.sets[0]
-				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName())
+				wantStatus := wantPlacementBindingStatusInvalidSnapshots(set0.resourceCount(), set0.primaryName(), f.status)
 				Eventually(f.invalidSnapshotsStatusActual(wantStatus, fmt.Sprintf(snapshotNotFoundErrMsgFmt, set1.primaryName())),
 					eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the placement binding as failed to synchronize")
 				f.recordStatus()
@@ -670,7 +670,7 @@ var _ = Describe("handling invalid placement resource snapshots", func() {
 
 			It("should mark the placement binding as failed to synchronize again, at the new generation", func() {
 				// No snapshot has been processed (or resource placed) since the suspension.
-				wantStatus := wantPlacementBindingStatusInvalidSnapshots(0, "")
+				wantStatus := wantPlacementBindingStatusInvalidSnapshots(0, "", nil)
 				wantStatus.LastProcessedResourceSnapshotName = nil
 				Eventually(f.invalidSnapshotsStatusActual(wantStatus, fmt.Sprintf(snapshotNotFoundErrMsgFmt, set1.primaryName())),
 					eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to mark the placement binding as failed to synchronize")

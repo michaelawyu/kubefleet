@@ -1,6 +1,7 @@
 # Work Generator (v1) Integration Test Plan
 
-**Date**: October 26, 2026 17:48 AEDT (revised 19:33 AEDT for the latest code changes)
+**Date**: October 26, 2026 17:48 AEDT (revised 19:33 AEDT for the latest code changes, and 21:41 AEDT for the
+`Available` condition fix)
 **Task**: Plan (not yet implement) the tests for `pkg/v1/controllers/workgenerator`, based on the current code base,
 including the uncommitted changes in [controller.go](../../../pkg/v1/controllers/workgenerator/controller.go),
 [retrieval.go](../../../pkg/v1/controllers/workgenerator/retrieval.go),
@@ -9,8 +10,9 @@ including the uncommitted changes in [controller.go](../../../pkg/v1/controllers
 [placementbinding_types.go](../../../apis/kubefleet.dev/placement/v1alpha1/placementbinding_types.go):
 
 - invalid placement resource snapshots are surfaced on the binding (`Synchronized=False/InvalidSnapshots`, plus
-  `Available=False/IncompleteSetOfResources` when the binding points to a snapshot other than the last processed one),
-  with the resource counters recomputed from the works already placed;
+  `Available=False/IncompleteSetOfResources` when the binding still points to the last processed snapshot or nothing
+  has been processed; after a rollout to a different snapshot the previous `Available` condition, necessarily from an
+  older generation, is kept), with the resource counters recomputed from the works already placed;
 - sync-strategy-only changes are patched onto the works without reading the snapshots (the new strategy-only path);
 - the retrieval checks are reworked (duplicates, gaps, and missing snapshots are all `User` errors);
 - the binding spec name fields require a minimum length of 1.
@@ -105,9 +107,10 @@ Reconcile flow:
    ([status.go](../../../pkg/v1/controllers/workgenerator/status.go)):
    - `Synchronized=False/InvalidSnapshots` for the current generation, with the message `Failed to synchronize resources
      as the given placement resource snapshots are invalid: <err>`;
-   - if the last processed snapshot differs from the spec snapshot (or nothing has been processed):
+   - if the last processed snapshot is the spec snapshot (or nothing has been processed):
      `Available=False/IncompleteSetOfResources` for the current generation ("The set of resources in the target cluster
-     might have become incomplete; cannot complete the availability check"); otherwise `Available` is left as is;
+     might have become incomplete; cannot complete the availability check"); otherwise (a rollout to a different
+     snapshot) `Available` is left as is, which is safe as it can only carry an older generation (or be absent);
    - the counters and failed resources are recomputed from the works linked to the last processed snapshot (none →
      0/0/0 and no failed resources; failed resources capped at 50);
    - `LastProcessedResourceSnapshotName` is untouched; the write is skipped if the whole status is unchanged.
@@ -148,7 +151,7 @@ through `scopes`).
 | core: single & multiple, `backport status for failed manifests` | Failed-to-apply (with `DiffDetails`) and unavailable manifests → `FailedResources`, counters, `FailedToSynchronizeSomeResources`; multiple works merged |
 | core: multiple, `generate works` | Primary + secondaries, owner refs, linked count; status not refreshed until every work is processed |
 | core: multiple, `update works` | Scale down (dangling work deleted), in-place updates (same UIDs), scale up (created) |
-| core: multiple, `handle inconsistent resource snapshots` | Rewritten (X5, done): missing secondaries → `InvalidSnapshots` ("fewer…") + `IncompleteSetOfResources`, counters from the last processed works, works unchanged; a hash mismatch afterwards leaves the status (and message) as is; recovery through retries once the secondaries appear |
+| core: multiple, `handle inconsistent resource snapshots` | Rewritten (X5, done): missing secondaries → `InvalidSnapshots` ("fewer…"), the pre-rollout `Available` condition kept, counters from the last processed works, works unchanged; a hash mismatch afterwards leaves the status (and message) as is; recovery through retries once the secondaries appear |
 | lifecycle: `deleting placement bindings` | Single (another binding on member-2 unaffected); multiple (primary deleted, secondaries left to GC) |
 | lifecycle: `suspending placement bindings` | Suspend/resume (works removed, last processed snapshot unset, finalizer removed, no works while suspended, a rollout made while suspended applied on resume); unprocessed works; delete while suspended |
 | lifecycle: `changing sync strategies` | Updated (X6, done): set/unset with 1 and 2 snapshots → works patched in place; the binding status left untouched (previous generation) until the works are marked, then synced |
@@ -180,9 +183,10 @@ the 50-entry cap, and the failed-resource **order** (the status helpers sort bef
 4. **Condition messages are ignored** by `placementBindingStatusUpdatedActual` / `placementBindingStatusMatchesActual`
    (`ignoreFieldConditionLTTMsg`); the invalid-snapshot message needs its own check.
 5. **Mixed generations.** Two cases leave conditions at different generations: the strategy-only path (every condition
-   keeps the previous generation until the works are re-processed), and an invalid mark at the same generation
-   (`Available` left as is). `placementBindingStatusUpdatedActual` stamps every condition with the current generation,
-   so these need `placementBindingStatusMatchesActual` with explicit generations.
+   keeps the previous generation until the works are re-processed), and an invalid mark after a rollout to a different
+   snapshot (`Available` kept at the pre-rollout generation). `placementBindingStatusUpdatedActual` stamps every
+   condition with the current generation, so these need `placementBindingStatusMatchesActual` with explicit
+   generations.
 6. **Strategy patches bump work generations.** `markWorkAsAppliedAndAvailable` stamps the work's current generation, so
    marking the works after a strategy patch is what lets the in-sync refresh run (X6, S7).
 7. **Snapshot specs are immutable** (CEL); "re-create" means delete, wait until gone, create again.
@@ -232,11 +236,14 @@ the 50-entry cap, and the failed-resource **order** (the status helpers sort bef
   - `deleteSnapshot(setIdx, subIdx)`; `createStraySnapshot(index, subIdx, count, contentsHash)` /
     `deleteStraySnapshot(name)`: extra snapshots under `%s-snapshot-%d-%d-stray-%s`, cleaned up by `teardown`.
   - `recordStatus()` (status and resource version), `statusUnchangedActual()`, `resourceVersionUnchangedActual()`,
-    `recordWorkUIDs()` + `expectWorksNotRecreated()`.
-  - `invalidSnapshotsStatusActual(wantStatus, wantMsgSubstr)`: the whole status (every condition stamped with the
-    current generation) plus the message prefix and details; `wantPlacementBindingStatusInvalidSnapshots(placed,
-    lastProcessed)` builds the common expected status, adjusted in place for the other cases (no last processed
-    snapshot, failed resources, `Available` left as is).
+    `recordWorkUIDs()` + `expectWorksNotRecreated()`. `registerBaselineSpecs` records the status once the baseline
+    is synced.
+  - `invalidSnapshotsStatusActual(wantStatus, wantMsgSubstr)`: the whole status (conditions without an explicit
+    observed generation are stamped with the current one; explicit ones are kept) plus the message prefix and details;
+    `wantPlacementBindingStatusInvalidSnapshots(placed, lastProcessed, previousStatus)` builds the common expected
+    status: with a previous status (a rollout to a different snapshot), its `Available` condition (generation
+    included) is kept; with nil, `Available=False/IncompleteSetOfResources` is expected. It is adjusted in place for
+    the other cases (no last processed snapshot, failed resources).
   - `worksMatchBindingStrategyActual(setIdx)`: works carry the binding's sync strategy as written to the API server.
   - `updateSpec(mutate)` / `updatePlacementBindingSpec(ns, name, mutate)`: several spec fields in one update (S7b).
   - `placementBindingSyncCondMessageActual(ns, name, wantSubstr)`.
@@ -269,15 +276,15 @@ behavior; **P2** = nice to have. Every row runs for both scopes unless it says o
 
 | ID | P | Context | Setup → steps | Assert |
 | --- | --- | --- | --- | --- |
-| S1 | P0 | roll out to a missing snapshot | Baseline on set 0 (1 snapshot) synced; record status; point the binding to set 1's primary name before set 1 exists; mark the Deployment in set 0's work unavailable; then create set 1 (1 snapshot) | `Synchronized=False/InvalidSnapshots` and `Available=False/IncompleteSetOfResources` at the new generation, message = prefix + the not-found error naming the snapshot; counters 3/3/3 recomputed from set 0's works; last processed still set 0; works unchanged and binding resource version stable over `consistentlyDuration` while the controller retries (no-op skip). After the Deployment turns unavailable: counters 3/3/2 with the Deployment in `FailedResources`, conditions unchanged (the recount follows the works). After set 1 appears: primary work updated in place (same UID), `WaitingForSync(set 1)` → mark → synced |
+| S1 | P0 | roll out to a missing snapshot | Baseline on set 0 (1 snapshot) synced; record status; point the binding to set 1's primary name before set 1 exists; mark the Deployment in set 0's work unavailable; then create set 1 (1 snapshot) | `Synchronized=False/InvalidSnapshots` at the new generation, and the baseline `Available` condition kept (previous generation), message = prefix + the not-found error naming the snapshot; counters 3/3/3 recomputed from set 0's works; last processed still set 0; works unchanged and binding resource version stable over `consistentlyDuration` while the controller retries (no-op skip). After the Deployment turns unavailable: counters 3/3/2 with the Deployment in `FailedResources`, conditions unchanged (the recount follows the works). After set 1 appears: primary work updated in place (same UID), `WaitingForSync(set 1)` → mark → synced |
 | S2 | P0 | duplicate of the last counted sub-index; the message follows the cause | Baseline on set 0 (2 snapshots); point to set 1's primary (missing); create set 1 (2 snapshots) plus a stray at sub-index 1 with the **same** contents hash (the case the hash check cannot catch); delete the stray | Not-found message first; then the message changes to the duplicate error (one more status write, then stable); works still from set 0 (`Consistently`); after deleting the stray: works updated in place to set 1, `WaitingForSync` → mark → synced. Variant (P2): the stray has a different hash |
 | S3 | P1 | duplicates further down the listing are ignored | Baseline on set 0 (1); create set 1 (count 2) plus two extras at sub-index 2 (sorted after the snapshot right after the counted ones); roll out | No `InvalidSnapshots`; exactly 2 works (no work for sub-index 2); `WaitingForSync` → mark → synced. Pins the `count + 1` limit (B11) |
 | S4 | P1 | duplicate primary at the same index | Baseline on set 0 (1); create set 1 (count 2) plus a stray sub-index 0 at index 1; roll out; delete the stray | Duplicate message; recovers to set 1 |
 | S5 | P1 | gap in the counted sub-indices | Baseline on set 0 (1); create set 1 with count 3 and sub-indices 0, 2, 3; roll out; then create sub-index 1 | `inconsistent sub-indices` message; after the fix: 3 works (sub-indices 0–2), sub-index 3 ignored as an extra. Gaps do not occur in normal ops; this pins the sanity check |
 | S6 | P1 | new binding with a missing snapshot | Create the binding pointing to a nonexistent primary; then create the snapshot | Finalizer added; `Synchronized=False/InvalidSnapshots` and `Available=False/IncompleteSetOfResources` at generation 1; counters 0/0/0, no failed resources, no last processed; no works (`Consistently`); after the snapshot appears: works generated, `WaitingForSync` |
 | S7 | P1 | sync strategy change while the processed snapshot is missing (strategy-only path) | Baseline on set 0 (2); delete set 0's primary (premature GC); set a sync strategy; mark the works | Works patched in place with the new strategy (same UIDs, manifests and links unchanged) without reading the snapshots; no `InvalidSnapshots`; the binding status unchanged (conditions at the previous generation, counters 6/6/6; `Consistently`); after marking: synced at the new generation. Pins the resolution of B5 (Decision 7) |
-| S7b | P2 | sync strategy change together with a rollout to a missing snapshot | Baseline on set 0 (1); in one update, set a sync strategy and point to set 1 (missing); then create set 1 | Resource path: `InvalidSnapshots` + `IncompleteSetOfResources` at the new generation; works keep the old (nil) strategy (`Consistently`); after set 1 appears: works updated with set 1 and the new strategy, `WaitingForSync` → mark → synced |
-| S8 | P2 | works deleted out of band while the processed snapshot is invalid | Baseline on set 0 (2); delete set 0's primary; delete the secondary work; re-create the primary | `InvalidSnapshots` at the **same** generation; `Available` left as is (`True` for that generation; B4); counters recomputed from the remaining primary work (3/3/3); the secondary work not re-created (`Consistently`); after the re-creation: re-created, `WaitingForSync` → mark → synced |
+| S7b | P2 | sync strategy change together with a rollout to a missing snapshot | Baseline on set 0 (1); in one update, set a sync strategy and point to set 1 (missing); then create set 1 | Resource path: `InvalidSnapshots` at the new generation, the baseline `Available` condition kept (previous generation); works keep the old (nil) strategy (`Consistently`); after set 1 appears: works updated with set 1 and the new strategy, `WaitingForSync` → mark → synced |
+| S8 | P2 | works deleted out of band while the processed snapshot is invalid | Baseline on set 0 (2); delete set 0's primary; delete the secondary work; re-create the primary | `InvalidSnapshots` and `Available=False/IncompleteSetOfResources` at the **same** generation (B4); counters recomputed from the remaining primary work (3/3/3); the secondary work not re-created (`Consistently`); after the re-creation: re-created, `WaitingForSync` → mark → synced |
 | S9 | P2 | suspend, resume, and delete while invalid | Binding in S1's invalid state; suspend; resume; delete | Suspend: works removed, last processed unset, finalizer removed, conditions left from before (older generation). Resume: finalizer back, `InvalidSnapshots` + `IncompleteSetOfResources` at the new generation, counters 0/0/0, no works. Delete: binding removed (cleanup does not read snapshots) |
 
 Missing secondaries ("fewer than count") and a hash mismatch after an invalid mark are covered by the rewritten
@@ -306,7 +313,7 @@ Missing secondaries ("fewer than count") and a hash mismatch after an invalid ma
 
 | ID | Existing | Proposal | Reason |
 | --- | --- | --- | --- |
-| X5 | core `handle inconsistent resource snapshots`, both scopes | **Rewrite (P0; done October 26, 2026)** | Index 1 without its secondary: now `InvalidSnapshots` with the "fewer … deleted" message, `IncompleteSetOfResources`, counters 3/3/3 from index 0's works, works unchanged. Index 1's secondary with a mismatched hash: `Unexpected`, not surfaced, so the status stays exactly as in the previous step (the "fewer" message remains though the cause changed; B2). Index 2 without its secondaries: `InvalidSnapshots` again, at the newer generation. Recovery once the secondaries appear: unchanged; now within `eventuallyDuration` (Decision 8; it took ~15s per scope on the 1-minute budget before) |
+| X5 | core `handle inconsistent resource snapshots`, both scopes | **Rewrite (P0; done October 26, 2026)** | Index 1 without its secondary: now `InvalidSnapshots` with the "fewer … deleted" message, the pre-rollout `Available` condition kept (its generation included), counters 3/3/3 from index 0's works, works unchanged. Index 1's secondary with a mismatched hash: `Unexpected`, not surfaced, so the status stays exactly as in the previous step (the "fewer" message remains though the cause changed; B2). Index 2 without its secondaries: `InvalidSnapshots` again, at the newer generation. Recovery once the secondaries appear: unchanged; now within `eventuallyDuration` (Decision 8; it took ~15s per scope on the 1-minute budget before) |
 | X6 | lifecycle `changing sync strategies`, 1 and 2 snapshots × both scopes | **Update (P0; done October 26, 2026)** | After setting (and after unsetting) the strategy: works patched in place (already asserted); the binding status stays as recorded before the change, with conditions at the previous generation (`Consistently`), instead of `WaitingForSync`; after marking the works: synced at the new generation |
 | X1 | core `generate works` (single snapshot), both scopes | Keep (Decision 3) | Overlaps `registerBaselineSpecs` in the single-snapshot lifecycle contexts, but kept |
 | X2 | core cluster-scoped `Describe`s (10 contexts, ~2,100 lines) | Keep as is (Decision 4) | They mirror the namespace-scoped ones; folding them into the `scopes` loop is not planned |
@@ -328,10 +335,11 @@ reuse a few pure helpers from `utils_integration_test.go` (the manifest identifi
   count label invalid / < 1, missing owned-by annotation or index label, malformed sub-index label (sort errors), fewer
   than count, duplicates (last counted, right after the counted ones, further down (ignored), primary), gap, hash
   mismatch, extras trimmed, ordering. Needs the `fieldindexers` extractors exported (or a test-only index setup).
-- **U2 `TestMarkPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots`** (`status_test.go`, 7 cases, done): a
-  rollout to an invalid snapshot (`Available=IncompleteSetOfResources`, counters only from the works linked to the last
-  processed snapshot); nothing processed yet (0/0/0, works ignored); the processed snapshot itself invalid (`Available`
-  left as is); the 50-entry cap; already marked with the same details (no write) or different details (write); a
+- **U2 `TestMarkPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots`** (`status_test.go`, 8 cases, done): a
+  rollout to an invalid snapshot (the previous `Available` condition kept at its generation, counters only from the
+  works linked to the last processed snapshot); the same with no previous `Available` condition (none added); nothing
+  processed yet (`Available=False/IncompleteSetOfResources`, 0/0/0, works ignored); the processed snapshot itself
+  invalid (`Available=False/IncompleteSetOfResources` at the same generation); the 50-entry cap; already marked with the same details (no write) or different details (write); a
   failed update (API server error).
 - **U3** (`status_test.go`, done): `TestCountResourcesInWorksByProcessingResults` (5 cases: no works, unprocessed
   manifests, applied with and without availability results, failures incl. `DiffDetails` and an ignored `Available`
@@ -378,11 +386,13 @@ reuse a few pure helpers from `utils_integration_test.go` (the manifest identifi
    snapshots ("fewer than count") are all marked `InvalidSnapshots`. An `Unexpected` error that follows an invalid mark
    leaves the earlier message in place (X5).
 3. **In the invalid state**, `Synchronized=False/InvalidSnapshots`; `Available=False/IncompleteSetOfResources` when the
-   binding points to a snapshot other than the last processed one (or none was processed), otherwise `Available` is
-   left as is; the counters and failed resources are recomputed from the works linked to the last processed snapshot
+   binding still points to the last processed snapshot (or none was processed); after a rollout to a different
+   snapshot, `Available` is left as is, which is safe as it then necessarily carries an older generation (or is
+   absent); the counters and failed resources are recomputed from the works linked to the last processed snapshot
    on every reconcile, so they follow work status changes (S1); `LastProcessedResourceSnapshotName` is untouched.
-4. **Same-generation re-read failures** (works deleted out of band after the processed snapshot became invalid) leave
-   `Available` as is, so it can read `True` for the same generation next to `Synchronized=False/InvalidSnapshots` (S8).
+4. **Same-generation re-read failures** (works deleted out of band after the processed snapshot became invalid) set
+   `Available=False/IncompleteSetOfResources` at the same generation (S8). Fixed October 26, 2026: `Available` used to
+   be left as is here, so it could read `True` for the same generation next to `Synchronized=False/InvalidSnapshots`.
 5. **Strategy-only changes do not need the snapshots and do not reset the binding status** (resolved October 26,
    2026). Until the works are re-processed, the conditions keep the previous generation and the counters their previous
    values (X6, S7); consumers that check the condition generation (staged update runs, the policy status) see the
@@ -516,3 +526,13 @@ capped limiter.
   every work regardless of its strategy (U7, 3 cases); dropping the optimistic lock from the patch (U7 conflict case).
   `golangci-lint` reports no new issues (four `goconst` findings on repeated literals in the new tests were fixed with
   local constants).
+- [ ] **`Available` condition fix** (October 26, 2026, 21:41 AEDT; tests updated, not yet run). In
+  `markPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots`, the `IncompleteSetOfResources` check is inverted: it
+  now applies when the last processed snapshot is the spec snapshot (or none was processed), and the previous
+  `Available` condition is kept after a rollout to a different snapshot (B4; Behaviors 3 and 4). Test updates: U2 (the
+  rollout cases keep the previous `Available`; the processed-snapshot case expects `IncompleteSetOfResources`; a new
+  case for a rollout with no previous `Available`, so 8 cases and 40 table cases in total); the helpers
+  (`wantPlacementBindingStatusInvalidSnapshots` takes the previous status, `invalidSnapshotsStatusActual` keeps
+  explicit generations, `registerBaselineSpecs` records the status); S1, S2, S4, S5, S7b, and S9 (rollout) keep the
+  baseline `Available`; S8 expects `IncompleteSetOfResources` at the same generation; X5 keeps the pre-rollout
+  `Available`. The verification figures and mutation results above predate this change.

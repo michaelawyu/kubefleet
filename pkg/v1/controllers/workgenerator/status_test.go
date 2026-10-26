@@ -739,7 +739,7 @@ func TestMarkPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots(t *testi
 	// The status after rolling out to snapshot 1 (at generation 3) with the given error details.
 	rolledOutStatus := func(details string) placementv1alpha1.PlacementBindingStatus {
 		return placementv1alpha1.PlacementBindingStatus{
-			Conditions:                        []metav1.Condition{invalidSnapshotsCond(3, details), incompleteSetOfResourcesCond(3)},
+			Conditions:                        []metav1.Condition{invalidSnapshotsCond(3, details), syncedStatus.Conditions[1]},
 			SelectedResources:                 ptr.To(int32(3)),
 			SynchronizedResources:             ptr.To(int32(3)),
 			AvailableResources:                ptr.To(int32(2)),
@@ -747,6 +747,10 @@ func TestMarkPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots(t *testi
 			LastProcessedResourceSnapshotName: ptr.To(unitTestSnapshotName0),
 		}
 	}
+	statusWithoutAvailability := *syncedStatus.DeepCopy()
+	statusWithoutAvailability.Conditions = statusWithoutAvailability.Conditions[:1]
+	rolledOutStatusWithoutAvailability := rolledOutStatus(errDetails)
+	rolledOutStatusWithoutAvailability.Conditions = rolledOutStatusWithoutAvailability.Conditions[:1]
 	manyFailedWork, wantManyFailed := failedToApplyWorkWithManyManifests(unitTestSnapshotName0)
 
 	testCases := []struct {
@@ -772,6 +776,16 @@ func TestMarkPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots(t *testi
 			wantWrites:        1,
 		},
 		{
+			name:              "rolled out with no Available condition",
+			bindingGeneration: 3,
+			snapshotName:      unitTestSnapshotName1,
+			existingStatus:    statusWithoutAvailability,
+			works:             works,
+			errDetails:        errDetails,
+			wantStatus:        rolledOutStatusWithoutAvailability,
+			wantWrites:        1,
+		},
+		{
 			name:              "no snapshot processed yet",
 			bindingGeneration: 1,
 			snapshotName:      unitTestSnapshotName0,
@@ -793,9 +807,8 @@ func TestMarkPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots(t *testi
 			existingStatus:    syncedStatus,
 			works:             works,
 			errDetails:        errDetails,
-			// The Available condition is left as it is.
 			wantStatus: placementv1alpha1.PlacementBindingStatus{
-				Conditions:                        []metav1.Condition{invalidSnapshotsCond(2, errDetails), syncedStatus.Conditions[1]},
+				Conditions:                        []metav1.Condition{invalidSnapshotsCond(2, errDetails), incompleteSetOfResourcesCond(2)},
 				SelectedResources:                 ptr.To(int32(3)),
 				SynchronizedResources:             ptr.To(int32(3)),
 				AvailableResources:                ptr.To(int32(2)),
@@ -812,7 +825,7 @@ func TestMarkPlacementBindingAsFailedToSynchronizeDueToInvalidSnapshots(t *testi
 			works:             []placementv1alpha1.Work{manyFailedWork},
 			errDetails:        errDetails,
 			wantStatus: placementv1alpha1.PlacementBindingStatus{
-				Conditions:                        []metav1.Condition{invalidSnapshotsCond(3, errDetails), incompleteSetOfResourcesCond(3)},
+				Conditions:                        []metav1.Condition{invalidSnapshotsCond(3, errDetails), syncedStatus.Conditions[1]},
 				SelectedResources:                 ptr.To(int32(maxFailedResourcesToReport + 1)),
 				SynchronizedResources:             ptr.To(int32(0)),
 				AvailableResources:                ptr.To(int32(0)),

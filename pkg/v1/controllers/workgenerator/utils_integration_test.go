@@ -574,9 +574,10 @@ func wantPlacementBindingStatusSyncedAndAvailable(selectedResources int32, snaps
 // wantPlacementBindingStatusInvalidSnapshots builds the placement binding status that the work generator is expected
 // to report when the placement resource snapshots that a placement binding has been rolled out to are invalid. The
 // resource counters are tallied from the work objects of the last processed placement resource snapshot, all of
-// which are expected to have been applied and become available.
-func wantPlacementBindingStatusInvalidSnapshots(placedResources int32, lastProcessedSnapshotName string) *placementv1alpha1.PlacementBindingStatus {
-	return &placementv1alpha1.PlacementBindingStatus{
+// which are expected to have been applied and become available. For a rollout to a different snapshot, previousStatus
+// supplies the Available condition to preserve; nil expects an incomplete set of resources instead.
+func wantPlacementBindingStatusInvalidSnapshots(placedResources int32, lastProcessedSnapshotName string, previousStatus *placementv1alpha1.PlacementBindingStatus) *placementv1alpha1.PlacementBindingStatus {
+	wantStatus := &placementv1alpha1.PlacementBindingStatus{
 		Conditions: []metav1.Condition{
 			{
 				Type:   placementv1alpha1.PlacementBindingCondTypeSynchronized,
@@ -594,6 +595,13 @@ func wantPlacementBindingStatusInvalidSnapshots(placedResources int32, lastProce
 		AvailableResources:                ptr.To(placedResources),
 		LastProcessedResourceSnapshotName: ptr.To(lastProcessedSnapshotName),
 	}
+	if previousStatus != nil {
+		wantStatus.Conditions = wantStatus.Conditions[:1]
+		if availableCond := meta.FindStatusCondition(previousStatus.Conditions, placementv1alpha1.PlacementBindingCondTypeAvailable); availableCond != nil {
+			wantStatus.Conditions = append(wantStatus.Conditions, *availableCond)
+		}
+	}
+	return wantStatus
 }
 
 func placementBindingFinalizerAddedActual(bindingNS, bindingName string) func() error {
@@ -1514,12 +1522,21 @@ func (f *bindingFixture) resourceVersionUnchangedActual() func() error {
 	}
 }
 
-// invalidSnapshotsStatusActual verifies that the binding has the given status (with the observed generations of all
-// conditions set to the current generation of the binding), and that the message of its Synchronized condition
-// reports invalid placement resource snapshots with the given details.
+// invalidSnapshotsStatusActual verifies the given status, preserving explicitly supplied observed generations, and
+// checks that the Synchronized condition reports invalid placement resource snapshots with the given details.
 func (f *bindingFixture) invalidSnapshotsStatusActual(wantStatus *placementv1alpha1.PlacementBindingStatus, wantMsgSubstr string) func() error {
 	return func() error {
-		if err := placementBindingStatusUpdatedActual(f.scope.bindingNS, f.bindingName, wantStatus)(); err != nil {
+		binding, err := getPlacementBinding(f.scope.bindingNS, f.bindingName)
+		if err != nil {
+			return err
+		}
+		wantStatusWithObsGen := wantStatus.DeepCopy()
+		for idx := range wantStatusWithObsGen.Conditions {
+			if wantStatusWithObsGen.Conditions[idx].ObservedGeneration == 0 {
+				wantStatusWithObsGen.Conditions[idx].ObservedGeneration = binding.GetGeneration()
+			}
+		}
+		if err := placementBindingStatusMatchesActual(f.scope.bindingNS, f.bindingName, wantStatusWithObsGen)(); err != nil {
 			return err
 		}
 		if err := placementBindingSyncCondMessageActual(f.scope.bindingNS, f.bindingName, invalidSnapshotsMsgPrefix)(); err != nil {
@@ -1589,6 +1606,7 @@ func (f *bindingFixture) registerBaselineSpecs(setIdx int) {
 
 	It("should refresh the placement binding status", func() {
 		Eventually(f.syncedStatusActual(setIdx), eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to refresh the placement binding status")
+		f.recordStatus()
 	})
 }
 

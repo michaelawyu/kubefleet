@@ -1441,6 +1441,7 @@ var _ = Describe("reconciling placement bindings (multiple placement resource sn
 		// marked the placement binding as failed to synchronize after a rollout attempt; it should not change until
 		// the next rollout attempt.
 		var wantStatusAfterRollout *placementv1alpha1.PlacementBindingStatus
+		var statusBeforeRollouts *placementv1alpha1.PlacementBindingStatus
 
 		// The differently named NS, Deployment, and ConfigMap objects to place, one set per sub-index.
 		nsNames := make([]string, len(snapshotNamesIdx2))
@@ -1462,7 +1463,7 @@ var _ = Describe("reconciling placement bindings (multiple placement resource sn
 		// due to the missing secondary snapshots, with the resource counters tallied from the work object of index 0
 		// (the last processed snapshot). The spec is checked first, so that the observed generations are not verified
 		// against a stale (pre-rollout) generation from the cache; the status before and after the second rollout
-		// differs only in its observed generations.
+		// differs only in the Synchronized condition's observed generation.
 		markedAsFailedToSynchronizeActual := func(wantSnapshotName string) func() error {
 			return func() error {
 				binding, err := getPlacementBinding(appNamespaceName, bindingName)
@@ -1473,8 +1474,9 @@ var _ = Describe("reconciling placement bindings (multiple placement resource sn
 					return fmt.Errorf("the placement binding points to snapshot %s, want %s", got, wantSnapshotName)
 				}
 
-				wantStatus := wantPlacementBindingStatusInvalidSnapshots(3, snapshotNameIdx0)
-				if err := placementBindingStatusUpdatedActual(appNamespaceName, bindingName, wantStatus)(); err != nil {
+				wantStatus := wantPlacementBindingStatusInvalidSnapshots(3, snapshotNameIdx0, statusBeforeRollouts)
+				wantStatus.Conditions[0].ObservedGeneration = binding.GetGeneration()
+				if err := placementBindingStatusMatchesActual(appNamespaceName, bindingName, wantStatus)(); err != nil {
 					return err
 				}
 				return placementBindingSyncCondMessageActual(appNamespaceName, bindingName, fewerSnapshotsErrMsg)()
@@ -1484,10 +1486,8 @@ var _ = Describe("reconciling placement bindings (multiple placement resource sn
 		recordStatusAfterRollout := func() {
 			binding, err := getPlacementBinding(appNamespaceName, bindingName)
 			Expect(err).To(Succeed(), "Failed to retrieve the placement binding")
-			wantStatusAfterRollout = wantPlacementBindingStatusInvalidSnapshots(3, snapshotNameIdx0)
-			for idx := range wantStatusAfterRollout.Conditions {
-				wantStatusAfterRollout.Conditions[idx].ObservedGeneration = binding.GetGeneration()
-			}
+			wantStatusAfterRollout = wantPlacementBindingStatusInvalidSnapshots(3, snapshotNameIdx0, statusBeforeRollouts)
+			wantStatusAfterRollout.Conditions[0].ObservedGeneration = binding.GetGeneration()
 		}
 
 		bindingAndWorksUnchangedActual := func() error {
@@ -1552,6 +1552,9 @@ var _ = Describe("reconciling placement bindings (multiple placement resource sn
 
 			statusUpdatedActual := placementBindingStatusUpdatedActual(appNamespaceName, bindingName, wantStatus)
 			Eventually(statusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to refresh the placement binding status")
+			binding, err := getPlacementBinding(appNamespaceName, bindingName)
+			Expect(err).To(Succeed(), "Failed to retrieve the placement binding")
+			statusBeforeRollouts = binding.GetStatus().DeepCopy()
 		})
 
 		It("can roll out a new primary snapshot (index 1) without its secondary snapshot", func() {
@@ -3563,6 +3566,7 @@ var _ = Describe("reconciling cluster placement bindings (multiple placement res
 		// has marked the cluster placement binding as failed to synchronize after a rollout attempt; it should not
 		// change until the next rollout attempt.
 		var wantStatusAfterRollout *placementv1alpha1.PlacementBindingStatus
+		var statusBeforeRollouts *placementv1alpha1.PlacementBindingStatus
 
 		// The differently named NS, Deployment, and ConfigMap objects to place, one set per sub-index.
 		nsNames := make([]string, len(snapshotNamesIdx2))
@@ -3584,7 +3588,7 @@ var _ = Describe("reconciling cluster placement bindings (multiple placement res
 		// synchronize due to the missing secondary snapshots, with the resource counters tallied from the work object of
 		// index 0 (the last processed snapshot). The spec is checked first, so that the observed generations are not
 		// verified against a stale (pre-rollout) generation from the cache; the status before and after the second
-		// rollout differs only in its observed generations.
+		// rollout differs only in the Synchronized condition's observed generation.
 		markedAsFailedToSynchronizeActual := func(wantSnapshotName string) func() error {
 			return func() error {
 				binding, err := getPlacementBinding(clusterScopedNS, bindingName)
@@ -3595,8 +3599,9 @@ var _ = Describe("reconciling cluster placement bindings (multiple placement res
 					return fmt.Errorf("the cluster placement binding points to snapshot %s, want %s", got, wantSnapshotName)
 				}
 
-				wantStatus := wantPlacementBindingStatusInvalidSnapshots(3, snapshotNameIdx0)
-				if err := placementBindingStatusUpdatedActual(clusterScopedNS, bindingName, wantStatus)(); err != nil {
+				wantStatus := wantPlacementBindingStatusInvalidSnapshots(3, snapshotNameIdx0, statusBeforeRollouts)
+				wantStatus.Conditions[0].ObservedGeneration = binding.GetGeneration()
+				if err := placementBindingStatusMatchesActual(clusterScopedNS, bindingName, wantStatus)(); err != nil {
 					return err
 				}
 				return placementBindingSyncCondMessageActual(clusterScopedNS, bindingName, fewerSnapshotsErrMsg)()
@@ -3606,10 +3611,8 @@ var _ = Describe("reconciling cluster placement bindings (multiple placement res
 		recordStatusAfterRollout := func() {
 			binding, err := getPlacementBinding(clusterScopedNS, bindingName)
 			Expect(err).To(Succeed(), "Failed to retrieve the cluster placement binding")
-			wantStatusAfterRollout = wantPlacementBindingStatusInvalidSnapshots(3, snapshotNameIdx0)
-			for idx := range wantStatusAfterRollout.Conditions {
-				wantStatusAfterRollout.Conditions[idx].ObservedGeneration = binding.GetGeneration()
-			}
+			wantStatusAfterRollout = wantPlacementBindingStatusInvalidSnapshots(3, snapshotNameIdx0, statusBeforeRollouts)
+			wantStatusAfterRollout.Conditions[0].ObservedGeneration = binding.GetGeneration()
 		}
 
 		bindingAndWorksUnchangedActual := func() error {
@@ -3674,6 +3677,9 @@ var _ = Describe("reconciling cluster placement bindings (multiple placement res
 
 			statusUpdatedActual := placementBindingStatusUpdatedActual(clusterScopedNS, bindingName, wantStatus)
 			Eventually(statusUpdatedActual, eventuallyDuration, eventuallyInterval).Should(Succeed(), "Failed to refresh the cluster placement binding status")
+			binding, err := getPlacementBinding(clusterScopedNS, bindingName)
+			Expect(err).To(Succeed(), "Failed to retrieve the cluster placement binding")
+			statusBeforeRollouts = binding.GetStatus().DeepCopy()
 		})
 
 		It("can roll out a new primary snapshot (index 1) without its secondary snapshot", func() {

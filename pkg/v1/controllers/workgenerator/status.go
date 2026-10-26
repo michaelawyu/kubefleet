@@ -105,10 +105,10 @@ func (r *Reconciler) markPlacementBindingAsFailedToSynchronizeDueToInvalidSnapsh
 		Message:            fmt.Sprintf("Failed to synchronize resources as the given placement resource snapshots are invalid: %s", errDetails),
 	})
 	// Set a false Available condition with the IncompleteSetOfResources reason, if the last processed placement
-	// resource snapshot differs from the primary snapshot in the spec; otherwise the existing condition
+	// resource snapshot is the same as the primary snapshot in the spec; otherwise the existing condition
 	// is left stale.
 	lastProcessedSnapshotName := placementBindingStatus.LastProcessedResourceSnapshotName
-	if lastProcessedSnapshotName == nil || *lastProcessedSnapshotName != placementBinding.GetSpec().ResourceSnapshotName {
+	if lastProcessedSnapshotName == nil || *lastProcessedSnapshotName == placementBinding.GetSpec().ResourceSnapshotName {
 		meta.SetStatusCondition(&placementBindingStatus.Conditions, metav1.Condition{
 			Type:               placementv1alpha1.PlacementBindingCondTypeAvailable,
 			Status:             metav1.ConditionFalse,
